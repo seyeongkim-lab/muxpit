@@ -1,0 +1,237 @@
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyOutput {
+    pub id: u32,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyExit {
+    pub id: u32,
+    pub code: Option<i32>,
+}
+
+struct PtyInstance {
+    writer: Box<dyn Write + Send>,
+    _master: Box<dyn MasterPty + Send>,
+    child_pid: Option<u32>,
+}
+
+pub struct PtyManager {
+    instances: Mutex<HashMap<u32, PtyInstance>>,
+    next_id: Mutex<u32>,
+}
+
+impl PtyManager {
+    pub fn new() -> Self {
+        Self {
+            instances: Mutex::new(HashMap::new()),
+            next_id: Mutex::new(1),
+        }
+    }
+
+    pub fn spawn(&self, app: AppHandle, rows: u16, cols: u16) -> Result<u32, String> {
+        let pty_system = native_pty_system();
+
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("Failed to open PTY: {e}"))?;
+
+        // Use PowerShell if available, fall back to default shell
+        let mut cmd = if cfg!(windows) {
+            let pwsh = which_powershell();
+            CommandBuilder::new(pwsh)
+        } else {
+            CommandBuilder::new_default_prog()
+        };
+        cmd.env("TERM", "xterm-256color");
+
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("Failed to spawn shell: {e}"))?;
+
+        let child_pid = child.process_id();
+
+        let id = {
+            let mut next = self.next_id.lock().unwrap();
+            let id = *next;
+            *next += 1;
+            id
+        };
+
+        // Read thread: PTY stdout -> frontend event
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("Failed to clone reader: {e}"))?;
+
+        let app_clone = app.clone();
+        let pty_id = id;
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => {
+                        let _ = app_clone.emit(
+                            "pty-exit",
+                            PtyExit {
+                                id: pty_id,
+                                code: None,
+                            },
+                        );
+                        break;
+                    }
+                    Ok(n) => {
+                        // Use lossy conversion for terminal output
+                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let _ = app_clone.emit(
+                            "pty-output",
+                            PtyOutput {
+                                id: pty_id,
+                                data: text,
+                            },
+                        );
+                    }
+                    Err(_) => {
+                        let _ = app_clone.emit(
+                            "pty-exit",
+                            PtyExit {
+                                id: pty_id,
+                                code: None,
+                            },
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Child watcher thread: detect process exit
+        let app_clone2 = app.clone();
+        let pty_id2 = id;
+        std::thread::spawn(move || {
+            let status = child.wait();
+            let code = status.ok().map(|s| s.exit_code() as i32);
+            let _ = app_clone2.emit(
+                "pty-exit",
+                PtyExit {
+                    id: pty_id2,
+                    code,
+                },
+            );
+        });
+
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| format!("Failed to take writer: {e}"))?;
+
+        {
+            let mut instances = self.instances.lock().unwrap();
+            instances.insert(
+                id,
+                PtyInstance {
+                    writer,
+                    _master: pair.master,
+                    child_pid,
+                },
+            );
+        }
+
+        Ok(id)
+    }
+
+    pub fn write(&self, id: u32, data: &str) -> Result<(), String> {
+        let mut instances = self.instances.lock().unwrap();
+        let instance = instances
+            .get_mut(&id)
+            .ok_or_else(|| format!("PTY {id} not found"))?;
+        instance
+            .writer
+            .write_all(data.as_bytes())
+            .map_err(|e| format!("Write error: {e}"))?;
+        instance
+            .writer
+            .flush()
+            .map_err(|e| format!("Flush error: {e}"))?;
+        Ok(())
+    }
+
+    pub fn resize(&self, id: u32, rows: u16, cols: u16) -> Result<(), String> {
+        let instances = self.instances.lock().unwrap();
+        let instance = instances
+            .get(&id)
+            .ok_or_else(|| format!("PTY {id} not found"))?;
+        instance
+            ._master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("Resize error: {e}"))?;
+        Ok(())
+    }
+
+    pub fn kill(&self, id: u32) -> Result<(), String> {
+        let mut instances = self.instances.lock().unwrap();
+        instances
+            .remove(&id)
+            .ok_or_else(|| format!("PTY {id} not found"))?;
+        // Dropping the instance closes the master PTY, which signals the child
+        Ok(())
+    }
+
+    pub fn get_child_pid(&self, id: u32) -> Result<Option<u32>, String> {
+        let instances = self.instances.lock().unwrap();
+        let instance = instances
+            .get(&id)
+            .ok_or_else(|| format!("PTY {id} not found"))?;
+        Ok(instance.child_pid)
+    }
+}
+
+// Make PtyManager safe to use as Tauri state
+unsafe impl Send for PtyManager {}
+unsafe impl Sync for PtyManager {}
+
+#[cfg(windows)]
+fn which_powershell() -> std::ffi::OsString {
+    // Prefer pwsh (PowerShell 7+), fall back to Windows PowerShell
+    for name in &["pwsh.exe", "powershell.exe"] {
+        let mut cmd = std::process::Command::new("where");
+        cmd.arg(name);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        if let Ok(output) = cmd.output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout);
+                if let Some(first_line) = path.lines().next() {
+                    return std::ffi::OsString::from(first_line.trim());
+                }
+            }
+        }
+    }
+    std::ffi::OsString::from("cmd.exe")
+}
+
+#[cfg(not(windows))]
+fn which_powershell() -> std::ffi::OsString {
+    std::ffi::OsString::from("/bin/sh")
+}
