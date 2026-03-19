@@ -1,0 +1,352 @@
+import { useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
+
+interface SidebarMonitorProps {
+  monitorId: string;
+  sshTarget: string;
+  onClose: () => void;
+}
+
+interface MonitorDataEvent {
+  monitor_id: string;
+  cpu_percent: number;
+  mem_total_mb: number;
+  mem_used_mb: number;
+  mem_percent: number;
+  load_avg: [number, number, number];
+  processes: {
+    pid: number;
+    user: string;
+    cpu: number;
+    mem: number;
+    command: string;
+  }[];
+  hostname: string;
+  timestamp: number;
+  error: string | null;
+  net: { rx_bytes_per_sec: number; tx_bytes_per_sec: number } | null;
+}
+
+const COLORS = {
+  bg: "#1e1e2e",
+  surface: "#313244",
+  text: "#cdd6f4",
+  subtext: "#a6adc8",
+  overlay: "#45475a",
+  blue: "#89b4fa",
+  green: "#a6e3a1",
+  red: "#f38ba8",
+  yellow: "#f9e2af",
+  teal: "#94e2d5",
+};
+
+// SVG sparkline from time series data
+const Sparkline = ({ data, color, height = 28, autoMax }: { data: number[]; color: string; height?: number; autoMax?: boolean }) => {
+  if (data.length < 2) return null;
+  const max = autoMax ? Math.max(...data, 1) : 100;
+  const width = 180;
+  const points = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - (v / max) * height;
+    return `${x},${y}`;
+  });
+  const fillPoints = `0,${height} ${points.join(" ")} ${width},${height}`;
+
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      <polygon points={fillPoints} fill={`${color}15`} />
+      <polyline points={points.join(" ")} fill="none" stroke={color} strokeWidth="1.5" />
+    </svg>
+  );
+};
+
+const formatBytes = (bytes: number): string => {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB/s`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB/s`;
+  return `${bytes} B/s`;
+};
+
+const ProgressBar = ({ value, color, label }: { value: number; color: string; label: string }) => (
+  <div style={styles.barRow}>
+    <span style={styles.barLabel}>{label}</span>
+    <div style={styles.barTrack}>
+      <div style={{ ...styles.barFill, width: `${Math.min(100, value)}%`, backgroundColor: color }} />
+    </div>
+    <span style={{ ...styles.barValue, color }}>{value.toFixed(1)}%</span>
+  </div>
+);
+
+const EMPTY_SERIES: MonitorSnapshot[] = [];
+
+export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitorProps) => {
+  const startedRef = useRef(false);
+  const series = useMonitorStore((s) => s.series[monitorId]) ?? EMPTY_SERIES;
+  const latest = series[series.length - 1] as MonitorSnapshot | undefined;
+
+  // Start monitor on mount
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    invoke("start_monitor", { monitorId, sshTarget }).catch(console.error);
+
+    return () => {
+      invoke("stop_monitor", { monitorId }).catch(() => {});
+      useMonitorStore.getState().clearMonitor(monitorId);
+    };
+  }, [monitorId, sshTarget]);
+
+  // Listen for monitor-data events
+  useEffect(() => {
+    const unlisten = listen<MonitorDataEvent>("monitor-data", (event) => {
+      const d = event.payload;
+      if (d.monitor_id !== monitorId) return;
+
+      const snapshot: MonitorSnapshot = {
+        cpuPercent: d.cpu_percent,
+        memTotalMb: d.mem_total_mb,
+        memUsedMb: d.mem_used_mb,
+        memPercent: d.mem_percent,
+        loadAvg: d.load_avg,
+        processes: d.processes.map((p) => ({
+          pid: p.pid,
+          user: p.user,
+          cpu: p.cpu,
+          mem: p.mem,
+          command: p.command,
+        })),
+        hostname: d.hostname,
+        timestamp: d.timestamp,
+        error: d.error,
+        net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec } : null,
+      };
+
+      useMonitorStore.getState().pushSnapshot(monitorId, snapshot);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [monitorId]);
+
+  const error = latest?.error;
+  const cpuData = series.map((s) => s.cpuPercent);
+  const memData = series.map((s) => s.memPercent);
+  const rxData = series.map((s) => s.net?.rxBytesPerSec ?? 0);
+  const txData = series.map((s) => s.net?.txBytesPerSec ?? 0);
+
+  return (
+    <div style={styles.container}>
+      {/* Header */}
+      <div style={styles.header}>
+        <span style={styles.hostname}>{latest?.hostname || sshTarget}</span>
+        <button onClick={onClose} style={styles.closeBtn} title="Close monitor">x</button>
+      </div>
+
+      {error ? (
+        <div style={styles.error}>{error}</div>
+      ) : !latest ? (
+        <div style={styles.loading}>connecting...</div>
+      ) : (
+        <>
+          {/* CPU/MEM bars */}
+          <div style={styles.bars}>
+            <ProgressBar value={latest.cpuPercent} color={COLORS.blue} label="CPU" />
+            <ProgressBar value={latest.memPercent} color={COLORS.green} label="MEM" />
+          </div>
+
+          {/* Sparklines */}
+          <div style={styles.sparklines}>
+            <Sparkline data={cpuData} color={COLORS.blue} height={32} />
+            <Sparkline data={memData} color={COLORS.green} height={32} />
+          </div>
+
+          {/* Network */}
+          {latest.net && (
+            <div style={styles.netSection}>
+              <div style={styles.netRow}>
+                <span style={{ color: COLORS.teal, fontSize: 12 }}>NET</span>
+                <span style={{ color: COLORS.subtext, fontSize: 11 }}>
+                  {"▼ "}{formatBytes(latest.net.rxBytesPerSec)}{"  ▲ "}{formatBytes(latest.net.txBytesPerSec)}
+                </span>
+              </div>
+              <Sparkline data={rxData} color={COLORS.teal} height={24} autoMax />
+              <Sparkline data={txData} color={COLORS.yellow} height={24} autoMax />
+            </div>
+          )}
+
+          {/* Load average */}
+          <div style={styles.loadRow}>
+            <span style={styles.loadLabel}>Load</span>
+            <span style={styles.loadValues}>
+              {latest.loadAvg.map((v) => v.toFixed(2)).join("  ")}
+            </span>
+          </div>
+
+          {/* Compact process list (top 5) */}
+          <div style={styles.processes}>
+            <div style={styles.procHeader}>
+              <span style={{ width: 38 }}>CPU%</span>
+              <span style={{ flex: 1 }}>CMD</span>
+            </div>
+            {latest.processes.slice(0, 5).map((p) => (
+              <div key={p.pid} style={styles.procRow}>
+                <span style={{ width: 38, color: p.cpu > 50 ? COLORS.red : COLORS.subtext }}>
+                  {p.cpu.toFixed(1)}
+                </span>
+                <span style={styles.procCmd}>{p.command}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    borderTop: `1px solid ${COLORS.surface}`,
+    backgroundColor: COLORS.bg,
+    display: "flex",
+    flexDirection: "column",
+    fontSize: 12,
+    fontFamily: "'JetBrains Mono', monospace",
+    maxHeight: "65%",
+    overflow: "auto",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "4px 8px",
+    backgroundColor: COLORS.surface,
+    flexShrink: 0,
+  },
+  hostname: {
+    color: COLORS.blue,
+    fontWeight: 600,
+    fontSize: 13,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  closeBtn: {
+    background: "none",
+    border: "none",
+    color: "#585b70",
+    fontSize: 12,
+    cursor: "pointer",
+    padding: "0 2px",
+    lineHeight: 1,
+    flexShrink: 0,
+  },
+  error: {
+    padding: "8px",
+    color: COLORS.red,
+    textAlign: "center" as const,
+    fontSize: 11,
+  },
+  loading: {
+    padding: "8px",
+    color: COLORS.subtext,
+    textAlign: "center" as const,
+    fontSize: 11,
+  },
+  bars: {
+    padding: "6px 8px 4px",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 4,
+  },
+  barRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+  },
+  barLabel: {
+    color: COLORS.subtext,
+    fontSize: 12,
+    width: 28,
+    flexShrink: 0,
+  },
+  barTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: COLORS.overlay,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  barFill: {
+    height: "100%",
+    borderRadius: 2,
+    transition: "width 0.3s ease",
+  },
+  barValue: {
+    fontSize: 12,
+    width: 36,
+    textAlign: "right" as const,
+    flexShrink: 0,
+  },
+  sparklines: {
+    padding: "4px 8px",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 1,
+  },
+  netSection: {
+    padding: "4px 8px",
+    borderTop: `1px solid ${COLORS.surface}`,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 2,
+  },
+  netRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  loadRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "4px 8px",
+  },
+  loadLabel: {
+    color: COLORS.subtext,
+    fontSize: 12,
+    width: 28,
+  },
+  loadValues: {
+    color: COLORS.text,
+    fontSize: 12,
+  },
+  processes: {
+    padding: "4px 8px 6px",
+    borderTop: `1px solid ${COLORS.surface}`,
+    marginTop: 4,
+  },
+  procHeader: {
+    display: "flex",
+    gap: 4,
+    color: COLORS.subtext,
+    fontSize: 11,
+    fontWeight: 600,
+    marginBottom: 1,
+  },
+  procRow: {
+    display: "flex",
+    gap: 4,
+    fontSize: 11,
+    lineHeight: "18px",
+  },
+  procCmd: {
+    flex: 1,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+    color: COLORS.subtext,
+  },
+};

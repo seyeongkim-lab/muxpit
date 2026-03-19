@@ -222,6 +222,186 @@
 | 7. 브라우저 | 고급 기능 | 대 |
 | 8. 설정 & 마감 | 완성도 | 중 |
 
+### Phase 9: SSH 직접 실행 + 시스템 모니터링 패널
+> 목표: SSH를 PTY로 직접 실행 (중간 셸 제거) + 원격 서버 모니터링 대시보드
+
+#### Step 1: SSH 직접 실행 (기능 A)
+
+**문제**: 현재 SSH 세션 복제/복원 시 PowerShell을 먼저 띄운 뒤 500ms 후 SSH 명령을 타이핑.
+**해결**: `spawn_pty`에 `command` 파라미터를 추가하여 SSH를 PTY 프로세스로 직접 실행.
+
+1-1. **Rust: `PtyManager::spawn()` 확장** — `pty.rs`
+   - `spawn(app, rows, cols)` → `spawn(app, rows, cols, command: Option<String>)`
+   - `command`가 `Some`이면 해당 명령어를 파싱하여 `CommandBuilder`에 설정
+   - `command`가 `None`이면 기존 동작 (PowerShell)
+   ```rust
+   // command = Some("ssh user@host -t bash")
+   // → CommandBuilder::new("ssh").args(["user@host", "-t", "bash"])
+   ```
+
+1-2. **Rust: Tauri 커맨드 수정** — `lib.rs`
+   - `spawn_pty(app, state, rows, cols)` → `spawn_pty(app, state, rows, cols, command: Option<String>)`
+   - 기존 호출부(`command` 미전달)는 `None`으로 하위호환
+
+1-3. **TS: 터미널 초기화 수정** — `Terminal.tsx`
+   - `spawn_pty` invoke에 `command` 파라미터 추가
+   - SSH 복제 로직 변경:
+     ```
+     Before: spawn_pty() → setTimeout(500ms) → write_pty(sshCmd)
+     After:  spawn_pty({ command: sshCmd })
+     ```
+   - SSH 세션 복원 로직도 동일하게 변경
+   - `setTimeout(500ms)` + `write_pty` 패턴 제거
+
+1-4. **TS: 세션 저장/복원 확장** — `workspace.ts`
+   - `LeafNode`에 `command?: string` 필드 추가
+   - `SavedLeaf`에 `command?: string` 추가
+   - `stripPty()`, `restoreLayout()`에서 `command` 보존
+
+**검증**:
+- [x] 기존 터미널 생성 (command 없음) → PowerShell 실행 (기존 동작)
+- [x] SSH 복제 (command="ssh user@host") → SSH 직접 실행
+- [x] 세션 저장/복원 시 command 보존
+- [x] `tsc --noEmit` + `cargo check` 통과
+
+---
+
+#### Step 2: 모니터링 백엔드 (기능 B-Backend)
+
+2-1. **Rust: 모니터링 모듈** — `src-tauri/src/monitor.rs` (신규)
+   - `MonitorManager` 구조체: 활성 모니터링 세션 관리
+   - `start_monitor(ssh_target, monitor_id)`:
+     - 별도 스레드에서 5초 간격으로 SSH 명령 실행
+     - 단일 SSH 호출로 모든 데이터 수집:
+       ```bash
+       ssh {target} 'echo "===STAT===" && cat /proc/stat && echo "===MEM===" && cat /proc/meminfo && echo "===LOAD===" && cat /proc/loadavg && echo "===PS===" && ps aux --sort=-%cpu | head -21'
+       ```
+     - 출력을 구분자(===STAT=== 등)로 분리 → 각 섹션 파싱
+     - `monitor-data` Tauri 이벤트로 프론트엔드에 전달
+   - `stop_monitor(monitor_id)`: 스레드 중단 플래그 설정
+   - 파싱 결과 구조체:
+     ```rust
+     struct MonitorData {
+         monitor_id: String,
+         cpu_percent: f64,          // /proc/stat 두 스냅샷 diff
+         mem_total_mb: u64,
+         mem_used_mb: u64,
+         mem_percent: f64,
+         load_avg: [f64; 3],        // 1, 5, 15분
+         processes: Vec<ProcessInfo>, // pid, user, cpu%, mem%, command
+         timestamp: u64,
+     }
+     ```
+
+2-2. **Rust: Tauri 커맨드 등록** — `lib.rs`
+   - `start_monitor(ssh_target, monitor_id)` 커맨드 추가
+   - `stop_monitor(monitor_id)` 커맨드 추가
+   - `MonitorManager`를 `.manage()` 상태로 등록
+
+**검증**:
+- [x] `cargo check` 통과
+- [x] SSH 키 인증된 서버에서 데이터 수집 확인
+- [x] `monitor-data` 이벤트 발행 확인
+
+---
+
+#### Step 3: 모니터링 프론트엔드 (기능 B-Frontend)
+
+3-1. **의존성 추가** — `package.json`
+   - `pnpm add uplot`
+
+3-2. **TS: MonitorNode 타입** — `workspace.ts`
+   - `MonitorNode` 인터페이스 추가:
+     ```typescript
+     interface MonitorNode {
+       type: "monitor";
+       id: string;
+       sshTarget: string;   // "user@host"
+       monitorId: string;    // 백엔드 모니터 세션 ID
+     }
+     ```
+   - `LayoutNode` 유니온에 `MonitorNode` 추가
+   - 트리 순회 함수 업데이트: `collectLeafIds`, `removeLeaf`, `replaceNode`
+   - 세션 저장/복원: `SavedMonitor` 타입 추가
+   - `openMonitor(wsId, leafId, sshTarget)` 액션 추가
+
+3-3. **TS: 모니터 데이터 스토어** — `src/stores/monitor.ts` (신규)
+   - `MonitorDataStore`: monitorId별 시계열 데이터 보관
+   - 최근 60개 포인트 유지 (5초 × 60 = 5분 히스토리)
+   - `monitor-data` 이벤트 리스너에서 데이터 추가
+
+3-4. **TS: MonitorPane 컴포넌트** — `src/components/MonitorPane.tsx` (신규)
+   - 레이아웃:
+     ```
+     ┌──────────────────────────────┐
+     │  hostname  │  uptime  │ load │  ← 상단 바
+     ├──────────────────────────────┤
+     │  CPU Usage (uPlot line)      │  ← CPU 시계열
+     ├──────────────────────────────┤
+     │  Memory Usage (uPlot line)   │  ← 메모리 시계열
+     ├──────────────────────────────┤
+     │  PID  USER  CPU%  MEM%  CMD  │  ← 프로세스 테이블
+     │  ...                         │
+     └──────────────────────────────┘
+     ```
+   - uPlot 래퍼: `useRef` + `useEffect`로 차트 인스턴스 관리
+   - Catppuccin 테마에 맞춘 차트 색상
+   - 마운트 시 `start_monitor` invoke, 언마운트 시 `stop_monitor`
+
+3-5. **TS: SplitPane 디스패치** — `SplitPane.tsx`
+   - `node.type === "monitor"` 분기 추가 → `<MonitorPane />`
+
+3-6. **TS: 키보드 단축키** — `App.tsx`
+   - `Ctrl+Shift+M`: 현재 포커스된 패인의 SSH 타겟을 감지 → 모니터링 패인 열기
+   - SSH 세션이 아닌 경우 무시
+
+**검증**:
+- [x] `tsc --noEmit` 통과
+- [x] 모니터링 패인 열기/닫기 동작
+- [x] uPlot 차트 실시간 갱신
+- [x] 세션 저장/복원 시 모니터 패인 복원
+
+---
+
+#### Step 4: 통합 및 UX
+
+4-1. **SSH 타겟 자동 감지**
+   - 포커스된 패인이 SSH 세션일 때 `get_shell_ctx`로 SSH 명령 추출
+   - SSH 명령에서 `user@host` 파싱 (포트 번호 등 옵션 처리)
+
+4-2. **모니터링 패인 자동 배치**
+   - `Ctrl+Shift+M` → 현재 패인을 vertical split → 하단에 모니터링 패인
+   - ratio 기본값 0.7 (터미널 70%, 모니터 30%)
+
+4-3. **모니터링 상태 표시**
+   - 연결 실패 시 에러 메시지 표시
+   - SSH 키 인증 실패 시 안내 메시지
+   - 수집 중단 시 마지막 데이터에 "stale" 표시
+
+---
+
+#### 변경 파일 요약
+
+| 파일 | 변경 유형 | Step |
+|------|----------|------|
+| `src-tauri/src/pty.rs` | 수정 | 1-1 |
+| `src-tauri/src/lib.rs` | 수정 | 1-2, 2-2 |
+| `src-tauri/src/monitor.rs` | **신규** | 2-1 |
+| `src/components/Terminal.tsx` | 수정 | 1-3 |
+| `src/stores/workspace.ts` | 수정 | 1-4, 3-2 |
+| `src/stores/monitor.ts` | **신규** | 3-3 |
+| `src/components/MonitorPane.tsx` | **신규** | 3-4 |
+| `src/components/SplitPane.tsx` | 수정 | 3-5 |
+| `src/App.tsx` | 수정 | 3-6 |
+| `package.json` | 수정 | 3-1 |
+
+#### 의존성 추가
+
+- **Frontend**: `uplot` (~20KB)
+- **Backend**: 추가 크레이트 없음 (SSH는 `std::process::Command`로 실행)
+
+---
+
 ## 리스크
 
 | 리스크 | 대응 |

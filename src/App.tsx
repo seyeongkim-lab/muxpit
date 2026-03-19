@@ -1,9 +1,11 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { SplitPane } from "./components/SplitPane";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { SshHostPanel } from "./components/SshHostPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
+import { buildSshCommand, type SshHost } from "./stores/sshHosts";
 import { useNotificationStore } from "./stores/notifications";
 import { useSettingsStore } from "./stores/settings";
 import { destroyTerminal, destroyAllTerminals } from "./components/Terminal";
@@ -11,12 +13,34 @@ import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspac
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { LayoutNode, LeafNode } from "./stores/workspace";
+
+const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
+  if (node.type === "leaf") return node.id === id ? node : null;
+  if (node.type === "split") return findLeafNode(node.children[0], id) ?? findLeafNode(node.children[1], id);
+  return null;
+};
+
+// Parse "user@host" from SSH command like: ssh user@host -t bash, "C:\...\ssh.exe" user@host
+const parseSshTarget = (cmd: string): string | null => {
+  const parts = cmd.split(/\s+/);
+  for (const part of parts) {
+    // Skip flags, quoted paths, and the ssh binary itself
+    if (part.startsWith("-") || part.startsWith('"') || part.toLowerCase().includes("ssh")) continue;
+    if (part.includes("@")) return part;
+  }
+  // Fallback: look for user@host pattern anywhere
+  const match = cmd.match(/(\S+@\S+)/);
+  return match ? match[1] : null;
+};
 
 export const App = () => {
   const { workspaces, activeId, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser } =
     useWorkspaceStore();
   const activeWs = workspaces.find((w) => w.id === activeId);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sshPanelOpen, setSshPanelOpen] = useState(false);
+  const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string } | null>(null);
 
   const uiFontSize = useSettingsStore((s) => s.fontSize);
 
@@ -29,6 +53,67 @@ export const App = () => {
   useWorkspaceInfoPoller(5000);
   // SSH context caching every 30 seconds (for session restore)
   useSshContextPoller(30000);
+
+  // Auto-detect SSH on focused pane and show sidebar monitor (poll every 5s)
+  const monitorTargetRef = useRef<string | null>(null);
+  const focusedLeafId = activeWs?.focusedLeafId;
+  const activeWsId = activeWs?.id;
+
+  useEffect(() => {
+    if (!activeWsId || !focusedLeafId) return;
+    let cancelled = false;
+
+    const checkSsh = async () => {
+      const state = useWorkspaceStore.getState();
+      const ws = state.workspaces.find((w) => w.id === activeWsId);
+      if (!ws) return;
+      const leaf = findLeafNode(ws.layout, focusedLeafId);
+      if (!leaf || leaf.type !== "leaf" || !leaf.ptyId) {
+        if (monitorTargetRef.current) {
+          monitorTargetRef.current = null;
+          setSidebarMonitor((prev) => {
+            if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+            return null;
+          });
+        }
+        return;
+      }
+
+      let target: string | null = null;
+
+      // Check leaf.command first (set when connecting via SSH host registry)
+      if (leaf.command && leaf.command.toLowerCase().includes("ssh")) {
+        target = parseSshTarget(leaf.command);
+      }
+      // Fallback: live SSH process detection (for manually typed ssh commands)
+      if (!target) {
+        try {
+          const ctx = await invoke<{ ssh_command: string | null }>("get_shell_ctx", { id: leaf.ptyId });
+          if (ctx.ssh_command) target = parseSshTarget(ctx.ssh_command);
+        } catch {}
+      }
+
+      if (cancelled) return;
+
+      if (target && target !== monitorTargetRef.current) {
+        monitorTargetRef.current = target;
+        setSidebarMonitor((prev) => {
+          if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+          return { monitorId: `mon-${Date.now()}`, sshTarget: target! };
+        });
+      } else if (!target && monitorTargetRef.current) {
+        monitorTargetRef.current = null;
+        setSidebarMonitor((prev) => {
+          if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+          return null;
+        });
+      }
+    };
+
+    checkSsh();
+    const timer = setInterval(checkSsh, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [activeWsId, focusedLeafId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restore session or create initial workspace
   useEffect(() => {
@@ -198,16 +283,58 @@ export const App = () => {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [activeWs, workspaces, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser]);
 
+  const handleConnectHost = useCallback((host: SshHost) => {
+    const cmd = buildSshCommand(host);
+    addWorkspace(host.name, cmd);
+    // Start monitor immediately — no need to wait for SSH auto-detection
+    const target = `${host.user}@${host.host}`;
+    const monitorId = `mon-${Date.now()}`;
+    setSidebarMonitor((prev) => {
+      if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+      return { monitorId, sshTarget: target };
+    });
+    monitorTargetRef.current = target;
+  }, [addWorkspace]);
+
+  const handleCloseMonitor = useCallback(() => {
+    if (sidebarMonitor) {
+      invoke("stop_monitor", { monitorId: sidebarMonitor.monitorId }).catch(() => {});
+      setSidebarMonitor(null);
+    }
+  }, [sidebarMonitor]);
+
   return (
     <div style={styles.container}>
-      <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSshPanel={() => setSshPanelOpen(true)}
+        onConnectHost={handleConnectHost}
+        monitor={sidebarMonitor}
+        onCloseMonitor={handleCloseMonitor}
+      />
       <div style={styles.terminalArea}>
-        {activeWs && (
+        {activeWs ? (
           <SplitPane node={activeWs.layout} workspaceId={activeWs.id} />
+        ) : (
+          <div style={styles.welcome}>
+            <div style={styles.welcomeLogo}>wmux</div>
+            <div style={styles.welcomeTagline}>Terminal Multiplexer for Windows</div>
+            <div style={styles.welcomeHints}>
+              <span><b>Ctrl+Shift+T</b> New session</span>
+              <span><b>Ctrl+Shift+D</b> Split horizontal</span>
+              <span><b>Ctrl+Shift+E</b> Split vertical</span>
+              <span><b>H</b> button to manage SSH hosts</span>
+            </div>
+          </div>
         )}
       </div>
       <NotificationPanel />
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SshHostPanel
+        open={sshPanelOpen}
+        onClose={() => setSshPanelOpen(false)}
+        onConnect={(host) => { handleConnectHost(host); setSshPanelOpen(false); }}
+      />
     </div>
   );
 };
@@ -223,5 +350,34 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     position: "relative",
     overflow: "hidden",
+  },
+  welcome: {
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    gap: 16,
+    color: "#585b70",
+    fontFamily: "'JetBrains Mono', monospace",
+    userSelect: "none" as const,
+  },
+  welcomeLogo: {
+    fontSize: 48,
+    fontWeight: 700,
+    color: "#89b4fa",
+    letterSpacing: -2,
+  },
+  welcomeTagline: {
+    fontSize: 14,
+    color: "#a6adc8",
+  },
+  welcomeHints: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 6,
+    fontSize: 12,
+    color: "#585b70",
+    marginTop: 16,
   },
 };

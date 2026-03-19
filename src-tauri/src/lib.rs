@@ -1,14 +1,16 @@
 mod ipc;
+mod monitor;
 mod pty;
 mod sysinfo;
 
+use monitor::MonitorManager;
 use pty::PtyManager;
 use sysinfo::{gather_workspace_info, get_listening_ports, get_shell_context, ShellContext, WorkspaceInfo};
 use tauri::{AppHandle, State};
 
 #[tauri::command]
-fn spawn_pty(app: AppHandle, state: State<'_, PtyManager>, rows: u16, cols: u16) -> Result<u32, String> {
-    state.spawn(app, rows, cols)
+fn spawn_pty(app: AppHandle, state: State<'_, PtyManager>, rows: u16, cols: u16, command: Option<String>) -> Result<u32, String> {
+    state.spawn(app, rows, cols, command)
 }
 
 #[tauri::command]
@@ -90,6 +92,16 @@ fn list_fonts_sync() -> Vec<String> {
 }
 
 #[tauri::command]
+fn start_monitor(app: AppHandle, state: State<'_, MonitorManager>, monitor_id: String, ssh_target: String) -> Result<(), String> {
+    state.start(app, monitor_id, ssh_target)
+}
+
+#[tauri::command]
+fn stop_monitor(state: State<'_, MonitorManager>, monitor_id: String) -> Result<(), String> {
+    state.stop(&monitor_id)
+}
+
+#[tauri::command]
 fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
     app.notification()
@@ -104,6 +116,7 @@ fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), 
 pub fn run() {
     tauri::Builder::default()
         .manage(PtyManager::new())
+        .manage(MonitorManager::new())
         .invoke_handler(tauri::generate_handler![
             spawn_pty,
             write_pty,
@@ -115,6 +128,8 @@ pub fn run() {
             get_shell_ctx,
             list_fonts,
             send_notification,
+            start_monitor,
+            stop_monitor,
         ])
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
