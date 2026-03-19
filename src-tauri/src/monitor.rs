@@ -39,6 +39,15 @@ pub struct MonitorData {
     pub timestamp: u64,
     pub error: Option<String>,
     pub net: Option<NetInfo>,
+    pub disks: Vec<DiskInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskInfo {
+    pub mount: String,
+    pub total_gb: f64,
+    pub used_gb: f64,
+    pub percent: f64,
 }
 
 #[derive(Clone, Default)]
@@ -104,7 +113,7 @@ const END_MARKER: &str = "===WMUX_END===";
 
 fn build_collect_script() -> String {
     format!(
-        r#"OS=$(uname -s); echo "===OS===$OS"; if [ "$OS" = "Darwin" ]; then echo '===CPU===' && top -l 1 -n 0 -s 0 2>/dev/null | grep 'CPU usage' && echo '===MEM===' && vm_stat 2>/dev/null && echo "===MEMTOTAL===$(sysctl -n hw.memsize 2>/dev/null)" && echo '===LOAD===' && sysctl -n vm.loadavg 2>/dev/null && echo '===NET===' && netstat -ib 2>/dev/null | head -20 && echo '===PS===' && ps aux -r 2>/dev/null | head -11 && echo '===HOST===' && hostname; else echo '===STAT===' && head -1 /proc/stat && echo '===MEM===' && head -5 /proc/meminfo && echo '===LOAD===' && cat /proc/loadavg && echo '===NET===' && cat /proc/net/dev && echo '===PS===' && ps aux --sort=-%cpu 2>/dev/null | head -11 && echo '===HOST===' && hostname -f 2>/dev/null || hostname; fi; echo '{END_MARKER}'"#,
+        r#"OS=$(uname -s); echo "===OS===$OS"; if [ "$OS" = "Darwin" ]; then echo '===CPU===' && top -l 1 -n 0 -s 0 2>/dev/null | grep 'CPU usage' && echo '===MEM===' && vm_stat 2>/dev/null && echo "===MEMTOTAL===$(sysctl -n hw.memsize 2>/dev/null)" && echo '===LOAD===' && sysctl -n vm.loadavg 2>/dev/null && echo '===NET===' && netstat -ib 2>/dev/null | head -20 && echo '===DISK===' && df -h 2>/dev/null | grep '^/dev/' && echo '===PS===' && ps aux -r 2>/dev/null | head -11 && echo '===HOST===' && hostname; else echo '===STAT===' && head -1 /proc/stat && echo '===MEM===' && head -5 /proc/meminfo && echo '===LOAD===' && cat /proc/loadavg && echo '===NET===' && cat /proc/net/dev && echo '===DISK===' && df -h -x tmpfs -x squashfs -x devtmpfs -x overlay -x efivarfs 2>/dev/null | tail -n +2 && echo '===PS===' && ps aux --sort=-%cpu 2>/dev/null | head -11 && echo '===HOST===' && hostname -f 2>/dev/null || hostname; fi; echo '{END_MARKER}'"#,
         END_MARKER = END_MARKER,
     )
 }
@@ -318,6 +327,8 @@ fn parse_remote_output(text: &str, monitor_id: &str, prev_cpu: &mut Option<CpuSn
         None
     };
 
+    let disks = sections.get("DISK").map(|s| parse_disk(s)).unwrap_or_default();
+
     let hostname = sections.get("HOST")
         .map(|h| h.trim().to_string())
         .unwrap_or_default();
@@ -339,6 +350,7 @@ fn parse_remote_output(text: &str, monitor_id: &str, prev_cpu: &mut Option<CpuSn
         timestamp,
         error: None,
         net,
+        disks,
     }
 }
 
@@ -580,6 +592,49 @@ fn parse_macos_net(text: &str) -> (u64, u64) {
     (total_rx, total_tx)
 }
 
+/// Parse df output: "Filesystem Size Used Avail Use% Mounted"
+fn parse_disk(text: &str) -> Vec<DiskInfo> {
+    let mut disks = Vec::new();
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        // Linux: /dev/sda1 50G 20G 28G 42% /
+        // macOS: /dev/disk1s1 466Gi 200Gi 250Gi 45% 10000 1000000 1% /
+        if parts.len() < 5 { continue; }
+        // Find mount point (last column) and percent (column ending with %)
+        let mount = parts.last().unwrap().to_string();
+        let pct_str = parts.iter().rev().find(|s| s.ends_with('%'));
+        let percent: f64 = pct_str
+            .and_then(|s| s.trim_end_matches('%').parse().ok())
+            .unwrap_or(0.0);
+        let total = parse_size_to_gb(parts[1]);
+        let used = parse_size_to_gb(parts[2]);
+        if total > 0.0 {
+            disks.push(DiskInfo { mount, total_gb: total, used_gb: used, percent });
+        }
+    }
+    disks
+}
+
+/// Parse human-readable size (e.g., "50G", "1.2T", "500M", "466Gi") to GB
+fn parse_size_to_gb(s: &str) -> f64 {
+    let s = s.trim();
+    if s.is_empty() { return 0.0; }
+    // Strip trailing 'i' for macOS (Gi, Ti, Mi)
+    let s = s.trim_end_matches('i');
+    let (num, unit) = if s.ends_with('T') {
+        (s.trim_end_matches('T'), 1024.0)
+    } else if s.ends_with('G') {
+        (s.trim_end_matches('G'), 1.0)
+    } else if s.ends_with('M') {
+        (s.trim_end_matches('M'), 1.0 / 1024.0)
+    } else if s.ends_with('K') {
+        (s.trim_end_matches('K'), 1.0 / (1024.0 * 1024.0))
+    } else {
+        return 0.0;
+    };
+    num.parse::<f64>().unwrap_or(0.0) * unit
+}
+
 fn error_data(monitor_id: &str, msg: &str) -> MonitorData {
     MonitorData {
         monitor_id: monitor_id.to_string(),
@@ -596,5 +651,6 @@ fn error_data(monitor_id: &str, msg: &str) -> MonitorData {
             .unwrap_or(0),
         error: Some(msg.to_string()),
         net: None,
+        disks: vec![],
     }
 }
