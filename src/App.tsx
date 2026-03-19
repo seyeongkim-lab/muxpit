@@ -60,7 +60,16 @@ export const App = () => {
   const activeWsId = activeWs?.id;
 
   useEffect(() => {
-    if (!activeWsId || !focusedLeafId) return;
+    if (!activeWsId || !focusedLeafId) {
+      // No active workspace — stop monitor
+      monitorTargetRef.current = null;
+      setSidebarMonitor((prev) => {
+        if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+        return null;
+      });
+      return;
+    }
+
     let cancelled = false;
 
     const checkSsh = async () => {
@@ -69,13 +78,11 @@ export const App = () => {
       if (!ws) return;
       const leaf = findLeafNode(ws.layout, focusedLeafId);
       if (!leaf || leaf.type !== "leaf" || !leaf.ptyId) {
-        if (monitorTargetRef.current) {
-          monitorTargetRef.current = null;
-          setSidebarMonitor((prev) => {
-            if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
-            return null;
-          });
-        }
+        monitorTargetRef.current = null;
+        setSidebarMonitor((prev) => {
+          if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+          return null;
+        });
         return;
       }
 
@@ -95,13 +102,16 @@ export const App = () => {
 
       if (cancelled) return;
 
-      if (target && target !== monitorTargetRef.current) {
-        monitorTargetRef.current = target;
-        setSidebarMonitor((prev) => {
-          if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
-          return { monitorId: `mon-${Date.now()}`, sshTarget: target! };
-        });
-      } else if (!target && monitorTargetRef.current) {
+      if (target) {
+        // Always (re)start monitor for the detected target
+        if (target !== monitorTargetRef.current) {
+          monitorTargetRef.current = target;
+          setSidebarMonitor((prev) => {
+            if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+            return { monitorId: `mon-${Date.now()}`, sshTarget: target! };
+          });
+        }
+      } else {
         monitorTargetRef.current = null;
         setSidebarMonitor((prev) => {
           if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
@@ -110,6 +120,8 @@ export const App = () => {
       }
     };
 
+    // Reset ref on workspace/leaf change so new check always triggers
+    monitorTargetRef.current = null;
     checkSsh();
     const timer = setInterval(checkSsh, 5000);
     return () => { cancelled = true; clearInterval(timer); };

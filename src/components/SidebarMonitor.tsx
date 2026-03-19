@@ -27,6 +27,7 @@ interface MonitorDataEvent {
   timestamp: number;
   error: string | null;
   net: { rx_bytes_per_sec: number; tx_bytes_per_sec: number } | null;
+  disks: { mount: string; total_gb: number; used_gb: number; percent: number }[];
 }
 
 const COLORS = {
@@ -40,6 +41,7 @@ const COLORS = {
   red: "#f38ba8",
   yellow: "#f9e2af",
   teal: "#94e2d5",
+  mauve: "#cba6f7",
 };
 
 // SVG sparkline from time series data
@@ -120,6 +122,7 @@ export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitor
         timestamp: d.timestamp,
         error: d.error,
         net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec } : null,
+        disks: (d.disks ?? []).map((dk) => ({ mount: dk.mount, totalGb: dk.total_gb, usedGb: dk.used_gb, percent: dk.percent })),
       };
 
       useMonitorStore.getState().pushSnapshot(monitorId, snapshot);
@@ -184,6 +187,27 @@ export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitor
             </span>
           </div>
 
+          {/* Disk usage */}
+          {latest.disks.length > 0 && (
+            <div style={styles.diskSection}>
+              {latest.disks.map((dk) => (
+                <div key={dk.mount} style={styles.diskRow}>
+                  <span style={styles.diskMount}>{dk.mount}</span>
+                  <div style={styles.diskBarTrack}>
+                    <div style={{
+                      ...styles.diskBarFill,
+                      width: `${Math.min(100, dk.percent)}%`,
+                      backgroundColor: dk.percent > 90 ? COLORS.red : dk.percent > 70 ? COLORS.yellow : COLORS.mauve,
+                    }} />
+                  </div>
+                  <span style={styles.diskLabel}>
+                    {dk.usedGb.toFixed(0)}/{dk.totalGb.toFixed(0)}G
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Compact process list (top 5) */}
           <div style={styles.processes}>
             <div style={styles.procHeader}>
@@ -211,7 +235,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: COLORS.bg,
     display: "flex",
     flexDirection: "column",
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: "'JetBrains Mono', monospace",
     maxHeight: "65%",
     overflow: "auto",
@@ -227,7 +251,7 @@ const styles: Record<string, React.CSSProperties> = {
   hostname: {
     color: COLORS.blue,
     fontWeight: 600,
-    fontSize: 13,
+    fontSize: 14,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
@@ -267,8 +291,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   barLabel: {
     color: COLORS.subtext,
-    fontSize: 12,
-    width: 28,
+    fontSize: 13,
+    width: 30,
     flexShrink: 0,
   },
   barTrack: {
@@ -284,7 +308,7 @@ const styles: Record<string, React.CSSProperties> = {
     transition: "width 0.3s ease",
   },
   barValue: {
-    fontSize: 12,
+    fontSize: 13,
     width: 36,
     textAlign: "right" as const,
     flexShrink: 0,
@@ -316,12 +340,52 @@ const styles: Record<string, React.CSSProperties> = {
   },
   loadLabel: {
     color: COLORS.subtext,
-    fontSize: 12,
-    width: 28,
+    fontSize: 13,
+    width: 30,
   },
   loadValues: {
     color: COLORS.text,
-    fontSize: 12,
+    fontSize: 13,
+  },
+  diskSection: {
+    padding: "4px 8px",
+    borderTop: `1px solid ${COLORS.surface}`,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 3,
+  },
+  diskRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+  },
+  diskMount: {
+    color: COLORS.mauve,
+    fontSize: 11,
+    width: 32,
+    flexShrink: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  diskBarTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: COLORS.overlay,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  diskBarFill: {
+    height: "100%",
+    borderRadius: 2,
+    transition: "width 0.3s ease",
+  },
+  diskLabel: {
+    color: COLORS.subtext,
+    fontSize: 10,
+    width: 50,
+    textAlign: "right" as const,
+    flexShrink: 0,
   },
   processes: {
     padding: "4px 8px 6px",
@@ -332,14 +396,14 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     gap: 4,
     color: COLORS.subtext,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: 600,
     marginBottom: 1,
   },
   procRow: {
     display: "flex",
     gap: 4,
-    fontSize: 11,
+    fontSize: 12,
     lineHeight: "18px",
   },
   procCmd: {

@@ -13,6 +13,13 @@ export interface NetInfo {
   txBytesPerSec: number;
 }
 
+export interface DiskInfo {
+  mount: string;
+  totalGb: number;
+  usedGb: number;
+  percent: number;
+}
+
 export interface MonitorSnapshot {
   cpuPercent: number;
   memTotalMb: number;
@@ -24,6 +31,7 @@ export interface MonitorSnapshot {
   timestamp: number;
   error: string | null;
   net: NetInfo | null;
+  disks: DiskInfo[];
 }
 
 interface MonitorDataState {
