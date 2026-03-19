@@ -36,7 +36,7 @@ impl PtyManager {
         }
     }
 
-    pub fn spawn(&self, app: AppHandle, rows: u16, cols: u16) -> Result<u32, String> {
+    pub fn spawn(&self, app: AppHandle, rows: u16, cols: u16, command: Option<String>) -> Result<u32, String> {
         let pty_system = native_pty_system();
 
         let pair = pty_system
@@ -48,8 +48,18 @@ impl PtyManager {
             })
             .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-        // Use PowerShell if available, fall back to default shell
-        let mut cmd = if cfg!(windows) {
+        // If command is provided, run it directly; otherwise use default shell
+        let mut cmd = if let Some(ref command_str) = command {
+            let parts = shell_words_parse(command_str);
+            if parts.is_empty() {
+                return Err("Empty command".to_string());
+            }
+            let mut cb = CommandBuilder::new(&parts[0]);
+            for arg in &parts[1..] {
+                cb.arg(arg);
+            }
+            cb
+        } else if cfg!(windows) {
             let pwsh = which_powershell();
             CommandBuilder::new(pwsh)
         } else {
@@ -234,4 +244,36 @@ fn which_powershell() -> std::ffi::OsString {
 #[cfg(not(windows))]
 fn which_powershell() -> std::ffi::OsString {
     std::ffi::OsString::from("/bin/sh")
+}
+
+/// Simple shell-like word splitting that respects quotes
+fn shell_words_parse(s: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    for ch in s.chars() {
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single && !cfg!(windows) => escape = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            ' ' | '\t' if !in_single && !in_double => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
 }

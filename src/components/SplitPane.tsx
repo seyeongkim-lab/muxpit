@@ -2,6 +2,7 @@ import { useRef, useCallback } from "react";
 import { LayoutNode, useWorkspaceStore } from "../stores/workspace";
 import { TerminalLeaf } from "./Terminal";
 import { BrowserPane } from "./BrowserPane";
+import { MonitorPane } from "./MonitorPane";
 
 interface SplitPaneProps {
   node: LayoutNode;
@@ -15,6 +16,10 @@ export const SplitPane = ({ node, workspaceId }: SplitPaneProps) => {
 
   if (node.type === "browser") {
     return <BrowserPane key={node.id} id={node.id} url={node.url} />;
+  }
+
+  if (node.type === "monitor") {
+    return <MonitorPane key={node.id} id={node.id} sshTarget={node.sshTarget} monitorId={node.monitorId} />;
   }
 
   return (

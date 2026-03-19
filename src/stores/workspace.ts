@@ -17,6 +17,7 @@ export interface LeafNode {
   ptyId: number | null;
   cloneFromPtyId?: number; // PTY ID of the source pane when split
   sshCommand?: string; // SSH command to restore on session reload
+  command?: string; // Direct command to run as PTY process (e.g., "ssh user@host")
 }
 
 export interface BrowserNode {
@@ -25,7 +26,14 @@ export interface BrowserNode {
   url: string;
 }
 
-export type LayoutNode = SplitNode | LeafNode | BrowserNode;
+export interface MonitorNode {
+  type: "monitor";
+  id: string;
+  sshTarget: string;
+  monitorId: string;
+}
+
+export type LayoutNode = SplitNode | LeafNode | BrowserNode | MonitorNode;
 
 export interface Workspace {
   id: string;
@@ -39,6 +47,7 @@ interface SavedLeaf {
   type: "leaf";
   id: string;
   sshCommand?: string;
+  command?: string;
 }
 
 interface SavedBrowser {
@@ -55,7 +64,14 @@ interface SavedSplit {
   children: [SavedLayout, SavedLayout];
 }
 
-type SavedLayout = SavedLeaf | SavedBrowser | SavedSplit;
+interface SavedMonitor {
+  type: "monitor";
+  id: string;
+  sshTarget: string;
+  monitorId: string;
+}
+
+type SavedLayout = SavedLeaf | SavedBrowser | SavedSplit | SavedMonitor;
 
 interface SavedWorkspace {
   id: string;
@@ -73,7 +89,7 @@ interface WorkspaceState {
   workspaces: Workspace[];
   activeId: string | null;
 
-  addWorkspace: (name?: string) => string;
+  addWorkspace: (name?: string, command?: string) => string;
   removeWorkspace: (id: string) => void;
   setActive: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
@@ -89,6 +105,8 @@ interface WorkspaceState {
   setSplitRatio: (workspaceId: string, splitId: string, ratio: number) => void;
 
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => void;
+
+  openMonitor: (workspaceId: string, leafId: string, sshTarget: string) => string;
 
   // Session persistence
   saveSession: () => void;
@@ -122,7 +140,7 @@ const removeLeaf = (
   tree: LayoutNode,
   leafId: string,
 ): LayoutNode | null => {
-  if (tree.type === "leaf" || tree.type === "browser") {
+  if (tree.type === "leaf" || tree.type === "browser" || tree.type === "monitor") {
     return tree.id === leafId ? null : tree;
   }
   const [left, right] = tree.children;
@@ -140,10 +158,11 @@ const removeLeaf = (
   return tree;
 };
 
-// Helper: collect all leaf IDs (terminal leaves only)
+// Helper: collect all leaf IDs (terminal + browser + monitor)
 export const collectLeafIds = (node: LayoutNode): string[] => {
   if (node.type === "leaf") return [node.id];
   if (node.type === "browser") return [node.id];
+  if (node.type === "monitor") return [node.id];
   return [
     ...collectLeafIds(node.children[0]),
     ...collectLeafIds(node.children[1]),
@@ -154,13 +173,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   activeId: null,
 
-  addWorkspace: (name?: string) => {
+  addWorkspace: (name?: string, command?: string) => {
     const leafId = genId();
     const wsId = genId();
+    const leaf: LeafNode = { type: "leaf", id: leafId, ptyId: null, command: command ?? undefined };
     const ws: Workspace = {
       id: wsId,
       name: name ?? `Shell ${get().workspaces.length + 1}`,
-      layout: { type: "leaf", id: leafId, ptyId: null },
+      layout: leaf,
       focusedLeafId: leafId,
     };
     set((s) => ({
@@ -204,6 +224,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         return { ...w, layout: replaceNode(w.layout, leafId, splitNode) };
       }),
     }));
+  },
+
+  openMonitor: (workspaceId: string, leafId: string, sshTarget: string) => {
+    const monitorNodeId = genId();
+    const monitorId = `mon-${Date.now()}`;
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const splitNode: SplitNode = {
+          type: "split",
+          id: genId(),
+          direction: "vertical",
+          ratio: 0.7,
+          children: [
+            { type: "leaf", id: leafId, ptyId: (findLeaf(w.layout, leafId))?.ptyId ?? null },
+            { type: "monitor", id: monitorNodeId, sshTarget, monitorId },
+          ],
+        };
+        return { ...w, layout: replaceNode(w.layout, leafId, splitNode) };
+      }),
+    }));
+    return monitorId;
   },
 
   removeWorkspace: (id: string) => {
@@ -318,8 +360,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   saveSession: () => {
     const state = get();
     const stripPty = (node: LayoutNode): SavedLayout => {
-      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand };
+      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command };
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
+      if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, monitorId: node.monitorId };
       return {
         type: "split",
         id: node.id,
@@ -353,8 +396,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (!session.workspaces || session.workspaces.length === 0) return false;
 
       const restoreLayout = (node: SavedLayout): LayoutNode => {
-        if (node.type === "leaf") return { type: "leaf", id: node.id, ptyId: null, sshCommand: node.sshCommand };
+        if (node.type === "leaf") return { type: "leaf", id: node.id, ptyId: null, sshCommand: node.sshCommand, command: node.command };
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
+        // Monitor nodes are now sidebar-based; restore as plain leaf
+        if (node.type === "monitor") return { type: "leaf", id: node.id, ptyId: null };
         return {
           type: "split",
           id: node.id,
@@ -406,7 +451,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 // Helper: find a leaf node by id
 const findLeaf = (node: LayoutNode, id: string): LeafNode | null => {
   if (node.type === "leaf") return node.id === id ? node : null;
-  if (node.type === "browser") return null;
+  if (node.type === "browser" || node.type === "monitor") return null;
   return findLeaf(node.children[0], id) ?? findLeaf(node.children[1], id);
 };
 

@@ -119,7 +119,7 @@ const findSshCommand = (wsId: string, leafId: string): string | undefined => {
   const ws = state.workspaces.find((w) => w.id === wsId);
   if (!ws) return undefined;
   const find = (node: any): string | undefined => {
-    if (node.type === "leaf" && node.id === leafId) return node.sshCommand;
+    if (node.type === "leaf" && node.id === leafId) return node.command ?? node.sshCommand;
     if (node.type === "split") return find(node.children[0]) ?? find(node.children[1]);
     return undefined;
   };
@@ -245,12 +245,36 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       invoke("resize_pty", { id: ptyId, rows, cols }).catch(console.error);
     });
 
-    // Now spawn PTY
+    // Determine command to run: SSH direct execution or default shell
+    let spawnCommand: string | null = null;
+
+    const cloneFromPtyId = findCloneFromPtyId(workspaceId, leafId);
+    if (cloneFromPtyId) {
+      try {
+        const ctx = await invoke<{ ssh_command: string | null; cwd: string | null }>(
+          "get_shell_ctx",
+          { id: cloneFromPtyId },
+        );
+        if (ctx.ssh_command) {
+          spawnCommand = ctx.ssh_command;
+        }
+      } catch {
+        // Silently ignore context fetch errors
+      }
+    } else {
+      // Session restore: check for saved SSH command
+      const savedSsh = findSshCommand(workspaceId, leafId);
+      if (savedSsh) {
+        spawnCommand = savedSsh;
+      }
+    }
+
+    // Spawn PTY — with command for SSH direct execution, or null for default shell
     ptyId = await invoke<number>("spawn_pty", {
       rows: Math.max(term.rows, 1),
       cols: Math.max(term.cols, 1),
+      command: spawnCommand,
     });
-
 
     terminalInstances.set(leafId, {
       term,
@@ -262,27 +286,14 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // Trigger state update LAST, after everything is set up
     setPtyId(workspaceId, leafId, ptyId);
 
-    // Auto-replicate SSH session if this pane was split from another
-    const cloneFromPtyId = findCloneFromPtyId(workspaceId, leafId);
-    if (cloneFromPtyId) {
+    // For non-SSH clones, replicate local cwd
+    if (cloneFromPtyId && !spawnCommand) {
       try {
         const ctx = await invoke<{ ssh_command: string | null; cwd: string | null }>(
           "get_shell_ctx",
           { id: cloneFromPtyId },
         );
-        if (ctx.ssh_command) {
-          // Normalize SSH command for PowerShell compatibility
-          // If the command has a quoted executable path, prefix with & operator
-          let sshCmd = ctx.ssh_command;
-          if (sshCmd.startsWith('"')) {
-            sshCmd = `& ${sshCmd}`;
-          }
-          // Wait for shell to be ready, then send SSH command
-          setTimeout(() => {
-            invoke("write_pty", { id: ptyId, data: sshCmd + "\r" }).catch(() => {});
-          }, 500);
-        } else if (ctx.cwd) {
-          // No SSH, but replicate local cwd
+        if (ctx.cwd) {
           setTimeout(() => {
             invoke("write_pty", {
               id: ptyId,
@@ -291,19 +302,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           }, 500);
         }
       } catch {
-        // Silently ignore context fetch errors
-      }
-    } else {
-      // Session restore: if leaf has a saved SSH command, execute it
-      const savedSsh = findSshCommand(workspaceId, leafId);
-      if (savedSsh) {
-        let sshCmd = savedSsh;
-        if (sshCmd.startsWith('"')) {
-          sshCmd = `& ${sshCmd}`;
-        }
-        setTimeout(() => {
-          invoke("write_pty", { id: ptyId, data: sshCmd + "\r" }).catch(() => {});
-        }, 500);
+        // Silently ignore
       }
     }
 
