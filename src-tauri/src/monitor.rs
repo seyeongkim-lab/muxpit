@@ -98,10 +98,9 @@ impl MonitorManager {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(session) = sessions.remove(monitor_id) {
             *session.stop_flag.lock().unwrap() = true;
-            Ok(())
-        } else {
-            Err(format!("Monitor session '{monitor_id}' not found"))
         }
+        // Silently ignore if session not found (may already be stopped during rapid switching)
+        Ok(())
     }
 }
 

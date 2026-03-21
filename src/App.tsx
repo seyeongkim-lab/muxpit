@@ -72,17 +72,36 @@ export const App = () => {
 
     let cancelled = false;
 
-    const checkSsh = async () => {
-      const state = useWorkspaceStore.getState();
-      const ws = state.workspaces.find((w) => w.id === activeWsId);
-      if (!ws) return;
-      const leaf = findLeafNode(ws.layout, focusedLeafId);
-      if (!leaf || leaf.type !== "leaf" || !leaf.ptyId) {
+    const setMonitorTarget = (target: string | null) => {
+      if (cancelled) return;
+
+      if (target) {
+        if (target !== monitorTargetRef.current) {
+          monitorTargetRef.current = target;
+          setSidebarMonitor((prev) => {
+            if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+            return { monitorId: `mon-${Date.now()}`, sshTarget: target };
+          });
+        }
+      } else if (monitorTargetRef.current !== null) {
         monitorTargetRef.current = null;
         setSidebarMonitor((prev) => {
           if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
           return null;
         });
+      }
+    };
+
+    const checkSsh = async () => {
+      if (cancelled) return;
+
+      const state = useWorkspaceStore.getState();
+      const ws = state.workspaces.find((w) => w.id === activeWsId);
+      if (!ws) { setMonitorTarget(null); return; }
+
+      const leaf = findLeafNode(ws.layout, focusedLeafId);
+      if (!leaf || leaf.type !== "leaf" || !leaf.ptyId) {
+        setMonitorTarget(null);
         return;
       }
 
@@ -96,32 +115,14 @@ export const App = () => {
       if (!target) {
         try {
           const ctx = await invoke<{ ssh_command: string | null }>("get_shell_ctx", { id: leaf.ptyId });
-          if (ctx.ssh_command) target = parseSshTarget(ctx.ssh_command);
+          if (!cancelled && ctx.ssh_command) target = parseSshTarget(ctx.ssh_command);
         } catch {}
       }
 
-      if (cancelled) return;
-
-      if (target) {
-        // Always (re)start monitor for the detected target
-        if (target !== monitorTargetRef.current) {
-          monitorTargetRef.current = target;
-          setSidebarMonitor((prev) => {
-            if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
-            return { monitorId: `mon-${Date.now()}`, sshTarget: target! };
-          });
-        }
-      } else {
-        monitorTargetRef.current = null;
-        setSidebarMonitor((prev) => {
-          if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
-          return null;
-        });
-      }
+      setMonitorTarget(target);
     };
 
-    // Reset ref on workspace/leaf change so new check always triggers
-    monitorTargetRef.current = null;
+    // Immediate check on workspace/leaf change, then poll every 5s
     checkSsh();
     const timer = setInterval(checkSsh, 5000);
     return () => { cancelled = true; clearInterval(timer); };
@@ -312,6 +313,7 @@ export const App = () => {
     if (sidebarMonitor) {
       invoke("stop_monitor", { monitorId: sidebarMonitor.monitorId }).catch(() => {});
       setSidebarMonitor(null);
+      monitorTargetRef.current = null;
     }
   }, [sidebarMonitor]);
 

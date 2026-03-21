@@ -10,6 +10,7 @@ import { useWorkspaceStore } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
+import { getThemeByName } from "../themes";
 import "@xterm/xterm/css/xterm.css";
 
 interface PtyOutput {
@@ -21,29 +22,6 @@ interface PtyExit {
   id: number;
   code: number | null;
 }
-
-const THEME = {
-  background: "#1e1e2e",
-  foreground: "#cdd6f4",
-  cursor: "#f5e0dc",
-  selectionBackground: "#585b70",
-  black: "#45475a",
-  red: "#f38ba8",
-  green: "#a6e3a1",
-  yellow: "#f9e2af",
-  blue: "#89b4fa",
-  magenta: "#f5c2e7",
-  cyan: "#94e2d5",
-  white: "#bac2de",
-  brightBlack: "#585b70",
-  brightRed: "#f38ba8",
-  brightGreen: "#a6e3a1",
-  brightYellow: "#f9e2af",
-  brightBlue: "#89b4fa",
-  brightMagenta: "#f5c2e7",
-  brightCyan: "#94e2d5",
-  brightWhite: "#a6adc8",
-};
 
 // OSC sequence parser: extracts OSC 7 (cwd) and OSC 777 (custom) from terminal output
 const parseOscSequences = (data: string, workspaceId: string) => {
@@ -108,6 +86,16 @@ export const destroyTerminal = (leafId: string) => {
 export const destroyAllTerminals = (leafIds: string[]) => {
   leafIds.forEach(destroyTerminal);
 };
+
+// Apply theme changes to all existing terminals in real-time
+useSettingsStore.subscribe((state, prev) => {
+  if (state.themeName !== prev.themeName) {
+    const { theme } = getThemeByName(state.themeName);
+    terminalInstances.forEach(({ term }) => {
+      term.options.theme = theme;
+    });
+  }
+});
 
 interface TerminalLeafProps {
   workspaceId: string;
@@ -176,7 +164,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       cursorStyle: "block",
       fontSize: settings.fontSize,
       fontFamily: settings.fontFamily,
-      theme: THEME,
+      theme: getThemeByName(settings.themeName).theme,
       allowProposedApi: true,
       scrollback: 5000,
     });
@@ -192,6 +180,9 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       // Let Ctrl+Shift combos bubble to App shortcuts
       if (e.ctrlKey && e.shiftKey) return false;
 
+      // Let Win/Meta key combos pass through to OS (e.g. Win+V clipboard history)
+      if (e.metaKey) return false;
+
       if (e.type !== "keydown") return true;
 
       // Ctrl+C: copy selection if text is selected, otherwise send interrupt
@@ -203,6 +194,15 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           return false;
         }
         return true; // no selection → send ^C to PTY
+      }
+
+      // Ctrl+V: always paste from clipboard
+      if (e.ctrlKey && e.key === "v") {
+        e.preventDefault();
+        navigator.clipboard.readText().then((text) => {
+          if (text) term.paste(text);
+        });
+        return false;
       }
 
       return true;
