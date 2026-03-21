@@ -95,6 +95,7 @@ export const MonitorPane = ({ id, sshTarget, monitorId }: MonitorPaneProps) => {
         error: d.error,
         net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec } : null,
         disks: (d.disks ?? []).map((dk) => ({ mount: dk.mount, totalGb: dk.total_gb, usedGb: dk.used_gb, percent: dk.percent })),
+        claudeSessions: [],
       };
 
       useMonitorStore.getState().pushSnapshot(monitorId, snapshot);

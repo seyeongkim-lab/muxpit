@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, collectLeafIds, type LayoutNode } from "../stores/workspace";
 
 const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
-  if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor") && node.id === id) return node;
+  if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") && node.id === id) return node;
   if (node.type === "split") return findLeafInLayout(node.children[0], id) ?? findLeafInLayout(node.children[1], id);
   return null;
 };
@@ -56,7 +56,7 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
 
             const findInNode = (node: typeof w.layout): number | null => {
               if (node.type === "leaf") return node.ptyId;
-              if (node.type === "browser" || node.type === "monitor") return null;
+              if (node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") return null;
               return findInNode(node.children[0]) ?? findInNode(node.children[1]);
             };
             return findInNode(w.layout);

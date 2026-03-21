@@ -102,6 +102,34 @@ fn stop_monitor(state: State<'_, MonitorManager>, monitor_id: String) -> Result<
 }
 
 #[tauri::command]
+async fn fetch_claude_session(ssh_target: String, project: String, session_id: String) -> Result<Vec<String>, String> {
+    let path = format!("$HOME/.claude/projects/{}/{}.jsonl", project, session_id);
+    let mut cmd = std::process::Command::new("ssh");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd.args(["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", &ssh_target, &format!("cat {}", path)]);
+
+    let output = tauri::async_runtime::spawn_blocking(move || cmd.output())
+        .await
+        .map_err(|e| format!("Task error: {e}"))?
+        .map_err(|e| format!("SSH error: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!("Failed to read session: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let content = String::from_utf8_lossy(&output.stdout);
+    let messages: Vec<String> = content.lines()
+        .map(|l| l.to_string())
+        .collect();
+
+    Ok(messages)
+}
+
+#[tauri::command]
 fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
     app.notification()
@@ -128,6 +156,7 @@ pub fn run() {
             get_shell_ctx,
             list_fonts,
             send_notification,
+            fetch_claude_session,
             start_monitor,
             stop_monitor,
         ])

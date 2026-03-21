@@ -309,6 +309,16 @@ export const App = () => {
     monitorTargetRef.current = target;
   }, [addWorkspace]);
 
+  const handleViewClaudeSession = useCallback((sshTarget: string, project: string, sessionId: string) => {
+    if (!activeWs) return;
+    useWorkspaceStore.getState().openClaudeSession(activeWs.id, activeWs.focusedLeafId, sshTarget, project, sessionId);
+  }, [activeWs]);
+
+  const handleResumeClaudeSession = useCallback((sshTarget: string, projectPath: string, sessionId: string) => {
+    const cmd = `ssh -t ${sshTarget} "cd ${projectPath} && claude --resume ${sessionId}"`;
+    addWorkspace(`Claude: ${projectPath.split("/").pop()}`, cmd);
+  }, [addWorkspace]);
+
   const handleCloseMonitor = useCallback(() => {
     if (sidebarMonitor) {
       invoke("stop_monitor", { monitorId: sidebarMonitor.monitorId }).catch(() => {});
@@ -325,6 +335,8 @@ export const App = () => {
         onConnectHost={handleConnectHost}
         monitor={sidebarMonitor}
         onCloseMonitor={handleCloseMonitor}
+        onViewClaudeSession={handleViewClaudeSession}
+        onResumeClaudeSession={handleResumeClaudeSession}
       />
       <div style={styles.terminalArea}>
         {activeWs ? (

@@ -28,6 +28,14 @@ interface MonitorDataEvent {
   error: string | null;
   net: { rx_bytes_per_sec: number; tx_bytes_per_sec: number } | null;
   disks: { mount: string; total_gb: number; used_gb: number; percent: number }[];
+  claude_sessions: {
+    project: string;
+    project_path: string;
+    session_id: string;
+    started_at: string | null;
+    last_activity: string | null;
+    message_count: number;
+  }[];
 }
 
 const COLORS = {
@@ -124,6 +132,14 @@ export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitor
         error: d.error,
         net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec } : null,
         disks: (d.disks ?? []).map((dk) => ({ mount: dk.mount, totalGb: dk.total_gb, usedGb: dk.used_gb, percent: dk.percent })),
+        claudeSessions: (d.claude_sessions ?? []).map((cs: { project: string; project_path: string; session_id: string; started_at: string | null; last_activity: string | null; message_count: number }) => ({
+          project: cs.project,
+          projectPath: cs.project_path,
+          sessionId: cs.session_id,
+          startedAt: cs.started_at,
+          lastActivity: cs.last_activity,
+          messageCount: cs.message_count,
+        })),
       };
 
       useMonitorStore.getState().pushSnapshot(monitorId, snapshot);

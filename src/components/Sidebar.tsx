@@ -4,6 +4,8 @@ import { useNotificationStore } from "../stores/notifications";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
 import { destroyAllTerminals } from "./Terminal";
 import { SidebarMonitor } from "./SidebarMonitor";
+import { SidebarClaude } from "./SidebarClaude";
+import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useState } from "react";
 
 interface SidebarMonitorInfo {
@@ -17,9 +19,11 @@ interface SidebarProps {
   onConnectHost?: (host: SshHost) => void;
   monitor?: SidebarMonitorInfo | null;
   onCloseMonitor?: () => void;
+  onViewClaudeSession?: (sshTarget: string, project: string, sessionId: string) => void;
+  onResumeClaudeSession?: (sshTarget: string, projectPath: string, sessionId: string) => void;
 }
 
-export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor, onCloseMonitor }: SidebarProps) => {
+export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession }: SidebarProps) => {
   const { workspaces, activeId, addWorkspace, removeWorkspace, setActive, renameWorkspace } =
     useWorkspaceStore();
   const infoMap = useWorkspaceInfoStore((s) => s.info);
@@ -30,6 +34,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
 
+  const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
+  const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
   const totalUnread = notifications.filter((n) => !n.read).length;
   const [editName, setEditName] = useState("");
 
@@ -204,6 +210,15 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
         })}
       </div>
 
+
+      {monitor && latestSnapshot && (latestSnapshot.claudeSessions?.length ?? 0) > 0 && (
+        <SidebarClaude
+          sessions={latestSnapshot.claudeSessions}
+          sshTarget={monitor.sshTarget}
+          onViewSession={(project, sessionId) => onViewClaudeSession?.(monitor.sshTarget, project, sessionId)}
+          onResumeSession={(projectPath, sessionId) => onResumeClaudeSession?.(monitor.sshTarget, projectPath, sessionId)}
+        />
+      )}
 
       {monitor && onCloseMonitor && (
         <SidebarMonitor
