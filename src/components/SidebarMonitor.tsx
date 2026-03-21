@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
@@ -83,17 +83,18 @@ const ProgressBar = ({ value, color, label }: { value: number; color: string; la
 const EMPTY_SERIES: MonitorSnapshot[] = [];
 
 export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitorProps) => {
-  const startedRef = useRef(false);
   const series = useMonitorStore((s) => s.series[monitorId]) ?? EMPTY_SERIES;
   const latest = series[series.length - 1] as MonitorSnapshot | undefined;
 
-  // Start monitor on mount
+  // Start monitor on mount; re-start when monitorId changes
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    invoke("start_monitor", { monitorId, sshTarget }).catch(console.error);
+    let active = true;
+    invoke("start_monitor", { monitorId, sshTarget }).catch((err) => {
+      if (active) console.error("start_monitor error:", err);
+    });
 
     return () => {
+      active = false;
       invoke("stop_monitor", { monitorId }).catch(() => {});
       useMonitorStore.getState().clearMonitor(monitorId);
     };

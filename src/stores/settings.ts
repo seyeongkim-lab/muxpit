@@ -3,12 +3,13 @@ import { create } from "zustand";
 interface SettingsState {
   fontSize: number;
   fontFamily: string;
-  theme: "catppuccin-mocha";
+  themeName: string;
 
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
   setFontSize: (size: number) => void;
   setFontFamily: (family: string) => void;
+  setThemeName: (name: string) => void;
 }
 
 const FONT_SIZE_MIN = 8;
@@ -28,7 +29,7 @@ const saved = loadSaved();
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontSize: saved.fontSize ?? 14,
   fontFamily: saved.fontFamily ?? "'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace",
-  theme: "catppuccin-mocha",
+  themeName: saved.themeName ?? "Catppuccin Mocha",
 
   increaseFontSize: () => {
     const next = Math.min(get().fontSize + 1, FONT_SIZE_MAX);
@@ -51,6 +52,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ fontFamily: family });
     saveSettings(get());
   },
+
+  setThemeName: (name: string) => {
+    set({ themeName: name });
+    saveSettings(get());
+  },
 }));
 
 const saveSettings = (state: SettingsState) => {
@@ -60,6 +66,7 @@ const saveSettings = (state: SettingsState) => {
       JSON.stringify({
         fontSize: state.fontSize,
         fontFamily: state.fontFamily,
+        themeName: state.themeName,
       }),
     );
   } catch {}

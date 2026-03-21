@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSettingsStore } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
+import { THEMES } from "../themes";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -20,7 +21,7 @@ const isLikelyMonospace = (name: string) => {
 };
 
 export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
-  const { fontSize, fontFamily, setFontSize, setFontFamily } = useSettingsStore();
+  const { fontSize, fontFamily, themeName, setFontSize, setFontFamily, setThemeName } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
   const [monoOnly, setMonoOnly] = useState(true);
   const [search, setSearch] = useState("");
@@ -58,6 +59,48 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               <button onClick={() => setFontSize(14)} style={styles.resetBtn}>Reset</button>
             </div>
             <div style={styles.hint}>Ctrl+= / Ctrl+- / Ctrl+0</div>
+          </div>
+
+          {/* Theme */}
+          <div style={styles.section}>
+            <label style={styles.label}>Theme</label>
+            <div style={styles.themeGrid}>
+              {THEMES.map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => setThemeName(t.name)}
+                  style={{
+                    ...styles.themeBtn,
+                    ...(themeName === t.name ? styles.themeBtnActive : {}),
+                  }}
+                >
+                  <div style={styles.themePreview}>
+                    {[t.theme.red, t.theme.green, t.theme.yellow, t.theme.blue, t.theme.magenta, t.theme.cyan].map(
+                      (color, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            backgroundColor: color as string,
+                          }}
+                        />
+                      ),
+                    )}
+                  </div>
+                  <span style={{ ...styles.themeName, color: t.theme.foreground as string }}>
+                    {t.name}
+                  </span>
+                  <span
+                    style={{
+                      ...styles.themeBg,
+                      backgroundColor: t.theme.background as string,
+                    }}
+                  />
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Font Family */}
@@ -177,6 +220,16 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#a6adc8", fontSize: 13, padding: "6px 12px", cursor: "pointer", textAlign: "left" as const,
   },
   fontBtnActive: { borderColor: "#89b4fa", color: "#cdd6f4", backgroundColor: "#313244" },
+  themeGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 },
+  themeBtn: {
+    position: "relative" as const, overflow: "hidden",
+    background: "#1e1e2e", border: "1px solid transparent", borderRadius: 6,
+    padding: "8px 10px", cursor: "pointer", display: "flex", flexDirection: "column" as const, gap: 4, textAlign: "left" as const,
+  },
+  themeBtnActive: { borderColor: "#89b4fa" },
+  themePreview: { display: "flex", gap: 3 },
+  themeName: { fontSize: 11, fontWeight: 500 },
+  themeBg: { position: "absolute" as const, inset: 0, zIndex: -1, borderRadius: 6 },
   empty: { color: "#585b70", fontSize: 12, padding: 12, textAlign: "center" as const },
   preview: {
     background: "#1e1e2e", border: "1px solid #313244", borderRadius: 4,
