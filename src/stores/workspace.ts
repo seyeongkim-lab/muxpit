@@ -39,6 +39,7 @@ export interface ClaudeSessionNode {
   sshTarget: string;
   project: string;
   sessionId: string;
+  monitorId: string;
 }
 
 export type LayoutNode = SplitNode | LeafNode | BrowserNode | MonitorNode | ClaudeSessionNode;
@@ -85,6 +86,7 @@ interface SavedClaudeSession {
   sshTarget: string;
   project: string;
   sessionId: string;
+  monitorId: string;
 }
 
 type SavedLayout = SavedLeaf | SavedBrowser | SavedSplit | SavedMonitor | SavedClaudeSession;
@@ -123,7 +125,7 @@ interface WorkspaceState {
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => void;
 
   openMonitor: (workspaceId: string, leafId: string, sshTarget: string) => string;
-  openClaudeSession: (workspaceId: string, leafId: string, sshTarget: string, project: string, sessionId: string) => string;
+  openClaudeSession: (workspaceId: string, leafId: string, sshTarget: string, project: string, sessionId: string, monitorId: string) => string;
 
   // Session persistence
   saveSession: () => void;
@@ -235,7 +237,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           direction: "horizontal",
           ratio: 0.5,
           children: [
-            { type: "leaf", id: leafId, ptyId: (findLeaf(w.layout, leafId))?.ptyId ?? null },
+            preserveLeaf(w.layout, leafId),
             { type: "browser", id: browserId, url },
           ],
         };
@@ -256,7 +258,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           direction: "vertical",
           ratio: 0.7,
           children: [
-            { type: "leaf", id: leafId, ptyId: (findLeaf(w.layout, leafId))?.ptyId ?? null },
+            preserveLeaf(w.layout, leafId),
             { type: "monitor", id: monitorNodeId, sshTarget, monitorId },
           ],
         };
@@ -266,7 +268,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return monitorId;
   },
 
-  openClaudeSession: (workspaceId: string, leafId: string, sshTarget: string, project: string, sessionId: string) => {
+  openClaudeSession: (workspaceId: string, leafId: string, sshTarget: string, project: string, sessionId: string, monitorId: string) => {
     const claudeNodeId = genId();
     set((s) => ({
       workspaces: s.workspaces.map((w) => {
@@ -277,8 +279,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           direction: "horizontal",
           ratio: 0.5,
           children: [
-            { type: "leaf", id: leafId, ptyId: (findLeaf(w.layout, leafId))?.ptyId ?? null },
-            { type: "claudeSession", id: claudeNodeId, sshTarget, project, sessionId },
+            preserveLeaf(w.layout, leafId),
+            { type: "claudeSession", id: claudeNodeId, sshTarget, project, sessionId, monitorId },
           ],
         };
         return { ...w, layout: replaceNode(w.layout, leafId, splitNode) };
@@ -343,7 +345,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           direction,
           ratio: 0.5,
           children: [
-            { type: "leaf", id: leafId, ptyId: (findLeaf(w.layout, leafId))?.ptyId ?? null },
+            preserveLeaf(w.layout, leafId),
             { type: "leaf", id: newLeafId, ptyId: null, cloneFromPtyId: (findLeaf(w.layout, leafId))?.ptyId ?? undefined },
           ],
         };
@@ -402,7 +404,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command };
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, monitorId: node.monitorId };
-      if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, project: node.project, sessionId: node.sessionId };
+      if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, project: node.project, sessionId: node.sessionId, monitorId: node.monitorId };
       return {
         type: "split",
         id: node.id,
@@ -440,7 +442,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
         // Monitor nodes are now sidebar-based; restore as plain leaf
         if (node.type === "monitor") return { type: "leaf", id: node.id, ptyId: null };
-        if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, project: node.project, sessionId: node.sessionId };
+        // ClaudeSession nodes need active SSH connection; restore as plain leaf
+        if (node.type === "claudeSession") return { type: "leaf", id: node.id, ptyId: null };
         return {
           type: "split",
           id: node.id,
@@ -488,6 +491,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }));
   },
 }));
+
+// Helper: get a leaf with all its fields preserved (command, sshCommand, etc.)
+const preserveLeaf = (tree: LayoutNode, id: string): LeafNode => {
+  const existing = findLeaf(tree, id);
+  if (existing) return { ...existing };
+  return { type: "leaf", id, ptyId: null };
+};
 
 // Helper: find a leaf node by id
 const findLeaf = (node: LayoutNode, id: string): LeafNode | null => {

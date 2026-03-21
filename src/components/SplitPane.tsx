@@ -24,7 +24,7 @@ export const SplitPane = ({ node, workspaceId }: SplitPaneProps) => {
   }
 
   if (node.type === "claudeSession") {
-    return <ClaudeSessionPane key={node.id} id={node.id} sshTarget={node.sshTarget} project={node.project} sessionId={node.sessionId} />;
+    return <ClaudeSessionPane key={node.id} id={node.id} sshTarget={node.sshTarget} project={node.project} sessionId={node.sessionId} monitorId={node.monitorId} />;
   }
 
   return (
