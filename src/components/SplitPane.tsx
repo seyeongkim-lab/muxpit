@@ -3,6 +3,7 @@ import { LayoutNode, useWorkspaceStore } from "../stores/workspace";
 import { TerminalLeaf } from "./Terminal";
 import { BrowserPane } from "./BrowserPane";
 import { MonitorPane } from "./MonitorPane";
+import { ClaudeSessionPane } from "./ClaudeSessionPane";
 
 interface SplitPaneProps {
   node: LayoutNode;
@@ -20,6 +21,10 @@ export const SplitPane = ({ node, workspaceId }: SplitPaneProps) => {
 
   if (node.type === "monitor") {
     return <MonitorPane key={node.id} id={node.id} sshTarget={node.sshTarget} monitorId={node.monitorId} />;
+  }
+
+  if (node.type === "claudeSession") {
+    return <ClaudeSessionPane key={node.id} id={node.id} sshTarget={node.sshTarget} project={node.project} sessionId={node.sessionId} />;
   }
 
   return (

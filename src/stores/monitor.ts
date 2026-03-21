@@ -20,6 +20,15 @@ export interface DiskInfo {
   percent: number;
 }
 
+export interface ClaudeSessionInfo {
+  project: string;
+  projectPath: string;
+  sessionId: string;
+  startedAt: string | null;
+  lastActivity: string | null;
+  messageCount: number;
+}
+
 export interface MonitorSnapshot {
   cpuPercent: number;
   memTotalMb: number;
@@ -32,6 +41,7 @@ export interface MonitorSnapshot {
   error: string | null;
   net: NetInfo | null;
   disks: DiskInfo[];
+  claudeSessions: ClaudeSessionInfo[];
 }
 
 interface MonitorDataState {

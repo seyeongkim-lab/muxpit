@@ -27,6 +27,16 @@ pub struct NetInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeSession {
+    pub project: String,
+    pub project_path: String,
+    pub session_id: String,
+    pub started_at: Option<String>,
+    pub last_activity: Option<String>,
+    pub message_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorData {
     pub monitor_id: String,
     pub cpu_percent: f64,
@@ -40,6 +50,7 @@ pub struct MonitorData {
     pub error: Option<String>,
     pub net: Option<NetInfo>,
     pub disks: Vec<DiskInfo>,
+    pub claude_sessions: Vec<ClaudeSession>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +120,14 @@ unsafe impl Sync for MonitorManager {}
 
 // The collection script sent every tick. Ends with a unique marker.
 const END_MARKER: &str = "===WMUX_END===";
+const CLAUDE_END_MARKER: &str = "===WMUX_CLAUDE_END===";
+
+fn build_claude_script() -> String {
+    format!(
+        r#"if [ -d "$HOME/.claude/projects" ]; then for dir in "$HOME/.claude/projects"/*/; do pdir=$(basename "$dir"); echo "===CPROJ===$pdir"; ls -t "$dir"*.jsonl 2>/dev/null | head -3 | while read f; do sid=$(basename "$f" .jsonl); lines=$(wc -l < "$f" 2>/dev/null | tr -d ' '); first=$(head -1 "$f" 2>/dev/null); last=$(tail -1 "$f" 2>/dev/null); echo "CSESS:$sid:$lines:$first:$last"; done; done; fi; echo '{END}'"#,
+        END = CLAUDE_END_MARKER,
+    )
+}
 
 fn build_collect_script() -> String {
     format!(
@@ -177,6 +196,9 @@ fn run_persistent_monitor(app: &AppHandle, ssh_target: &str, monitor_id: &str, s
         let reader = BufReader::new(stdout);
         let reader = Arc::new(Mutex::new(reader));
         let script = build_collect_script();
+        let claude_script = build_claude_script();
+        let mut tick_count: u32 = 0;
+        let mut cached_claude_sessions: Vec<ClaudeSession> = Vec::new();
 
         // Collection loop on this SSH connection
         loop {
@@ -215,7 +237,35 @@ fn run_persistent_monitor(app: &AppHandle, ssh_target: &str, monitor_id: &str, s
                 break;
             }
 
-            let data = parse_remote_output(&output, monitor_id, &mut prev_cpu, &mut prev_net);
+            // Every 30 ticks (30 seconds), also collect Claude sessions
+            if tick_count % 30 == 0 {
+                if writeln!(stdin, "{}", claude_script).is_ok() && stdin.flush().is_ok() {
+                    let mut claude_output = String::new();
+                    let claude_ok = {
+                        let mut rdr = reader.lock().unwrap();
+                        loop {
+                            let mut line = String::new();
+                            match rdr.read_line(&mut line) {
+                                Ok(0) => break false,
+                                Ok(_) => {
+                                    if line.trim() == CLAUDE_END_MARKER {
+                                        break true;
+                                    }
+                                    claude_output.push_str(&line);
+                                }
+                                Err(_) => break false,
+                            }
+                        }
+                    };
+                    if claude_ok {
+                        cached_claude_sessions = parse_claude_sessions(&claude_output);
+                    }
+                }
+            }
+            tick_count += 1;
+
+            let mut data = parse_remote_output(&output, monitor_id, &mut prev_cpu, &mut prev_net);
+            data.claude_sessions = cached_claude_sessions.clone();
             let _ = app.emit("monitor-data", &data);
 
             // Sleep 1 second, checking stop flag every 250ms
@@ -350,6 +400,7 @@ fn parse_remote_output(text: &str, monitor_id: &str, prev_cpu: &mut Option<CpuSn
         error: None,
         net,
         disks,
+        claude_sessions: vec![],
     }
 }
 
@@ -634,6 +685,70 @@ fn parse_size_to_gb(s: &str) -> f64 {
     num.parse::<f64>().unwrap_or(0.0) * unit
 }
 
+fn parse_claude_sessions(text: &str) -> Vec<ClaudeSession> {
+    let mut sessions = Vec::new();
+    let mut current_project = String::new();
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with("===CPROJ===") {
+            current_project = line.trim_start_matches("===CPROJ===").to_string();
+        } else if line.starts_with("CSESS:") {
+            let parts: Vec<&str> = line.splitn(5, ':').collect();
+            // CSESS:session_id:line_count:first_json:last_json
+            if parts.len() >= 3 {
+                let session_id = parts[1].to_string();
+                let message_count: u32 = parts[2].parse().unwrap_or(0);
+
+                let started_at = if parts.len() > 3 {
+                    extract_timestamp(parts[3])
+                } else {
+                    None
+                };
+                let last_activity = if parts.len() > 4 {
+                    extract_timestamp(parts[4])
+                } else {
+                    None
+                };
+
+                let project_path = decode_project_path(&current_project);
+
+                sessions.push(ClaudeSession {
+                    project: current_project.clone(),
+                    project_path,
+                    session_id,
+                    started_at,
+                    last_activity,
+                    message_count,
+                });
+            }
+        }
+    }
+    sessions
+}
+
+fn extract_timestamp(json_str: &str) -> Option<String> {
+    // Simple extraction: find "timestamp":"..." in JSON
+    if let Some(idx) = json_str.find("\"timestamp\":\"") {
+        let start = idx + "\"timestamp\":\"".len();
+        if let Some(end) = json_str[start..].find('"') {
+            return Some(json_str[start..start + end].to_string());
+        }
+    }
+    None
+}
+
+fn decode_project_path(encoded: &str) -> String {
+    // Claude encodes project paths by replacing path separators with '-'
+    // e.g., "home-ubuntu-projects-myapp" -> "/home/ubuntu/projects/myapp"
+    let result: String = encoded.chars().map(|c| if c == '-' { '/' } else { c }).collect();
+    if result.is_empty() {
+        encoded.to_string()
+    } else {
+        format!("/{}", result)
+    }
+}
+
 fn error_data(monitor_id: &str, msg: &str) -> MonitorData {
     MonitorData {
         monitor_id: monitor_id.to_string(),
@@ -651,5 +766,6 @@ fn error_data(monitor_id: &str, msg: &str) -> MonitorData {
         error: Some(msg.to_string()),
         net: None,
         disks: vec![],
+        claude_sessions: vec![],
     }
 }
