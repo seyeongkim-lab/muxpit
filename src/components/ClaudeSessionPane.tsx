@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "../stores/workspace";
 
 interface ClaudeSessionPaneProps {
@@ -7,6 +8,7 @@ interface ClaudeSessionPaneProps {
   sshTarget: string;
   project: string;
   sessionId: string;
+  monitorId: string;
 }
 
 interface MessageEntry {
@@ -45,11 +47,12 @@ const extractText = (content: string | { type: string; text?: string }[] | undef
     .join("\n");
 };
 
-const parseJournalEntries = (raw: string): MessageEntry[] => {
+const parseJournalEntries = (raw: string | string[]): MessageEntry[] => {
   const messages: MessageEntry[] = [];
-  const lines = raw.split("\n").filter((l) => l.trim());
+  const lines = Array.isArray(raw) ? raw : raw.split("\n");
+  const filtered = lines.filter((l) => l.trim());
 
-  for (const line of lines) {
+  for (const line of filtered) {
     try {
       const entry: JournalEntry = JSON.parse(line);
       if (entry.type === "human" || entry.type === "assistant") {
@@ -70,38 +73,55 @@ const parseJournalEntries = (raw: string): MessageEntry[] => {
   return messages;
 };
 
-export const ClaudeSessionPane = ({ id, sshTarget, project, sessionId }: ClaudeSessionPaneProps) => {
+export const ClaudeSessionPane = ({ id, sshTarget, project, sessionId, monitorId }: ClaudeSessionPaneProps) => {
   const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const requestIdRef = useRef<string>("");
 
+  // Request session content via monitor's SSH connection
   useEffect(() => {
     let active = true;
+    const reqId = `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    requestIdRef.current = reqId;
 
-    const fetchSession = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const raw = await invoke<string>("fetch_claude_session", {
-          sshTarget,
-          project,
-          sessionId,
-        });
-        if (!active) return;
-        const parsed = parseJournalEntries(raw);
-        setMessages(parsed);
-      } catch (err) {
-        if (!active) return;
+    setLoading(true);
+    setError(null);
+
+    // Listen for response
+    const unlisten = listen<{ request_id: string; lines: string[]; error: string | null }>(
+      "claude-session-content",
+      (event) => {
+        if (!active || event.payload.request_id !== reqId) return;
+        if (event.payload.error) {
+          setError(event.payload.error);
+        } else {
+          const parsed = parseJournalEntries(event.payload.lines);
+          setMessages(parsed);
+        }
+        setLoading(false);
+      },
+    );
+
+    // Send request through monitor's SSH connection
+    invoke("request_session_content", {
+      monitorId,
+      project,
+      sessionId,
+      requestId: reqId,
+    }).catch((err) => {
+      if (active) {
         setError(String(err));
-      } finally {
-        if (active) setLoading(false);
+        setLoading(false);
       }
-    };
+    });
 
-    fetchSession();
-    return () => { active = false; };
-  }, [sshTarget, project, sessionId]);
+    return () => {
+      active = false;
+      unlisten.then((fn) => fn());
+    };
+  }, [monitorId, project, sessionId]);
 
   // Scroll to bottom when messages load
   useEffect(() => {
@@ -111,14 +131,10 @@ export const ClaudeSessionPane = ({ id, sshTarget, project, sessionId }: ClaudeS
   }, [messages]);
 
   const handleClose = useCallback(() => {
-    // Find the workspace containing this node and close it
     const state = useWorkspaceStore.getState();
-    for (const ws of state.workspaces) {
-      const leaves = state.workspaces.length; // just trigger close
-      if (leaves) {
-        state.closeLeaf(ws.id, id);
-        break;
-      }
+    const activeId = state.activeId;
+    if (activeId) {
+      state.closeLeaf(activeId, id);
     }
   }, [id]);
 

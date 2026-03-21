@@ -119,6 +119,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: COLORS.bg,
     fontSize: 13,
     fontFamily: "'JetBrains Mono', monospace",
+    flexShrink: 0,
   },
   header: {
     display: "flex",
@@ -140,7 +141,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   body: {
     padding: "4px 0",
-    maxHeight: 200,
+    maxHeight: 120,
     overflowY: "auto" as const,
   },
   projectRow: {

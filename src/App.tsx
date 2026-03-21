@@ -21,6 +21,7 @@ const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
   return null;
 };
 
+
 // Parse "user@host" from SSH command like: ssh user@host -t bash, "C:\...\ssh.exe" user@host
 const parseSshTarget = (cmd: string): string | null => {
   const parts = cmd.split(/\s+/);
@@ -56,11 +57,10 @@ export const App = () => {
 
   // Auto-detect SSH on focused pane and show sidebar monitor (poll every 5s)
   const monitorTargetRef = useRef<string | null>(null);
-  const focusedLeafId = activeWs?.focusedLeafId;
   const activeWsId = activeWs?.id;
 
   useEffect(() => {
-    if (!activeWsId || !focusedLeafId) {
+    if (!activeWsId) {
       // No active workspace — stop monitor
       monitorTargetRef.current = null;
       setSidebarMonitor((prev) => {
@@ -72,18 +72,60 @@ export const App = () => {
 
     let cancelled = false;
 
-    const setMonitorTarget = (target: string | null) => {
+    const checkSsh = async () => {
       if (cancelled) return;
 
-      if (target) {
-        if (target !== monitorTargetRef.current) {
-          monitorTargetRef.current = target;
-          setSidebarMonitor((prev) => {
-            if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
-            return { monitorId: `mon-${Date.now()}`, sshTarget: target };
-          });
+      const state = useWorkspaceStore.getState();
+      const ws = state.workspaces.find((w) => w.id === activeWsId);
+      if (!ws) return;
+
+      // Search all leaves in the workspace for an SSH connection
+      const allLeaves: LeafNode[] = [];
+      const collectLeaves = (node: LayoutNode) => {
+        if (node.type === "leaf") allLeaves.push(node);
+        if (node.type === "split") { collectLeaves(node.children[0]); collectLeaves(node.children[1]); }
+      };
+      collectLeaves(ws.layout);
+
+      // Try focused leaf first
+      const focused = allLeaves.find((l) => l.id === ws.focusedLeafId);
+      const ordered = focused ? [focused, ...allLeaves.filter((l) => l !== focused)] : allLeaves;
+
+      for (const leaf of ordered) {
+        if (!leaf.ptyId) continue;
+
+        let target: string | null = null;
+
+        if (leaf.command && leaf.command.toLowerCase().includes("ssh")) {
+          target = parseSshTarget(leaf.command);
         }
-      } else if (monitorTargetRef.current !== null) {
+
+        if (!target) {
+          try {
+            const ctx = await invoke<{ ssh_command: string | null }>("get_shell_ctx", { id: leaf.ptyId });
+            if (!cancelled && ctx.ssh_command) target = parseSshTarget(ctx.ssh_command);
+          } catch {}
+        }
+
+        if (cancelled) return;
+
+        if (target) {
+          if (target !== monitorTargetRef.current) {
+            monitorTargetRef.current = target;
+            setSidebarMonitor((prev) => {
+              if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+              return { monitorId: `mon-${Date.now()}`, sshTarget: target! };
+            });
+          }
+          return; // Found SSH — done
+        }
+      }
+
+      // No SSH found in any leaf — only clear if we explicitly have no SSH leaves
+      // (don't clear if leaves exist but just don't have ptyId yet)
+      const hasAnyPty = allLeaves.some((l) => l.ptyId);
+      if (hasAnyPty && monitorTargetRef.current !== null) {
+        // All PTYs checked, none are SSH — clear monitor
         monitorTargetRef.current = null;
         setSidebarMonitor((prev) => {
           if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
@@ -92,41 +134,11 @@ export const App = () => {
       }
     };
 
-    const checkSsh = async () => {
-      if (cancelled) return;
-
-      const state = useWorkspaceStore.getState();
-      const ws = state.workspaces.find((w) => w.id === activeWsId);
-      if (!ws) { setMonitorTarget(null); return; }
-
-      const leaf = findLeafNode(ws.layout, focusedLeafId);
-      if (!leaf || leaf.type !== "leaf" || !leaf.ptyId) {
-        setMonitorTarget(null);
-        return;
-      }
-
-      let target: string | null = null;
-
-      // Check leaf.command first (set when connecting via SSH host registry)
-      if (leaf.command && leaf.command.toLowerCase().includes("ssh")) {
-        target = parseSshTarget(leaf.command);
-      }
-      // Fallback: live SSH process detection (for manually typed ssh commands)
-      if (!target) {
-        try {
-          const ctx = await invoke<{ ssh_command: string | null }>("get_shell_ctx", { id: leaf.ptyId });
-          if (!cancelled && ctx.ssh_command) target = parseSshTarget(ctx.ssh_command);
-        } catch {}
-      }
-
-      setMonitorTarget(target);
-    };
-
-    // Immediate check on workspace/leaf change, then poll every 5s
+    // Immediate check on workspace change, then poll every 5s
     checkSsh();
     const timer = setInterval(checkSsh, 5000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [activeWsId, focusedLeafId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeWsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restore session or create initial workspace
   useEffect(() => {
@@ -310,9 +322,9 @@ export const App = () => {
   }, [addWorkspace]);
 
   const handleViewClaudeSession = useCallback((sshTarget: string, project: string, sessionId: string) => {
-    if (!activeWs) return;
-    useWorkspaceStore.getState().openClaudeSession(activeWs.id, activeWs.focusedLeafId, sshTarget, project, sessionId);
-  }, [activeWs]);
+    if (!activeWs || !sidebarMonitor) return;
+    useWorkspaceStore.getState().openClaudeSession(activeWs.id, activeWs.focusedLeafId, sshTarget, project, sessionId, sidebarMonitor.monitorId);
+  }, [activeWs, sidebarMonitor]);
 
   const handleResumeClaudeSession = useCallback((sshTarget: string, projectPath: string, sessionId: string) => {
     const cmd = `ssh -t ${sshTarget} "cd ${projectPath} && claude --resume ${sessionId}"`;

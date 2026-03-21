@@ -68,8 +68,25 @@ struct NetSnapshot {
     timestamp_ms: u64,
 }
 
+/// A request to fetch a file via the monitor's SSH connection.
+#[derive(Clone)]
+struct FetchRequest {
+    project: String,
+    session_id: String,
+    request_id: String,
+}
+
+/// Response emitted via "claude-session-content" event.
+#[derive(Clone, Serialize)]
+struct SessionContentEvent {
+    request_id: String,
+    lines: Vec<String>,
+    error: Option<String>,
+}
+
 struct MonitorSession {
     stop_flag: Arc<Mutex<bool>>,
+    pending_fetch: Arc<Mutex<Option<FetchRequest>>>,
 }
 
 pub struct MonitorManager {
@@ -93,15 +110,30 @@ impl MonitorManager {
 
         let stop_flag = Arc::new(Mutex::new(false));
         let stop_flag_clone = stop_flag.clone();
+        let pending_fetch: Arc<Mutex<Option<FetchRequest>>> = Arc::new(Mutex::new(None));
+        let pending_fetch_clone = pending_fetch.clone();
         let mid = monitor_id.clone();
 
-        sessions.insert(monitor_id, MonitorSession { stop_flag });
+        sessions.insert(monitor_id, MonitorSession { stop_flag, pending_fetch });
 
         // Spawn persistent SSH connection thread
         std::thread::spawn(move || {
-            run_persistent_monitor(&app, &ssh_target, &mid, &stop_flag_clone);
+            run_persistent_monitor(&app, &ssh_target, &mid, &stop_flag_clone, &pending_fetch_clone);
         });
 
+        Ok(())
+    }
+
+    pub fn request_session_content(&self, monitor_id: Option<&str>, project: String, session_id: String, request_id: String) -> Result<(), String> {
+        let sessions = self.sessions.lock().unwrap();
+        // Try specified monitor first, then fall back to any active monitor
+        let session = if let Some(mid) = monitor_id {
+            sessions.get(mid)
+        } else {
+            None
+        }.or_else(|| sessions.values().next());
+        let session = session.ok_or_else(|| "No active monitor session".to_string())?;
+        *session.pending_fetch.lock().unwrap() = Some(FetchRequest { project, session_id, request_id });
         Ok(())
     }
 
@@ -137,7 +169,7 @@ fn build_collect_script() -> String {
 }
 
 /// Run a persistent SSH session, sending collection commands every 1 second
-fn run_persistent_monitor(app: &AppHandle, ssh_target: &str, monitor_id: &str, stop_flag: &Arc<Mutex<bool>>) {
+fn run_persistent_monitor(app: &AppHandle, ssh_target: &str, monitor_id: &str, stop_flag: &Arc<Mutex<bool>>, pending_fetch: &Arc<Mutex<Option<FetchRequest>>>) {
     let mut prev_cpu: Option<CpuSnapshot> = None;
     let mut prev_net: Option<NetSnapshot> = None;
 
@@ -267,6 +299,42 @@ fn run_persistent_monitor(app: &AppHandle, ssh_target: &str, monitor_id: &str, s
             let mut data = parse_remote_output(&output, monitor_id, &mut prev_cpu, &mut prev_net);
             data.claude_sessions = cached_claude_sessions.clone();
             let _ = app.emit("monitor-data", &data);
+
+            // Check for pending session content fetch
+            let fetch_req = pending_fetch.lock().unwrap().take();
+            if let Some(req) = fetch_req {
+                let fetch_marker = "===WMUX_FETCH_END===";
+                let cat_cmd = format!(
+                    "cat \"$HOME/.claude/projects/{}/{}.jsonl\" 2>/dev/null; echo '{}'",
+                    req.project, req.session_id, fetch_marker
+                );
+                if writeln!(stdin, "{}", cat_cmd).is_ok() && stdin.flush().is_ok() {
+                    let mut fetch_output = String::new();
+                    let fetch_ok = {
+                        let mut rdr = reader.lock().unwrap();
+                        loop {
+                            let mut line = String::new();
+                            match rdr.read_line(&mut line) {
+                                Ok(0) => break false,
+                                Ok(_) => {
+                                    if line.trim() == fetch_marker {
+                                        break true;
+                                    }
+                                    fetch_output.push_str(&line);
+                                }
+                                Err(_) => break false,
+                            }
+                        }
+                    };
+                    let event = if fetch_ok {
+                        let lines: Vec<String> = fetch_output.lines().map(|l| l.to_string()).collect();
+                        SessionContentEvent { request_id: req.request_id, lines, error: None }
+                    } else {
+                        SessionContentEvent { request_id: req.request_id, lines: vec![], error: Some("Failed to read session".into()) }
+                    };
+                    let _ = app.emit("claude-session-content", &event);
+                }
+            }
 
             // Sleep 1 second, checking stop flag every 250ms
             for _ in 0..4 {
