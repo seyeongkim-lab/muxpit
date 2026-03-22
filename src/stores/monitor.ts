@@ -11,6 +11,7 @@ export interface ProcessInfo {
 export interface NetInfo {
   rxBytesPerSec: number;
   txBytesPerSec: number;
+  linkSpeedMbps: number | null;
 }
 
 export interface DiskInfo {

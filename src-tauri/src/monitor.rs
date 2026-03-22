@@ -24,6 +24,8 @@ pub struct ProcessInfo {
 pub struct NetInfo {
     pub rx_bytes_per_sec: u64,
     pub tx_bytes_per_sec: u64,
+    /// NIC link speed in Mbps (e.g. 1000 for 1Gbps, 10000 for 10Gbps). None if unknown.
+    pub link_speed_mbps: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,7 +165,7 @@ fn build_claude_script() -> String {
 
 fn build_collect_script() -> String {
     format!(
-        r#"OS=$(uname -s); echo "===OS===$OS"; if [ "$OS" = "Darwin" ]; then echo '===CPU===' && top -l 1 -n 0 -s 0 2>/dev/null | grep 'CPU usage' && echo '===MEM===' && vm_stat 2>/dev/null && echo "===MEMTOTAL===$(sysctl -n hw.memsize 2>/dev/null)" && echo '===LOAD===' && sysctl -n vm.loadavg 2>/dev/null && echo '===NET===' && netstat -ib 2>/dev/null | head -20 && echo '===DISK===' && df -h 2>/dev/null | grep '^/dev/' && echo '===PS===' && ps aux -r 2>/dev/null | head -11 && echo '===HOST===' && hostname; else echo '===STAT===' && head -1 /proc/stat && echo '===MEM===' && head -5 /proc/meminfo && echo '===LOAD===' && cat /proc/loadavg && echo '===NET===' && cat /proc/net/dev && echo '===DISK===' && df -h -x tmpfs -x squashfs -x devtmpfs -x overlay -x efivarfs 2>/dev/null | tail -n +2 && echo '===PS===' && ps aux --sort=-%cpu 2>/dev/null | head -11 && echo '===HOST===' && hostname -f 2>/dev/null || hostname; fi; echo '{END_MARKER}'"#,
+        r#"OS=$(uname -s); echo "===OS===$OS"; if [ "$OS" = "Darwin" ]; then echo '===CPU===' && top -l 1 -n 0 -s 0 2>/dev/null | grep 'CPU usage' && echo '===MEM===' && vm_stat 2>/dev/null && echo "===MEMTOTAL===$(sysctl -n hw.memsize 2>/dev/null)" && echo '===LOAD===' && sysctl -n vm.loadavg 2>/dev/null && echo '===NET===' && netstat -ib 2>/dev/null | head -20 && echo '===NETSPEED===' && for svc in $(networksetup -listallnetworkservices 2>/dev/null | tail -n +2); do info=$(networksetup -getinfo "$svc" 2>/dev/null); ip=$(echo "$info" | grep '^IP address:' | head -1 | awk -F': ' '{{print $2}}'); if [ -n "$ip" ] && [ "$ip" != "none" ]; then media=$(networksetup -getMedia "$svc" 2>/dev/null | head -1); echo "$svc:$media"; fi; done && echo '===DISK===' && df -h 2>/dev/null | grep '^/dev/' && echo '===PS===' && ps aux -r 2>/dev/null | head -11 && echo '===HOST===' && hostname; else echo '===STAT===' && head -1 /proc/stat && echo '===MEM===' && head -5 /proc/meminfo && echo '===LOAD===' && cat /proc/loadavg && echo '===NET===' && cat /proc/net/dev && echo '===NETSPEED===' && for iface in /sys/class/net/*/; do n=$(basename "$iface"); [ "$n" != "lo" ] && s=$(cat "$iface/speed" 2>/dev/null) && [ -n "$s" ] && [ "$s" -gt 0 ] 2>/dev/null && echo "$n:$s"; done && echo '===DISK===' && df -h -x tmpfs -x squashfs -x devtmpfs -x overlay -x efivarfs 2>/dev/null | tail -n +2 && echo '===PS===' && ps aux --sort=-%cpu 2>/dev/null | head -11 && echo '===HOST===' && hostname -f 2>/dev/null || hostname; fi; echo '{END_MARKER}'"#,
         END_MARKER = END_MARKER,
     )
 }
@@ -418,6 +420,10 @@ fn parse_remote_output(text: &str, monitor_id: &str, prev_cpu: &mut Option<CpuSn
         (cpu, total, used, pct, load, procs)
     };
 
+    // Network speed detection
+    let link_speed_mbps = sections.get("NETSPEED")
+        .and_then(|s| parse_net_speed(s, is_macos));
+
     // Network
     let net = if let Some(net_text) = sections.get("NET") {
         let (rx, tx) = if is_macos { parse_macos_net(net_text) } else { parse_linux_net(net_text) };
@@ -431,7 +437,7 @@ fn parse_remote_output(text: &str, monitor_id: &str, prev_cpu: &mut Option<CpuSn
             if dt > 0 {
                 let rx_rate = (current.rx_bytes.saturating_sub(prev.rx_bytes) * 1000) / dt;
                 let tx_rate = (current.tx_bytes.saturating_sub(prev.tx_bytes) * 1000) / dt;
-                Some(NetInfo { rx_bytes_per_sec: rx_rate, tx_bytes_per_sec: tx_rate })
+                Some(NetInfo { rx_bytes_per_sec: rx_rate, tx_bytes_per_sec: tx_rate, link_speed_mbps })
             } else {
                 None
             }
@@ -708,6 +714,45 @@ fn parse_macos_net(text: &str) -> (u64, u64) {
         }
     }
     (total_rx, total_tx)
+}
+
+/// Parse NETSPEED section: lines like "eth0:1000" or "Ethernet:1000baseT"
+/// Returns the max link speed in Mbps across all interfaces.
+fn parse_net_speed(text: &str, is_macos: bool) -> Option<u32> {
+    let mut max_speed: u32 = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        if is_macos {
+            // macOS: "Ethernet:1000baseT <full-duplex>" or "Wi-Fi:autoselect"
+            if let Some(media) = line.split(':').nth(1) {
+                let media = media.trim();
+                if let Some(speed) = extract_speed_from_media(media) {
+                    max_speed = max_speed.max(speed);
+                }
+            }
+        } else {
+            // Linux: "eth0:1000" (speed in Mbps from /sys/class/net/*/speed)
+            if let Some(speed_str) = line.split(':').nth(1) {
+                if let Ok(speed) = speed_str.trim().parse::<u32>() {
+                    max_speed = max_speed.max(speed);
+                }
+            }
+        }
+    }
+    if max_speed > 0 { Some(max_speed) } else { None }
+}
+
+/// Extract Mbps from macOS media string like "1000baseT", "100baseTX", "10Gigabit"
+fn extract_speed_from_media(media: &str) -> Option<u32> {
+    let media = media.to_lowercase();
+    if media.contains("10gbase") || media.contains("10gigabit") { return Some(10000); }
+    if media.contains("5gbase") { return Some(5000); }
+    if media.contains("2.5gbase") { return Some(2500); }
+    if media.contains("1000base") || media.contains("gigabit") { return Some(1000); }
+    if media.contains("100base") { return Some(100); }
+    if media.contains("10base") { return Some(10); }
+    None
 }
 
 /// Parse df output: "Filesystem Size Used Avail Use% Mounted"

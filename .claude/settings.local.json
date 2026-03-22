@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(rtk pnpm:*)"
+      "Bash(rtk pnpm:*)",
+      "Bash(find /c/Users/one/Projects/wmux/src -type f \\\\\\(-name *.ts -o -name *.tsx \\\\\\))",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:dev.to)"
     ]
   }
 }

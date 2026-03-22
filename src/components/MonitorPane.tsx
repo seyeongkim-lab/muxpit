@@ -28,7 +28,7 @@ interface MonitorDataEvent {
   hostname: string;
   timestamp: number;
   error: string | null;
-  net: { rx_bytes_per_sec: number; tx_bytes_per_sec: number } | null;
+  net: { rx_bytes_per_sec: number; tx_bytes_per_sec: number; link_speed_mbps: number | null } | null;
   disks: { mount: string; total_gb: number; used_gb: number; percent: number }[];
 }
 
@@ -93,7 +93,7 @@ export const MonitorPane = ({ id, sshTarget, monitorId }: MonitorPaneProps) => {
         hostname: d.hostname,
         timestamp: d.timestamp,
         error: d.error,
-        net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec } : null,
+        net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec, linkSpeedMbps: d.net.link_speed_mbps } : null,
         disks: (d.disks ?? []).map((dk) => ({ mount: dk.mount, totalGb: dk.total_gb, usedGb: dk.used_gb, percent: dk.percent })),
         claudeSessions: [],
       };
