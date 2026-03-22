@@ -26,7 +26,7 @@ interface MonitorDataEvent {
   hostname: string;
   timestamp: number;
   error: string | null;
-  net: { rx_bytes_per_sec: number; tx_bytes_per_sec: number } | null;
+  net: { rx_bytes_per_sec: number; tx_bytes_per_sec: number; link_speed_mbps: number | null } | null;
   disks: { mount: string; total_gb: number; used_gb: number; percent: number }[];
   claude_sessions: {
     project: string;
@@ -53,9 +53,9 @@ const COLORS = {
 };
 
 // SVG sparkline from time series data
-const Sparkline = ({ data, color, height = 28, autoMax }: { data: number[]; color: string; height?: number; autoMax?: boolean }) => {
+const Sparkline = ({ data, color, height = 28, autoMax, fixedMax }: { data: number[]; color: string; height?: number; autoMax?: boolean; fixedMax?: number }) => {
   if (data.length < 2) return null;
-  const max = autoMax ? Math.max(...data, 1) : 100;
+  const max = fixedMax ? fixedMax : autoMax ? Math.max(...data, 1) : 100;
   const width = 180;
   const points = data.map((v, i) => {
     const x = (i / (data.length - 1)) * width;
@@ -130,7 +130,7 @@ export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitor
         hostname: d.hostname,
         timestamp: d.timestamp,
         error: d.error,
-        net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec } : null,
+        net: d.net ? { rxBytesPerSec: d.net.rx_bytes_per_sec, txBytesPerSec: d.net.tx_bytes_per_sec, linkSpeedMbps: d.net.link_speed_mbps } : null,
         disks: (d.disks ?? []).map((dk) => ({ mount: dk.mount, totalGb: dk.total_gb, usedGb: dk.used_gb, percent: dk.percent })),
         claudeSessions: (d.claude_sessions ?? []).map((cs: { project: string; project_path: string; session_id: string; started_at: string | null; last_activity: string | null; message_count: number }) => ({
           project: cs.project,
@@ -183,18 +183,26 @@ export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitor
           </div>
 
           {/* Network */}
-          {latest.net && (
-            <div style={styles.netSection}>
-              <div style={styles.netRow}>
-                <span style={{ color: COLORS.teal, fontSize: 12 }}>NET</span>
-                <span style={{ color: COLORS.subtext, fontSize: 11 }}>
-                  {"▼ "}{formatBytes(latest.net.rxBytesPerSec)}{"  ▲ "}{formatBytes(latest.net.txBytesPerSec)}
-                </span>
+          {latest.net && (() => {
+            const speedMbps = latest.net.linkSpeedMbps;
+            // Convert link speed (Mbps) to bytes/sec for graph max
+            const speedBytesPerSec = speedMbps ? (speedMbps * 1000 * 1000) / 8 : undefined;
+            const formatSpeed = (mbps: number) => mbps >= 1000 ? `${mbps / 1000}G` : `${mbps}M`;
+            return (
+              <div style={styles.netSection}>
+                <div style={styles.netRow}>
+                  <span style={{ color: COLORS.teal, fontSize: 12 }}>
+                    NET{speedMbps ? ` (${formatSpeed(speedMbps)})` : ""}
+                  </span>
+                  <span style={{ color: COLORS.subtext, fontSize: 11 }}>
+                    {"▼ "}{formatBytes(latest.net.rxBytesPerSec)}{"  ▲ "}{formatBytes(latest.net.txBytesPerSec)}
+                  </span>
+                </div>
+                <Sparkline data={rxData} color={COLORS.teal} height={24} fixedMax={speedBytesPerSec} autoMax={!speedBytesPerSec} />
+                <Sparkline data={txData} color={COLORS.yellow} height={24} fixedMax={speedBytesPerSec} autoMax={!speedBytesPerSec} />
               </div>
-              <Sparkline data={rxData} color={COLORS.teal} height={24} autoMax />
-              <Sparkline data={txData} color={COLORS.yellow} height={24} autoMax />
-            </div>
-          )}
+            );
+          })()}
 
           {/* Load average */}
           <div style={styles.loadRow}>
