@@ -160,3 +160,32 @@ export const THEMES: ThemeEntry[] = [
 
 export const getThemeByName = (name: string): ThemeEntry =>
   THEMES.find((t) => t.name === name) ?? THEMES[0];
+
+// Only string-valued theme keys (excludes extendedAnsi which is string[])
+export type ThemeColorKey = Exclude<{
+  [K in keyof ITheme]: ITheme[K] extends string | undefined ? K : never;
+}[keyof ITheme], undefined>;
+
+export const THEME_COLOR_GROUPS: { label: string; keys: ThemeColorKey[] }[] = [
+  {
+    label: "Main",
+    keys: ["background", "foreground", "cursor", "selectionBackground"],
+  },
+  {
+    label: "Standard",
+    keys: ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"],
+  },
+  {
+    label: "Bright",
+    keys: ["brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"],
+  },
+];
+
+export type CustomColors = Record<string, Partial<Record<ThemeColorKey, string>>>;
+
+export const getResolvedTheme = (name: string, customColors: CustomColors): ITheme => {
+  const base = getThemeByName(name).theme;
+  const overrides = customColors[name];
+  if (!overrides) return base;
+  return { ...base, ...overrides };
+};

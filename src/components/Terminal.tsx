@@ -10,7 +10,7 @@ import { useWorkspaceStore } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
-import { getThemeByName } from "../themes";
+import { getResolvedTheme } from "../themes";
 import "@xterm/xterm/css/xterm.css";
 
 interface PtyOutput {
@@ -89,8 +89,8 @@ export const destroyAllTerminals = (leafIds: string[]) => {
 
 // Apply theme changes to all existing terminals in real-time
 useSettingsStore.subscribe((state, prev) => {
-  if (state.themeName !== prev.themeName) {
-    const { theme } = getThemeByName(state.themeName);
+  if (state.themeName !== prev.themeName || state.customColors !== prev.customColors) {
+    const theme = getResolvedTheme(state.themeName, state.customColors);
     terminalInstances.forEach(({ term }) => {
       term.options.theme = theme;
     });
@@ -164,7 +164,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       cursorStyle: "block",
       fontSize: settings.fontSize,
       fontFamily: settings.fontFamily,
-      theme: getThemeByName(settings.themeName).theme,
+      theme: getResolvedTheme(settings.themeName, settings.customColors),
       allowProposedApi: true,
       scrollback: 5000,
     });

@@ -1,15 +1,20 @@
 import { create } from "zustand";
+import type { CustomColors, ThemeColorKey } from "../themes";
 
 interface SettingsState {
   fontSize: number;
   fontFamily: string;
   themeName: string;
+  customColors: CustomColors;
 
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
   setFontSize: (size: number) => void;
   setFontFamily: (family: string) => void;
   setThemeName: (name: string) => void;
+  setCustomColor: (themeName: string, key: ThemeColorKey, color: string) => void;
+  resetCustomColors: (themeName: string) => void;
+  resetSingleColor: (themeName: string, key: ThemeColorKey) => void;
 }
 
 const FONT_SIZE_MIN = 8;
@@ -30,6 +35,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontSize: saved.fontSize ?? 14,
   fontFamily: saved.fontFamily ?? "'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace",
   themeName: saved.themeName ?? "Catppuccin Mocha",
+  customColors: saved.customColors ?? {},
 
   increaseFontSize: () => {
     const next = Math.min(get().fontSize + 1, FONT_SIZE_MAX);
@@ -57,6 +63,38 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ themeName: name });
     saveSettings(get());
   },
+
+  setCustomColor: (themeName: string, key: ThemeColorKey, color: string) => {
+    const prev = get().customColors;
+    set({
+      customColors: {
+        ...prev,
+        [themeName]: { ...prev[themeName], [key]: color },
+      },
+    });
+    saveSettings(get());
+  },
+
+  resetCustomColors: (themeName: string) => {
+    const prev = { ...get().customColors };
+    delete prev[themeName];
+    set({ customColors: prev });
+    saveSettings(get());
+  },
+
+  resetSingleColor: (themeName: string, key: ThemeColorKey) => {
+    const prev = get().customColors;
+    const themeOverrides = { ...prev[themeName] };
+    delete themeOverrides[key];
+    const next = { ...prev };
+    if (Object.keys(themeOverrides).length === 0) {
+      delete next[themeName];
+    } else {
+      next[themeName] = themeOverrides;
+    }
+    set({ customColors: next });
+    saveSettings(get());
+  },
 }));
 
 const saveSettings = (state: SettingsState) => {
@@ -67,6 +105,7 @@ const saveSettings = (state: SettingsState) => {
         fontSize: state.fontSize,
         fontFamily: state.fontFamily,
         themeName: state.themeName,
+        customColors: state.customColors,
       }),
     );
   } catch {}
