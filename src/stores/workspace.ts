@@ -118,6 +118,7 @@ interface WorkspaceState {
 
   // Split operations
   splitLeaf: (workspaceId: string, leafId: string, direction: SplitDirection) => string;
+  splitLeafWithCommand: (workspaceId: string, leafId: string, direction: SplitDirection, command: string) => string;
   closeLeaf: (workspaceId: string, leafId: string) => void;
   setFocusedLeaf: (workspaceId: string, leafId: string) => void;
   setSplitRatio: (workspaceId: string, splitId: string, ratio: number) => void;
@@ -353,6 +354,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           ...w,
           layout: replaceNode(w.layout, leafId, splitNode),
           focusedLeafId: newLeafId,
+        };
+      }),
+    }));
+    return newLeafId;
+  },
+
+  splitLeafWithCommand: (workspaceId: string, leafId: string, direction: SplitDirection, command: string) => {
+    const newLeafId = genId();
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const splitNode: SplitNode = {
+          type: "split",
+          id: genId(),
+          direction,
+          ratio: 0.5,
+          children: [
+            preserveLeaf(w.layout, leafId),
+            { type: "leaf", id: newLeafId, ptyId: null, command },
+          ],
+        };
+        return {
+          ...w,
+          layout: replaceNode(w.layout, leafId, splitNode),
         };
       }),
     }));

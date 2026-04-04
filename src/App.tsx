@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { SplitPane } from "./components/SplitPane";
+import { GridOverview } from "./components/GridOverview";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SshHostPanel } from "./components/SshHostPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
-import { buildSshCommand, type SshHost } from "./stores/sshHosts";
+import { buildSshCommand, buildSshCommandWithRemoteCmd, type SshHost } from "./stores/sshHosts";
 import { useNotificationStore } from "./stores/notifications";
 import { useSettingsStore } from "./stores/settings";
 import { destroyTerminal, destroyAllTerminals } from "./components/Terminal";
@@ -41,6 +42,7 @@ export const App = () => {
   const activeWs = workspaces.find((w) => w.id === activeId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sshPanelOpen, setSshPanelOpen] = useState(false);
+  const [gridView, setGridView] = useState(false);
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string } | null>(null);
 
   const uiFontSize = useSettingsStore((s) => s.fontSize);
@@ -239,6 +241,13 @@ export const App = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeWs) return;
 
+      // Ctrl+Shift+G: toggle grid / single view mode
+      if (e.ctrlKey && e.shiftKey && e.key === "G") {
+        e.preventDefault();
+        setGridView((prev) => !prev);
+        return;
+      }
+
       // Ctrl+Shift+D: split vertical
       if (e.ctrlKey && e.shiftKey && e.key === "D") {
         e.preventDefault();
@@ -306,11 +315,11 @@ export const App = () => {
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [activeWs, workspaces, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser]);
+  }, [activeWs, workspaces, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser, gridView]);
 
   const handleConnectHost = useCallback((host: SshHost) => {
     const cmd = buildSshCommand(host);
-    addWorkspace(host.name, cmd);
+    const wsId = addWorkspace(host.name, cmd);
     // Start monitor immediately — no need to wait for SSH auto-detection
     const target = `${host.user}@${host.host}`;
     const monitorId = `mon-${Date.now()}`;
@@ -319,6 +328,25 @@ export const App = () => {
       return { monitorId, sshTarget: target };
     });
     monitorTargetRef.current = target;
+
+    // Auto-split with Claude if available on remote server
+    (async () => {
+      try {
+        const hasClaude = await invoke<boolean>("check_remote_claude", { sshCommand: cmd });
+        if (!hasClaude) return;
+
+        const state = useWorkspaceStore.getState();
+        const ws = state.workspaces.find((w) => w.id === wsId);
+        if (!ws) return;
+
+        // Get the first leaf ID
+        const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
+        const claudeCmd = buildSshCommandWithRemoteCmd(host, "claude --dangerously-skip-permissions");
+        useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claudeCmd);
+      } catch {
+        // Silently ignore — claude check failure should not affect user
+      }
+    })();
   }, [addWorkspace]);
 
   const handleViewClaudeSession = useCallback((sshTarget: string, project: string, sessionId: string) => {
@@ -349,9 +377,16 @@ export const App = () => {
         onCloseMonitor={handleCloseMonitor}
         onViewClaudeSession={handleViewClaudeSession}
         onResumeClaudeSession={handleResumeClaudeSession}
+        gridView={gridView}
+        onToggleGridView={() => setGridView((prev) => !prev)}
       />
       <div style={styles.terminalArea}>
-        {activeWs ? (
+        {gridView ? (
+          <GridOverview
+            workspaces={workspaces}
+            activeId={activeId}
+          />
+        ) : activeWs ? (
           <SplitPane node={activeWs.layout} workspaceId={activeWs.id} />
         ) : (
           <div style={styles.welcome}>
@@ -361,6 +396,7 @@ export const App = () => {
               <span><b>Ctrl+Shift+T</b> New session</span>
               <span><b>Ctrl+Shift+D</b> Split horizontal</span>
               <span><b>Ctrl+Shift+E</b> Split vertical</span>
+              <span><b>Ctrl+Shift+G</b> Grid overview</span>
               <span><b>H</b> button to manage SSH hosts</span>
             </div>
           </div>
