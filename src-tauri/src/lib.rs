@@ -6,6 +6,7 @@ mod sysinfo;
 use monitor::MonitorManager;
 use pty::PtyManager;
 use sysinfo::{gather_workspace_info, get_listening_ports, get_shell_context, ShellContext, WorkspaceInfo};
+use std::process::{Command, Stdio};
 use tauri::{AppHandle, State};
 
 #[tauri::command]
@@ -107,6 +108,63 @@ fn request_session_content(state: State<'_, MonitorManager>, monitor_id: Option<
 }
 
 #[tauri::command]
+async fn check_remote_claude(ssh_command: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || check_remote_claude_sync(&ssh_command))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))
+}
+
+fn check_remote_claude_sync(ssh_command: &str) -> bool {
+    // Parse the SSH command: "ssh [-p port] [-i key] user@host"
+    let parts: Vec<&str> = ssh_command.split_whitespace().collect();
+    if parts.is_empty() {
+        return false;
+    }
+
+    let mut cmd = Command::new(parts[0]); // "ssh"
+
+    // Forward existing SSH args (port, key, target), skip the "ssh" binary itself
+    let mut i = 1;
+    while i < parts.len() {
+        match parts[i] {
+            "-p" | "-i" => {
+                cmd.arg(parts[i]);
+                if i + 1 < parts.len() {
+                    cmd.arg(parts[i + 1]);
+                    i += 2;
+                    continue;
+                }
+            }
+            _ => {
+                cmd.arg(parts[i]);
+            }
+        }
+        i += 1;
+    }
+
+    // Add batch mode options and the remote check command
+    cmd.args([
+        "-o", "ConnectTimeout=10",
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "command -v claude 2>/dev/null",
+    ]);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+    match cmd.status() {
+        Ok(status) => status.success(),
+        Err(_) => false,
+    }
+}
+
+#[tauri::command]
 fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
     app.notification()
@@ -132,6 +190,7 @@ pub fn run() {
             get_pty_pid,
             get_shell_ctx,
             list_fonts,
+            check_remote_claude,
             send_notification,
             request_session_content,
             start_monitor,

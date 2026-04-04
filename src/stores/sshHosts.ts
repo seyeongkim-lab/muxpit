@@ -89,3 +89,21 @@ export const buildSshCommand = (host: SshHost): string => {
 
   return parts.join(" ");
 };
+
+/** Build an SSH command that executes a remote command (with -t for PTY allocation) */
+export const buildSshCommandWithRemoteCmd = (host: SshHost, remoteCmd: string): string => {
+  const parts: string[] = ["ssh", "-t"];
+
+  if (host.port !== 22) {
+    parts.push("-p", String(host.port));
+  }
+
+  if (host.keyPath) {
+    parts.push("-i", host.keyPath);
+  }
+
+  parts.push(`${host.user}@${host.host}`);
+  parts.push(`"${remoteCmd}"`);
+
+  return parts.join(" ");
+};
