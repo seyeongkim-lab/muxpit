@@ -66,13 +66,11 @@ async fn list_fonts() -> Result<Vec<String>, String> {
         .map_err(|e| format!("Task join error: {e}"))
 }
 
+#[cfg(windows)]
 fn list_fonts_sync() -> Vec<String> {
     let mut cmd = std::process::Command::new("powershell");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x08000000);
     let output = cmd.args([
             "-NoProfile",
             "-Command",
@@ -87,6 +85,28 @@ fn list_fonts_sync() -> Vec<String> {
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
                 .collect()
+        }
+        _ => vec![],
+    }
+}
+
+#[cfg(unix)]
+fn list_fonts_sync() -> Vec<String> {
+    // fc-list :family outputs one family name per line
+    let output = std::process::Command::new("fc-list")
+        .args([":family"])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let mut fonts: Vec<String> = String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            fonts.sort();
+            fonts.dedup();
+            fonts
         }
         _ => vec![],
     }
@@ -121,34 +141,47 @@ fn check_remote_claude_sync(ssh_command: &str) -> bool {
         return false;
     }
 
-    let mut cmd = Command::new(parts[0]); // "ssh"
-
-    // Forward existing SSH args (port, key, target), skip the "ssh" binary itself
+    // Separate SSH options and the user@host target
+    let mut options: Vec<&str> = Vec::new();
+    let mut target: Option<&str> = None;
     let mut i = 1;
     while i < parts.len() {
         match parts[i] {
             "-p" | "-i" => {
-                cmd.arg(parts[i]);
+                options.push(parts[i]);
                 if i + 1 < parts.len() {
-                    cmd.arg(parts[i + 1]);
+                    options.push(parts[i + 1]);
                     i += 2;
                     continue;
                 }
             }
+            s if s.contains('@') => {
+                target = Some(s);
+            }
             _ => {
-                cmd.arg(parts[i]);
+                options.push(parts[i]);
             }
         }
         i += 1;
     }
 
-    // Add batch mode options and the remote check command
+    let Some(target) = target else {
+        return false;
+    };
+
+    // Build command: ssh [options] [-o ...] user@host "remote command"
+    // SSH options MUST come before the hostname
+    let mut cmd = Command::new(parts[0]);
+    for opt in &options {
+        cmd.arg(opt);
+    }
     cmd.args([
         "-o", "ConnectTimeout=10",
         "-o", "BatchMode=yes",
         "-o", "StrictHostKeyChecking=accept-new",
-        "command -v claude 2>/dev/null",
     ]);
+    cmd.arg(target);
+    cmd.arg("bash -lc 'command -v claude 2>/dev/null'");
 
     #[cfg(windows)]
     {

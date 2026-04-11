@@ -36,6 +36,40 @@ const parseSshTarget = (cmd: string): string | null => {
   return match ? match[1] : null;
 };
 
+/** Check if claude CLI exists on remote and auto-split if found */
+const autoClaudeSplit = async (wsId: string, sshCommand: string, host?: SshHost) => {
+  try {
+    const hasClaude = await invoke<boolean>("check_remote_claude", { sshCommand });
+    if (!hasClaude) return;
+
+    const state = useWorkspaceStore.getState();
+    const ws = state.workspaces.find((w) => w.id === wsId);
+    if (!ws) return;
+
+    // Check if there's already a claude pane in this workspace
+    const hasClaudePane = (node: LayoutNode): boolean => {
+      if (node.type === "leaf") return !!node.command?.includes("claude");
+      if (node.type === "split") return hasClaudePane(node.children[0]) || hasClaudePane(node.children[1]);
+      return false;
+    };
+    if (hasClaudePane(ws.layout)) return;
+
+    // Build the claude SSH command
+    let claudeCmd: string;
+    if (host) {
+      claudeCmd = buildSshCommandWithRemoteCmd(host, "bash -lc 'claude --dangerously-skip-permissions'");
+    } else {
+      // Build from raw SSH command: insert -t and append remote command
+      claudeCmd = sshCommand.replace(/^ssh\b/, "ssh -t") + ` "bash -lc 'claude --dangerously-skip-permissions'"`;
+    }
+
+    const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
+    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claudeCmd);
+  } catch {
+    // Silently ignore
+  }
+};
+
 export const App = () => {
   const { workspaces, activeId, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser } =
     useWorkspaceStore();
@@ -147,6 +181,23 @@ export const App = () => {
     const restored = useWorkspaceStore.getState().restoreSession();
     if (!restored && workspaces.length === 0) {
       addWorkspace("Shell 1");
+    }
+
+    // Auto claude split for restored SSH workspaces
+    if (restored) {
+      const state = useWorkspaceStore.getState();
+      for (const ws of state.workspaces) {
+        // Find first SSH leaf in the layout tree
+        const findSshLeaf = (node: LayoutNode): string | null => {
+          if (node.type === "leaf") return node.command?.toLowerCase().includes("ssh") ? node.command : null;
+          if (node.type === "split") return findSshLeaf(node.children[0]) ?? findSshLeaf(node.children[1]);
+          return null;
+        };
+        const sshCmd = findSshLeaf(ws.layout);
+        if (sshCmd) {
+          autoClaudeSplit(ws.id, sshCmd);
+        }
+      }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -330,23 +381,7 @@ export const App = () => {
     monitorTargetRef.current = target;
 
     // Auto-split with Claude if available on remote server
-    (async () => {
-      try {
-        const hasClaude = await invoke<boolean>("check_remote_claude", { sshCommand: cmd });
-        if (!hasClaude) return;
-
-        const state = useWorkspaceStore.getState();
-        const ws = state.workspaces.find((w) => w.id === wsId);
-        if (!ws) return;
-
-        // Get the first leaf ID
-        const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
-        const claudeCmd = buildSshCommandWithRemoteCmd(host, "claude --dangerously-skip-permissions");
-        useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claudeCmd);
-      } catch {
-        // Silently ignore — claude check failure should not affect user
-      }
-    })();
+    autoClaudeSplit(wsId, cmd, host);
   }, [addWorkspace]);
 
   const handleViewClaudeSession = useCallback((sshTarget: string, project: string, sessionId: string) => {
@@ -391,7 +426,7 @@ export const App = () => {
         ) : (
           <div style={styles.welcome}>
             <div style={styles.welcomeLogo}>wmux</div>
-            <div style={styles.welcomeTagline}>Terminal Multiplexer for Windows</div>
+            <div style={styles.welcomeTagline}>Terminal Multiplexer</div>
             <div style={styles.welcomeHints}>
               <span><b>Ctrl+Shift+T</b> New session</span>
               <span><b>Ctrl+Shift+D</b> Split horizontal</span>

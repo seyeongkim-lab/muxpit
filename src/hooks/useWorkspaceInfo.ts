@@ -66,7 +66,7 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
           if (ptyId === null) return;
 
           try {
-            const cwd = "C:\\Users\\one";
+            const cwd = "/";
 
             // Run git info and port detection in parallel
             const [info, pid] = await Promise.all([
