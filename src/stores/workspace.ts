@@ -467,8 +467,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
         // Monitor nodes are now sidebar-based; restore as plain leaf
         if (node.type === "monitor") return { type: "leaf", id: node.id, ptyId: null };
-        // ClaudeSession nodes need active SSH connection; restore as plain leaf
-        if (node.type === "claudeSession") return { type: "leaf", id: node.id, ptyId: null };
+        // ClaudeSession nodes need active SSH connection; restore as SSH terminal leaf
+        if (node.type === "claudeSession") return { type: "leaf", id: node.id, ptyId: null, command: `ssh ${node.sshTarget}` };
         return {
           type: "split",
           id: node.id,

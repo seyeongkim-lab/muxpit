@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use tauri::{AppHandle, Emitter};
 
+#[cfg(windows)]
 const PIPE_NAME: &str = r"\\.\pipe\wmux";
+
+#[cfg(unix)]
+const SOCKET_PATH: &str = "/tmp/wmux.sock";
 
 #[derive(Debug, Deserialize)]
 struct IpcRequest {
@@ -22,27 +26,32 @@ struct IpcResponse {
 
 pub fn start_ipc_server(app: AppHandle) {
     std::thread::spawn(move || {
-        loop {
-            match accept_client() {
-                Ok(stream) => {
-                    let app = app.clone();
-                    std::thread::spawn(move || {
-                        if let Err(e) = handle_client(stream, &app) {
-                            log::warn!("IPC client error: {e}");
-                        }
-                    });
-                }
-                Err(e) => {
-                    log::error!("IPC pipe error: {e}");
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                }
-            }
-        }
+        ipc_server_loop(app);
     });
 }
 
 #[cfg(windows)]
-fn accept_client() -> Result<std::fs::File, String> {
+fn ipc_server_loop(app: AppHandle) {
+    loop {
+        match accept_client_windows() {
+            Ok(stream) => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = handle_client(stream, &app) {
+                        log::warn!("IPC client error: {e}");
+                    }
+                });
+            }
+            Err(e) => {
+                log::error!("IPC pipe error: {e}");
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn accept_client_windows() -> Result<std::fs::File, String> {
     use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
@@ -83,9 +92,41 @@ fn accept_client() -> Result<std::fs::File, String> {
     }
 }
 
-#[cfg(not(windows))]
-fn accept_client() -> Result<std::fs::File, String> {
-    Err("Named pipes not supported on this platform".to_string())
+#[cfg(unix)]
+fn ipc_server_loop(app: AppHandle) {
+    use std::os::unix::net::UnixListener;
+
+    // Remove stale socket file
+    let _ = std::fs::remove_file(SOCKET_PATH);
+
+    let listener = match UnixListener::bind(SOCKET_PATH) {
+        Ok(l) => l,
+        Err(e) => {
+            log::error!("Failed to bind Unix socket at {SOCKET_PATH}: {e}");
+            return;
+        }
+    };
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    use std::os::unix::io::IntoRawFd;
+                    use std::os::unix::io::FromRawFd;
+                    let fd = stream.into_raw_fd();
+                    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+                    if let Err(e) = handle_client(file, &app) {
+                        log::warn!("IPC client error: {e}");
+                    }
+                });
+            }
+            Err(e) => {
+                log::error!("IPC accept error: {e}");
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+    }
 }
 
 fn handle_client(mut stream: std::fs::File, app: &AppHandle) -> Result<(), String> {
