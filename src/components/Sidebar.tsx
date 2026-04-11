@@ -21,9 +21,11 @@ interface SidebarProps {
   onCloseMonitor?: () => void;
   onViewClaudeSession?: (sshTarget: string, project: string, sessionId: string) => void;
   onResumeClaudeSession?: (sshTarget: string, projectPath: string, sessionId: string) => void;
+  gridView?: boolean;
+  onToggleGridView?: () => void;
 }
 
-export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession }: SidebarProps) => {
+export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
   const { workspaces, activeId, addWorkspace, removeWorkspace, setActive, renameWorkspace } =
     useWorkspaceStore();
   const infoMap = useWorkspaceInfoStore((s) => s.info);
@@ -65,6 +67,18 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
         <div style={styles.headerBtns}>
           <button onClick={handleAdd} style={styles.addBtn} title="New workspace (Ctrl+Shift+T)">
             +
+          </button>
+          <button
+            onClick={onToggleGridView}
+            style={{ ...styles.addBtn, ...(gridView ? { backgroundColor: "#313244", borderColor: "#89b4fa" } : {}) }}
+            title="Grid overview (Ctrl+Shift+G)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+            </svg>
           </button>
           <button onClick={onOpenSettings} style={styles.addBtn} title="Settings (Ctrl+,)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
