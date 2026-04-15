@@ -6,7 +6,7 @@ import { destroyAllTerminals } from "./Terminal";
 import { SidebarMonitor } from "./SidebarMonitor";
 import { SidebarClaude } from "./SidebarClaude";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 interface SidebarMonitorInfo {
   monitorId: string;
@@ -35,6 +35,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
   const sshHosts = useSshHostsStore((s) => s.hosts);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
+  const dragFromIdxRef = useRef<number | null>(null);
   const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
@@ -185,11 +186,14 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
                 key={ws.id}
                 draggable={editingId !== ws.id}
                 onDragStart={(e) => {
+                  dragFromIdxRef.current = i;
                   setDragFromIdx(i);
                   e.dataTransfer.effectAllowed = "move";
+                  // WebView2 / WKWebView require setData to actually initiate the drag
+                  e.dataTransfer.setData("text/plain", ws.id);
                 }}
                 onDragOver={(e) => {
-                  if (dragFromIdx === null) return;
+                  if (dragFromIdxRef.current === null) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   if (dragOverIdx !== i) setDragOverIdx(i);
@@ -199,13 +203,16 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
                 }}
                 onDrop={(e) => {
                   e.preventDefault();
-                  if (dragFromIdx !== null && dragFromIdx !== i) {
-                    reorderWorkspaces(dragFromIdx, i);
+                  const from = dragFromIdxRef.current;
+                  if (from !== null && from !== i) {
+                    reorderWorkspaces(from, i);
                   }
+                  dragFromIdxRef.current = null;
                   setDragFromIdx(null);
                   setDragOverIdx(null);
                 }}
                 onDragEnd={() => {
+                  dragFromIdxRef.current = null;
                   setDragFromIdx(null);
                   setDragOverIdx(null);
                 }}
@@ -362,7 +369,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   item: {
     padding: "8px 12px",
-    cursor: "pointer",
+    cursor: "grab",
     color: "#a6adc8",
     fontSize: 14,
     borderLeft: "3px solid transparent",
