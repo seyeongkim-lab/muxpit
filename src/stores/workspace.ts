@@ -44,7 +44,13 @@ export interface ClaudeSessionNode {
 
 export type LayoutNode = SplitNode | LeafNode | BrowserNode | MonitorNode | ClaudeSessionNode;
 
-export type LayoutMode = "free" | "even-horizontal" | "even-vertical" | "tiled";
+export type LayoutMode =
+  | "free"
+  | "even-horizontal"
+  | "even-vertical"
+  | "main-vertical"
+  | "main-horizontal"
+  | "tiled";
 
 export interface Workspace {
   id: string;
@@ -561,7 +567,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         if (w.id !== workspaceId) return w;
         const leaves = collectOrderedLeafNodes(w.layout);
         if (leaves.length < 2) return w;
-        const order: LayoutMode[] = ["even-horizontal", "even-vertical", "tiled"];
+        const order: LayoutMode[] = [
+          "even-horizontal",
+          "even-vertical",
+          "main-vertical",
+          "main-horizontal",
+          "tiled",
+        ];
         const effective: LayoutMode | "free" =
           w.layoutMode && order.includes(w.layoutMode)
             ? w.layoutMode
@@ -656,6 +668,28 @@ const buildLayout = (leaves: LayoutNode[], mode: LayoutMode): LayoutNode => {
   if (leaves.length === 1) return leaves[0];
   if (mode === "even-horizontal") return buildChain(leaves, "horizontal");
   if (mode === "even-vertical") return buildChain(leaves, "vertical");
+  if (mode === "main-vertical") {
+    // Main pane on the left, rest stacked vertically on the right
+    const [main, ...rest] = leaves;
+    return {
+      type: "split",
+      id: genId(),
+      direction: "horizontal",
+      ratio: 0.5,
+      children: [main, buildChain(rest, "vertical")],
+    };
+  }
+  if (mode === "main-horizontal") {
+    // Main pane on the top, rest split horizontally below
+    const [main, ...rest] = leaves;
+    return {
+      type: "split",
+      id: genId(),
+      direction: "vertical",
+      ratio: 0.5,
+      children: [main, buildChain(rest, "horizontal")],
+    };
+  }
   if (mode === "tiled") return buildTiled(leaves);
   return buildChain(leaves, "horizontal");
 };
