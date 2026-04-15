@@ -304,12 +304,44 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     }
 
-    // Spawn PTY — with command for SSH direct execution, or null for default shell
-    ptyId = await invoke<number>("spawn_pty", {
-      rows: Math.max(term.rows, 1),
-      cols: Math.max(term.cols, 1),
-      command: spawnCommand,
-    });
+    // Spawn PTY — with command for SSH direct execution, or null for default shell.
+    // If spawning with an explicit command fails (e.g. ssh binary missing after a
+    // session restore), fall back to the default shell so the pane is usable instead
+    // of leaving a silent empty xterm.
+    try {
+      ptyId = await invoke<number>("spawn_pty", {
+        rows: Math.max(term.rows, 1),
+        cols: Math.max(term.cols, 1),
+        command: spawnCommand,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      term.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
+      if (spawnCommand) {
+        term.write(`\x1b[33m[retrying with default shell]\x1b[0m\r\n`);
+        try {
+          ptyId = await invoke<number>("spawn_pty", {
+            rows: Math.max(term.rows, 1),
+            cols: Math.max(term.cols, 1),
+            command: null,
+          });
+        } catch (err2) {
+          const msg2 = err2 instanceof Error ? err2.message : String(err2);
+          term.write(`\r\n\x1b[31m[default shell also failed: ${msg2}]\x1b[0m\r\n`);
+          unlistenOutput();
+          unlistenExit();
+          onData.dispose();
+          onResize.dispose();
+          return;
+        }
+      } else {
+        unlistenOutput();
+        unlistenExit();
+        onData.dispose();
+        onResize.dispose();
+        return;
+      }
+    }
 
     terminalInstances.set(leafId, {
       term,
@@ -353,8 +385,10 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   }, [workspaceId, leafId, setPtyId]);
 
   useEffect(() => {
-    initTerminal();
-  }, [initTerminal]);
+    initTerminal().catch((err) => {
+      console.error(`[wmux] initTerminal failed for leaf ${leafId}:`, err);
+    });
+  }, [initTerminal, leafId]);
 
   // Apply font settings changes to existing terminals
   useEffect(() => {
