@@ -8,6 +8,9 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import { useWorkspaceStore } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
+import { usePrefixStore } from "../stores/prefix";
+import { useHistoryStore } from "../stores/history";
+import { matchesPrefixKey } from "../utils/prefixKey";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { getResolvedTheme } from "../themes";
@@ -23,8 +26,26 @@ interface PtyExit {
   code: number | null;
 }
 
+// Shell history capture hook: injects a bash PROMPT_COMMAND + zsh preexec hook into the spawned
+// shell (local or SSH remote) so it emits OSC 777;cmd;<command> before every interactive command.
+// wmux parses those sequences and stores them in the shared history store.
+// The trailing `&& clear` hides the visual footprint of the injection.
+const SHELL_HISTORY_HOOK =
+  '{ if [ -n "$BASH_VERSION" ]; then ' +
+  '__wmux_emit() { local c=$(fc -ln -1 2>/dev/null); c="${c# }"; c="${c#\t}"; ' +
+  '[ -z "$c" ] && return; [ "$c" = "$__wmux_prev" ] && return; ' +
+  'case "$c" in *__wmux_emit*|*__wmux_preexec*) return;; esac; ' +
+  'printf \'\\033]777;cmd;%s\\a\' "$c"; __wmux_prev="$c"; }; ' +
+  'PROMPT_COMMAND="__wmux_emit;${PROMPT_COMMAND:-}"; ' +
+  'elif [ -n "$ZSH_VERSION" ]; then ' +
+  'autoload -Uz add-zsh-hook; ' +
+  '__wmux_preexec() { case "$1" in *__wmux_emit*|*__wmux_preexec*) return;; esac; ' +
+  'printf \'\\033]777;cmd;%s\\a\' "$1"; }; ' +
+  'add-zsh-hook preexec __wmux_preexec; ' +
+  'fi; } 2>/dev/null && clear\r';
+
 // OSC sequence parser: extracts OSC 7 (cwd) and OSC 777 (custom) from terminal output
-const parseOscSequences = (data: string, workspaceId: string) => {
+const parseOscSequences = (data: string, workspaceId: string, leafId: string) => {
   const patchInfo = useWorkspaceInfoStore.getState().patchInfo;
 
   // OSC 7: current working directory
@@ -52,6 +73,14 @@ const parseOscSequences = (data: string, workspaceId: string) => {
   while ((m = osc777GitRe.exec(data)) !== null) {
     const branch = m[1].trim();
     patchInfo(workspaceId, { gitBranch: branch || null });
+  }
+
+  // OSC 777: shell command history (emitted by wmux-injected hook in bash/zsh)
+  // Format: \e]777;cmd;<command text>\a
+  const osc777CmdRe = /\x1b\]777;cmd;([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
+  while ((m = osc777CmdRe.exec(data)) !== null) {
+    const cmd = m[1];
+    if (cmd) useHistoryStore.getState().addEntry(workspaceId, leafId, cmd);
   }
 };
 
@@ -185,6 +214,14 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
       if (e.type !== "keydown") return true;
 
+      // Prefix mode active or history panel open → swallow all keys
+      const prefSt = usePrefixStore.getState();
+      if (prefSt.active || prefSt.historyOpen) return false;
+
+      // Pressing the configured prefix key → swallow (App handler will activate prefix mode)
+      const prefixKey = useSettingsStore.getState().prefixKey;
+      if (matchesPrefixKey(e, prefixKey)) return false;
+
       // Ctrl+C: copy selection if text is selected, otherwise send interrupt
       if (e.ctrlKey && e.key === "c") {
         const selection = term.getSelection();
@@ -227,7 +264,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
         const data = event.payload.data;
         term.write(data);
         // Only parse OSC sequences if ESC is present
-        if (data.includes("\x1b]")) parseOscSequences(data, workspaceId);
+        if (data.includes("\x1b]")) parseOscSequences(data, workspaceId, leafId);
       }
     });
 
@@ -245,11 +282,15 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       invoke("resize_pty", { id: ptyId, rows, cols }).catch(console.error);
     });
 
-    // Determine command to run: SSH direct execution or default shell
+    // Determine command to run: explicit leaf command first (split inheritance / session restore),
+    // then fall back to cloning parent PTY's SSH context.
     let spawnCommand: string | null = null;
 
     const cloneFromPtyId = findCloneFromPtyId(workspaceId, leafId);
-    if (cloneFromPtyId) {
+    const savedCmd = findSshCommand(workspaceId, leafId);
+    if (savedCmd) {
+      spawnCommand = savedCmd;
+    } else if (cloneFromPtyId) {
       try {
         const ctx = await invoke<{ ssh_command: string | null; cwd: string | null }>(
           "get_shell_ctx",
@@ -260,12 +301,6 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
         }
       } catch {
         // Silently ignore context fetch errors
-      }
-    } else {
-      // Session restore: check for saved SSH command
-      const savedSsh = findSshCommand(workspaceId, leafId);
-      if (savedSsh) {
-        spawnCommand = savedSsh;
       }
     }
 
@@ -304,6 +339,14 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       } catch {
         // Silently ignore
       }
+    }
+
+    // Inject shell history hook (bash + zsh). Skip panes running claude directly.
+    const isClaudePane = !!(spawnCommand && spawnCommand.toLowerCase().includes("claude"));
+    if (!isClaudePane) {
+      setTimeout(() => {
+        invoke("write_pty", { id: ptyId, data: SHELL_HISTORY_HOOK }).catch(() => {});
+      }, 700);
     }
 
     term.focus();

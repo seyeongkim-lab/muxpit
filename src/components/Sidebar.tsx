@@ -26,7 +26,7 @@ interface SidebarProps {
 }
 
 export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
-  const { workspaces, activeId, addWorkspace, removeWorkspace, setActive, renameWorkspace } =
+  const { workspaces, activeId, addWorkspace, removeWorkspace, setActive, renameWorkspace, reorderWorkspaces } =
     useWorkspaceStore();
   const infoMap = useWorkspaceInfoStore((s) => s.info);
   const notifications = useNotificationStore((s) => s.notifications);
@@ -35,6 +35,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
   const sshHosts = useSshHostsStore((s) => s.hosts);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
   const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
@@ -89,18 +91,33 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
         </div>
       </div>
 
-      {/* SSH Hosts Grid */}
-      <div style={styles.hostGrid}>
+      {/* SSH Hosts list */}
+      <div style={styles.section}>
+        <div style={styles.sectionHeader}>
+          <span style={styles.sectionLabel}>HOSTS</span>
+          <button
+            onClick={() => onOpenSshPanel?.()}
+            style={styles.sectionAction}
+            title="Manage SSH Hosts"
+          >
+            +
+          </button>
+        </div>
+        <div style={styles.hostList}>
+          {sshHosts.length === 0 && (
+            <div style={styles.hostEmpty} onClick={() => onOpenSshPanel?.()}>
+              + Add host
+            </div>
+          )}
           {sshHosts.map((host) => {
             const isSelected = selectedHostIds.has(host.id);
-            const initial = host.name.charAt(0).toUpperCase();
+            const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
             return (
               <div
                 key={host.id}
                 style={{
-                  ...styles.hostTile,
-                  borderColor: isSelected ? "#89b4fa" : host.color ?? "#45475a",
-                  backgroundColor: isSelected ? "#313244" : "transparent",
+                  ...styles.hostRow,
+                  ...(isSelected ? styles.hostRowSelected : {}),
                 }}
                 onClick={(e) => {
                   if (e.ctrlKey || e.metaKey) {
@@ -114,21 +131,21 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
                     onConnectHost?.(host);
                   }
                 }}
-                title={`${host.name}\n${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}\nCtrl+Click to multi-select`}
+                title={`${host.name} — ${target}\nCtrl+Click to multi-select`}
               >
-                <span style={{ ...styles.hostIcon, color: host.color ?? "#89b4fa" }}>{initial}</span>
-                <span style={styles.hostLabel}>{host.name}</span>
+                <span
+                  style={{
+                    ...styles.hostDot,
+                    backgroundColor: host.color ?? "#89b4fa",
+                  }}
+                />
+                <span style={styles.hostName}>{host.name}</span>
+                <span style={styles.hostTarget}>{target}</span>
               </div>
             );
           })}
-          <div
-            style={styles.hostTileAdd}
-            onClick={() => onOpenSshPanel?.()}
-            title="Manage SSH Hosts"
-          >
-            <span style={styles.hostIconAdd}>+</span>
-          </div>
         </div>
+      </div>
 
       {/* Multi-connect bar */}
       {selectedHostIds.size > 0 && (
@@ -148,80 +165,115 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
         </div>
       )}
 
-      <div style={styles.list}>
-        {workspaces.map((ws, i) => {
-          const info = infoMap[ws.id];
-          const isActive = ws.id === activeId;
-          const paneCount = collectLeafIds(ws.layout).length;
-          const wsUnread = notifications.filter(
-            (n) => n.workspaceId === ws.id && !n.read,
-          ).length;
+      <div style={styles.sessionSection}>
+        <div style={styles.sectionHeader}>
+          <span style={styles.sectionLabel}>SESSIONS</span>
+        </div>
+        <div style={styles.list}>
+          {workspaces.map((ws, i) => {
+            const info = infoMap[ws.id];
+            const isActive = ws.id === activeId;
+            const paneCount = collectLeafIds(ws.layout).length;
+            const wsUnread = notifications.filter(
+              (n) => n.workspaceId === ws.id && !n.read,
+            ).length;
+            const isDragging = dragFromIdx === i;
+            const isDropTarget = dragOverIdx === i && dragFromIdx !== null && dragFromIdx !== i;
 
-          return (
-            <div
-              key={ws.id}
-              onClick={() => { setActive(ws.id); markRead(ws.id); }}
-              style={{
-                ...styles.item,
-                ...(isActive ? styles.itemActive : {}),
-              }}
-            >
-              <div style={styles.itemMain}>
-                <div style={styles.itemRow}>
-                  <span style={styles.index}>{i + 1}</span>
-                  {editingId === ws.id ? (
-                    <input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      onBlur={() => handleRenameSubmit(ws.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleRenameSubmit(ws.id);
-                        if (e.key === "Escape") setEditingId(null);
-                      }}
-                      autoFocus
-                      style={styles.renameInput}
-                    />
-                  ) : (
-                    <span
-                      style={styles.name}
-                      onDoubleClick={() => handleDoubleClick(ws.id, ws.name)}
+            return (
+              <div
+                key={ws.id}
+                draggable={editingId !== ws.id}
+                onDragStart={(e) => {
+                  setDragFromIdx(i);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => {
+                  if (dragFromIdx === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dragOverIdx !== i) setDragOverIdx(i);
+                }}
+                onDragLeave={() => {
+                  if (dragOverIdx === i) setDragOverIdx(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragFromIdx !== null && dragFromIdx !== i) {
+                    reorderWorkspaces(dragFromIdx, i);
+                  }
+                  setDragFromIdx(null);
+                  setDragOverIdx(null);
+                }}
+                onDragEnd={() => {
+                  setDragFromIdx(null);
+                  setDragOverIdx(null);
+                }}
+                onClick={() => { setActive(ws.id); markRead(ws.id); }}
+                style={{
+                  ...styles.item,
+                  ...(isActive ? styles.itemActive : {}),
+                  ...(isDragging ? styles.itemDragging : {}),
+                  ...(isDropTarget ? styles.itemDropTarget : {}),
+                }}
+              >
+                <div style={styles.itemMain}>
+                  <div style={styles.itemRow}>
+                    <span style={styles.index}>{i + 1}</span>
+                    {editingId === ws.id ? (
+                      <input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onBlur={() => handleRenameSubmit(ws.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRenameSubmit(ws.id);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        autoFocus
+                        style={styles.renameInput}
+                      />
+                    ) : (
+                      <span
+                        style={styles.name}
+                        onDoubleClick={() => handleDoubleClick(ws.id, ws.name)}
+                      >
+                        {ws.name}
+                      </span>
+                    )}
+                    {wsUnread > 0 && (
+                      <span style={styles.badge}>{wsUnread}</span>
+                    )}
+                    <button
+                      onClick={(e) => handleClose(e, ws.id)}
+                      style={styles.closeBtn}
+                      title="Close workspace"
                     >
-                      {ws.name}
-                    </span>
-                  )}
-                  {wsUnread > 0 && (
-                    <span style={styles.badge}>{wsUnread}</span>
-                  )}
-                  <button
-                    onClick={(e) => handleClose(e, ws.id)}
-                    style={styles.closeBtn}
-                    title="Close workspace"
-                  >
-                    x
-                  </button>
-                </div>
+                      x
+                    </button>
+                  </div>
 
-                {/* Metadata */}
-                <div style={styles.meta}>
-                  {info?.gitBranch && (
-                    <span style={styles.branch}>
-                      {info.gitBranch}
-                      {info.gitDirty && <span style={styles.dirty}> *</span>}
-                    </span>
-                  )}
-                  {paneCount > 1 && (
-                    <span style={styles.panes}>{paneCount} panes</span>
-                  )}
-                  {info?.ports && info.ports.length > 0 && (
-                    <span style={styles.ports}>
-                      :{info.ports.join(", :")}
-                    </span>
-                  )}
+                  {/* Metadata */}
+                  <div style={styles.meta}>
+                    {info?.gitBranch && (
+                      <span style={styles.branch}>
+                        {info.gitBranch}
+                        {info.gitDirty && <span style={styles.dirty}> *</span>}
+                      </span>
+                    )}
+                    {paneCount > 1 && (
+                      <span style={styles.panes}>{paneCount} panes</span>
+                    )}
+                    {info?.ports && info.ports.length > 0 && (
+                      <span style={styles.ports}>
+                        :{info.ports.join(", :")}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
 
@@ -296,10 +348,17 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     lineHeight: 1,
   },
+  sessionSection: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column" as const,
+    minHeight: 0,
+    overflow: "hidden",
+  },
   list: {
     flex: 1,
     overflowY: "auto",
-    padding: "4px 0",
+    padding: "2px 0",
   },
   item: {
     padding: "8px 12px",
@@ -307,12 +366,18 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#a6adc8",
     fontSize: 14,
     borderLeft: "3px solid transparent",
-    transition: "background 0.1s",
+    transition: "background 0.1s, opacity 0.1s",
   },
   itemActive: {
     backgroundColor: "#1e1e2e",
     color: "#cdd6f4",
     borderLeftColor: "#89b4fa",
+  },
+  itemDragging: {
+    opacity: 0.4,
+  },
+  itemDropTarget: {
+    borderTop: "2px solid #89b4fa",
   },
   itemMain: {
     display: "flex",
@@ -409,58 +474,94 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
 
-  // SSH Hosts grid
-  hostGrid: {
-    display: "flex",
-    flexWrap: "wrap" as const,
-    gap: 6,
-    padding: "8px 10px",
+  // Section (shared by HOSTS and SESSIONS)
+  section: {
     borderBottom: "1px solid #313244",
-  },
-  hostTile: {
-    width: 46,
-    height: 50,
     display: "flex",
     flexDirection: "column" as const,
+    flexShrink: 0,
+  },
+  sectionHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "8px 12px 4px",
+  },
+  sectionLabel: {
+    color: "#585b70",
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: 1.2,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  sectionAction: {
+    background: "none",
+    border: "1px solid #313244",
+    borderRadius: 3,
+    color: "#585b70",
+    fontSize: 13,
+    width: 18,
+    height: 18,
+    cursor: "pointer",
+    lineHeight: 1,
+    padding: 0,
+    display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 2,
-    borderRadius: 6,
-    border: "1px solid #45475a",
+  },
+
+  // Host list (vertical, 1-line rows)
+  hostList: {
+    display: "flex",
+    flexDirection: "column" as const,
+    paddingBottom: 6,
+    maxHeight: 180,
+    overflowY: "auto" as const,
+  },
+  hostRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "5px 12px",
     cursor: "pointer",
-    transition: "background 0.1s, border-color 0.1s",
+    transition: "background 0.1s",
   },
-  hostIcon: {
-    fontSize: 18,
-    fontWeight: 700,
-    fontFamily: "'JetBrains Mono', monospace",
-    lineHeight: 1,
+  hostRowSelected: {
+    backgroundColor: "#313244",
   },
-  hostLabel: {
-    fontSize: 9,
-    color: "#a6adc8",
+  hostDot: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    flexShrink: 0,
+  },
+  hostName: {
+    color: "#cdd6f4",
+    fontSize: 13,
+    flexShrink: 0,
+    maxWidth: 80,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
-    maxWidth: 42,
-    textAlign: "center" as const,
-    lineHeight: 1,
   },
-  hostTileAdd: {
-    width: 46,
-    height: 50,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 6,
-    border: "1px dashed #45475a",
-    cursor: "pointer",
-  },
-  hostIconAdd: {
-    fontSize: 20,
+  hostTarget: {
     color: "#585b70",
-    lineHeight: 1,
+    fontSize: 11,
+    fontFamily: "'JetBrains Mono', monospace",
+    marginLeft: "auto",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+    minWidth: 0,
   },
+  hostEmpty: {
+    color: "#585b70",
+    fontSize: 12,
+    padding: "8px 12px",
+    cursor: "pointer",
+    fontStyle: "italic" as const,
+  },
+
   connectBar: {
     padding: "4px 10px",
     borderBottom: "1px solid #313244",

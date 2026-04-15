@@ -5,16 +5,28 @@ import { GridOverview } from "./components/GridOverview";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SshHostPanel } from "./components/SshHostPanel";
+import { PrefixIndicator } from "./components/PrefixIndicator";
+import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
+import { HistoryPanel } from "./components/HistoryPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
 import { buildSshCommand, buildSshCommandWithRemoteCmd, type SshHost } from "./stores/sshHosts";
 import { useNotificationStore } from "./stores/notifications";
 import { useSettingsStore } from "./stores/settings";
+import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals } from "./components/Terminal";
 import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspaceInfo";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { LayoutNode, LeafNode } from "./stores/workspace";
+import {
+  findNeighbor,
+  computeResize,
+  collectOrderedLeaves,
+  collectRects,
+  type Direction,
+} from "./utils/layoutGeometry";
+import { matchesPrefixKey } from "./utils/prefixKey";
 
 const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
   if (node.type === "leaf") return node.id === id ? node : null;
@@ -287,9 +299,198 @@ export const App = () => {
     };
   }, [activeId]);
 
+  // Prefix mode timeouts (module-scoped via refs so handler closure stays stable)
+  const prefixTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const paneNumberTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Keyboard shortcuts
   useEffect(() => {
+    const activatePrefix = () => {
+      usePrefixStore.getState().setActive(true);
+      if (prefixTimeoutRef.current) clearTimeout(prefixTimeoutRef.current);
+      prefixTimeoutRef.current = setTimeout(() => {
+        usePrefixStore.getState().setActive(false);
+        prefixTimeoutRef.current = null;
+      }, PREFIX_TIMEOUT_MS);
+    };
+
+    const deactivatePrefix = () => {
+      usePrefixStore.getState().setActive(false);
+      if (prefixTimeoutRef.current) {
+        clearTimeout(prefixTimeoutRef.current);
+        prefixTimeoutRef.current = null;
+      }
+    };
+
+    const triggerPaneNumbers = () => {
+      usePrefixStore.getState().setShowPaneNumbers(true);
+      if (paneNumberTimeoutRef.current) clearTimeout(paneNumberTimeoutRef.current);
+      paneNumberTimeoutRef.current = setTimeout(() => {
+        usePrefixStore.getState().setShowPaneNumbers(false);
+        paneNumberTimeoutRef.current = null;
+      }, PANE_NUMBER_TIMEOUT_MS);
+    };
+
+    const hidePaneNumbers = () => {
+      usePrefixStore.getState().setShowPaneNumbers(false);
+      if (paneNumberTimeoutRef.current) {
+        clearTimeout(paneNumberTimeoutRef.current);
+        paneNumberTimeoutRef.current = null;
+      }
+    };
+
+    const switchWorkspaceDelta = (delta: number) => {
+      const st = useWorkspaceStore.getState();
+      const idx = st.workspaces.findIndex((w) => w.id === st.activeId);
+      if (idx === -1 || st.workspaces.length < 2) return;
+      const next = (idx + delta + st.workspaces.length) % st.workspaces.length;
+      st.setActive(st.workspaces[next].id);
+    };
+
+    const selectWorkspaceByIndex = (i: number) => {
+      const st = useWorkspaceStore.getState();
+      if (st.workspaces[i]) st.setActive(st.workspaces[i].id);
+    };
+
+    const focusByPaneNumber = (i: number) => {
+      const st = useWorkspaceStore.getState();
+      const ws = st.workspaces.find((w) => w.id === st.activeId);
+      if (!ws) return;
+      const rects = collectRects(ws.layout);
+      const target = rects[i];
+      if (target) st.setFocusedLeaf(ws.id, target.id);
+    };
+
+    const dispatchPrefixCommand = (e: KeyboardEvent) => {
+      const st = useWorkspaceStore.getState();
+      const ws = st.workspaces.find((w) => w.id === st.activeId);
+      if (!ws) return;
+
+      // Directional focus / resize
+      const arrowMap: Record<string, Direction> = {
+        ArrowLeft: "left",
+        ArrowRight: "right",
+        ArrowUp: "up",
+        ArrowDown: "down",
+      };
+      const dir = arrowMap[e.key];
+      if (dir) {
+        if (e.ctrlKey) {
+          const r = computeResize(ws.layout, ws.focusedLeafId, dir);
+          if (r) st.setSplitRatio(ws.id, r.splitId, r.ratio);
+        } else {
+          const neighborId = findNeighbor(ws.layout, ws.focusedLeafId, dir);
+          if (neighborId) st.setFocusedLeaf(ws.id, neighborId);
+        }
+        return;
+      }
+
+      switch (e.key) {
+        case " ":
+        case "Spacebar":
+          st.cycleLayout(ws.id);
+          return;
+        case '"':
+          // tmux ": split horizontally → divider is horizontal → wmux "vertical"
+          st.splitLeaf(ws.id, ws.focusedLeafId, "vertical");
+          return;
+        case "%":
+          // tmux %: split vertically → divider is vertical → wmux "horizontal"
+          st.splitLeaf(ws.id, ws.focusedLeafId, "horizontal");
+          return;
+        case "x": {
+          const leaves = collectLeafIds(ws.layout);
+          if (leaves.length > 1) {
+            destroyTerminal(ws.focusedLeafId);
+            st.closeLeaf(ws.id, ws.focusedLeafId);
+          }
+          return;
+        }
+        case "z":
+          st.toggleZoom(ws.id);
+          return;
+        case "o": {
+          const leaves = collectOrderedLeaves(ws.layout);
+          if (leaves.length < 2) return;
+          const curIdx = leaves.findIndex((n) => n.id === ws.focusedLeafId);
+          const next = leaves[(curIdx + 1) % leaves.length];
+          st.setFocusedLeaf(ws.id, next.id);
+          return;
+        }
+        case "c":
+          st.addWorkspace();
+          return;
+        case "n":
+          switchWorkspaceDelta(1);
+          return;
+        case "p":
+          switchWorkspaceDelta(-1);
+          return;
+        case "q":
+          triggerPaneNumbers();
+          return;
+        case "!":
+          st.breakPane(ws.id, ws.focusedLeafId);
+          return;
+        case "h":
+          usePrefixStore.getState().setHistoryOpen(true);
+          return;
+      }
+
+      if (/^[0-9]$/.test(e.key)) {
+        selectWorkspaceByIndex(parseInt(e.key, 10));
+        return;
+      }
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      const prefixActive = usePrefixStore.getState().active;
+      const paneNumbersVisible = usePrefixStore.getState().showPaneNumbers;
+      const historyOpen = usePrefixStore.getState().historyOpen;
+      const prefKey = useSettingsStore.getState().prefixKey;
+
+      // History panel owns keyboard input while open
+      if (historyOpen) return;
+
+      // Pane-number pick mode: digit picks pane, any other key cancels overlay
+      if (paneNumbersVisible && !prefixActive) {
+        if (/^[0-9]$/.test(e.key)) {
+          e.preventDefault();
+          e.stopPropagation();
+          focusByPaneNumber(parseInt(e.key, 10));
+          hidePaneNumbers();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          hidePaneNumbers();
+          return;
+        }
+      }
+
+      // Prefix activation
+      if (!prefixActive && matchesPrefixKey(e, prefKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        activatePrefix();
+        return;
+      }
+
+      // Prefix command dispatch
+      if (prefixActive) {
+        // Ignore plain modifier keydown events (Ctrl, Shift, Alt) — wait for real key
+        if (e.key === "Control" || e.key === "Shift" || e.key === "Alt" || e.key === "Meta") {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        deactivatePrefix();
+        if (e.key === "Escape") return; // Escape just cancels
+        dispatchPrefixCommand(e);
+        return;
+      }
+
       if (!activeWs) return;
 
       // Ctrl+Shift+G: toggle grid / single view mode
@@ -422,7 +623,17 @@ export const App = () => {
             activeId={activeId}
           />
         ) : activeWs ? (
-          <SplitPane node={activeWs.layout} workspaceId={activeWs.id} />
+          <>
+            <SplitPane
+              node={
+                activeWs.zoomedLeafId
+                  ? collectOrderedLeaves(activeWs.layout).find((n) => n.id === activeWs.zoomedLeafId) ?? activeWs.layout
+                  : activeWs.layout
+              }
+              workspaceId={activeWs.id}
+            />
+            <PaneNumberOverlay workspaceId={activeWs.id} />
+          </>
         ) : (
           <div style={styles.welcome}>
             <div style={styles.welcomeLogo}>wmux</div>
@@ -437,6 +648,8 @@ export const App = () => {
           </div>
         )}
       </div>
+      <PrefixIndicator />
+      <HistoryPanel />
       <NotificationPanel />
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <SshHostPanel

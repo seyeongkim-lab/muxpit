@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSettingsStore } from "../stores/settings";
+import { useSettingsStore, PREFIX_KEY_CHOICES, type PrefixKey } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
@@ -65,8 +65,8 @@ const ColorSwatch = ({
 
 export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   const {
-    fontSize, fontFamily, themeName, customColors,
-    setFontSize, setFontFamily, setThemeName, setCustomColor, resetCustomColors, resetSingleColor,
+    fontSize, fontFamily, themeName, customColors, prefixKey,
+    setFontSize, setFontFamily, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
   } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
   const [monoOnly, setMonoOnly] = useState(true);
@@ -121,6 +121,25 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               <button onClick={() => setFontSize(14)} style={styles.resetBtn}>Reset</button>
             </div>
             <div style={styles.hint}>Ctrl+= / Ctrl+- / Ctrl+0</div>
+          </div>
+
+          {/* Prefix Key (tmux-style) */}
+          <div style={styles.section}>
+            <label style={styles.label}>Prefix Key</label>
+            <select
+              value={prefixKey}
+              onChange={(e) => setPrefixKey(e.target.value as PrefixKey)}
+              style={styles.select}
+            >
+              {PREFIX_KEY_CHOICES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+            <div style={styles.hint}>
+              After prefix: arrows focus, Ctrl+arrows resize, Space cycles layout,
+              " / % split, x close, z zoom, o next, c new, n/p workspace, 0-9 select,
+              q numbers, ! break, h history
+            </div>
           </div>
 
           {/* Theme */}
@@ -320,6 +339,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   value: { color: "#cdd6f4", fontSize: 16, fontWeight: 600, minWidth: 48, textAlign: "center" as const, fontFamily: "monospace" },
   hint: { color: "#585b70", fontSize: 11, marginTop: 4 },
+  select: {
+    width: "100%", background: "#313244", border: "1px solid #45475a", borderRadius: 4,
+    color: "#cdd6f4", fontSize: 13, padding: "6px 10px", outline: "none", cursor: "pointer",
+  },
   filterRow: { display: "flex", gap: 8, marginBottom: 8, alignItems: "center" },
   input: {
     flex: 1, background: "#313244", border: "1px solid #45475a", borderRadius: 4,
