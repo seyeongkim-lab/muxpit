@@ -1,11 +1,23 @@
 import { create } from "zustand";
 import type { CustomColors, ThemeColorKey } from "../themes";
 
+export type PrefixKey = "off" | "ctrl+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
+
+export const PREFIX_KEY_CHOICES: { value: PrefixKey; label: string }[] = [
+  { value: "ctrl+b", label: "Ctrl+B (tmux default)" },
+  { value: "ctrl+a", label: "Ctrl+A (screen default)" },
+  { value: "ctrl+space", label: "Ctrl+Space" },
+  { value: "ctrl+q", label: "Ctrl+Q" },
+  { value: "ctrl+\\", label: "Ctrl+\\" },
+  { value: "off", label: "Off (disabled)" },
+];
+
 interface SettingsState {
   fontSize: number;
   fontFamily: string;
   themeName: string;
   customColors: CustomColors;
+  prefixKey: PrefixKey;
 
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
@@ -15,6 +27,7 @@ interface SettingsState {
   setCustomColor: (themeName: string, key: ThemeColorKey, color: string) => void;
   resetCustomColors: (themeName: string) => void;
   resetSingleColor: (themeName: string, key: ThemeColorKey) => void;
+  setPrefixKey: (key: PrefixKey) => void;
 }
 
 const FONT_SIZE_MIN = 8;
@@ -36,6 +49,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontFamily: saved.fontFamily ?? "'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace",
   themeName: saved.themeName ?? "Catppuccin Mocha",
   customColors: saved.customColors ?? {},
+  prefixKey: saved.prefixKey ?? "ctrl+b",
 
   increaseFontSize: () => {
     const next = Math.min(get().fontSize + 1, FONT_SIZE_MAX);
@@ -95,6 +109,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ customColors: next });
     saveSettings(get());
   },
+
+  setPrefixKey: (key: PrefixKey) => {
+    set({ prefixKey: key });
+    saveSettings(get());
+  },
 }));
 
 const saveSettings = (state: SettingsState) => {
@@ -106,6 +125,7 @@ const saveSettings = (state: SettingsState) => {
         fontFamily: state.fontFamily,
         themeName: state.themeName,
         customColors: state.customColors,
+        prefixKey: state.prefixKey,
       }),
     );
   } catch {}

@@ -44,11 +44,15 @@ export interface ClaudeSessionNode {
 
 export type LayoutNode = SplitNode | LeafNode | BrowserNode | MonitorNode | ClaudeSessionNode;
 
+export type LayoutMode = "free" | "even-horizontal" | "even-vertical" | "tiled";
+
 export interface Workspace {
   id: string;
   name: string;
   layout: LayoutNode;
   focusedLeafId: string;
+  zoomedLeafId?: string;
+  layoutMode?: LayoutMode;
 }
 
 // Session save/restore types
@@ -122,6 +126,10 @@ interface WorkspaceState {
   closeLeaf: (workspaceId: string, leafId: string) => void;
   setFocusedLeaf: (workspaceId: string, leafId: string) => void;
   setSplitRatio: (workspaceId: string, splitId: string, ratio: number) => void;
+  toggleZoom: (workspaceId: string) => void;
+  cycleLayout: (workspaceId: string) => void;
+  breakPane: (workspaceId: string, leafId: string) => void;
+  reorderWorkspaces: (fromIdx: number, toIdx: number) => void;
 
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => void;
 
@@ -340,6 +348,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((s) => ({
       workspaces: s.workspaces.map((w) => {
         if (w.id !== workspaceId) return w;
+        const parent = findLeaf(w.layout, leafId);
+        const inheritedCmd =
+          parent?.command && /^ssh\b/i.test(parent.command) ? parent.command : undefined;
         const splitNode: SplitNode = {
           type: "split",
           id: genId(),
@@ -347,13 +358,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           ratio: 0.5,
           children: [
             preserveLeaf(w.layout, leafId),
-            { type: "leaf", id: newLeafId, ptyId: null, cloneFromPtyId: (findLeaf(w.layout, leafId))?.ptyId ?? undefined },
+            {
+              type: "leaf",
+              id: newLeafId,
+              ptyId: null,
+              cloneFromPtyId: parent?.ptyId ?? undefined,
+              command: inheritedCmd,
+            },
           ],
         };
         return {
           ...w,
           layout: replaceNode(w.layout, leafId, splitNode),
           focusedLeafId: newLeafId,
+          zoomedLeafId: undefined,
+          layoutMode: "free",
         };
       }),
     }));
@@ -378,6 +397,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         return {
           ...w,
           layout: replaceNode(w.layout, leafId, splitNode),
+          zoomedLeafId: undefined,
+          layoutMode: "free",
         };
       }),
     }));
@@ -394,7 +415,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const newFocus = leaves.includes(w.focusedLeafId)
           ? w.focusedLeafId
           : leaves[0];
-        return { ...w, layout: newLayout, focusedLeafId: newFocus };
+        return {
+          ...w,
+          layout: newLayout,
+          focusedLeafId: newFocus,
+          zoomedLeafId: w.zoomedLeafId === leafId ? undefined : w.zoomedLeafId,
+          layoutMode: "free",
+        };
       }),
     }));
   },
@@ -511,11 +538,169 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           }
           return node;
         };
-        return { ...w, layout: updateRatio(w.layout) };
+        return { ...w, layout: updateRatio(w.layout), layoutMode: "free" };
       }),
     }));
   },
+
+  toggleZoom: (workspaceId: string) => {
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        if (w.zoomedLeafId) return { ...w, zoomedLeafId: undefined };
+        const leaves = collectLeafIds(w.layout);
+        if (leaves.length < 2) return w;
+        return { ...w, zoomedLeafId: w.focusedLeafId };
+      }),
+    }));
+  },
+
+  cycleLayout: (workspaceId: string) => {
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const leaves = collectOrderedLeafNodes(w.layout);
+        if (leaves.length < 2) return w;
+        const order: LayoutMode[] = ["even-horizontal", "even-vertical", "tiled"];
+        const effective: LayoutMode | "free" =
+          w.layoutMode && order.includes(w.layoutMode)
+            ? w.layoutMode
+            : detectLayoutShape(w.layout);
+        const curIdx = order.indexOf(effective as LayoutMode);
+        const nextMode = order[(curIdx + 1) % order.length];
+        const newLayout = buildLayout(leaves, nextMode);
+        return { ...w, layout: newLayout, layoutMode: nextMode, zoomedLeafId: undefined };
+      }),
+    }));
+  },
+
+  reorderWorkspaces: (fromIdx: number, toIdx: number) => {
+    set((s) => {
+      if (
+        fromIdx < 0 ||
+        toIdx < 0 ||
+        fromIdx >= s.workspaces.length ||
+        toIdx >= s.workspaces.length ||
+        fromIdx === toIdx
+      ) {
+        return {};
+      }
+      const next = s.workspaces.slice();
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return { workspaces: next };
+    });
+  },
+
+  breakPane: (workspaceId: string, leafId: string) => {
+    const newWsId = genId();
+    set((s) => {
+      const ws = s.workspaces.find((w) => w.id === workspaceId);
+      if (!ws) return {};
+      const leaves = collectLeafIds(ws.layout);
+      if (leaves.length < 2) return {};
+      const detached = findAnyNode(ws.layout, leafId);
+      if (!detached) return {};
+      const remaining = removeLeaf(ws.layout, leafId);
+      if (!remaining) return {};
+      const remainingIds = collectLeafIds(remaining);
+      const newWs: Workspace = {
+        id: newWsId,
+        name: `Shell ${s.workspaces.length + 1}`,
+        layout: detached,
+        focusedLeafId: leafId,
+      };
+      return {
+        workspaces: s.workspaces
+          .map((w) =>
+            w.id === workspaceId
+              ? {
+                  ...w,
+                  layout: remaining,
+                  focusedLeafId: remainingIds.includes(w.focusedLeafId)
+                    ? w.focusedLeafId
+                    : remainingIds[0],
+                  zoomedLeafId: undefined,
+                }
+              : w,
+          )
+          .concat([newWs]),
+        activeId: newWsId,
+      };
+    });
+  },
 }));
+
+// Helper: walk tree and return any node by id (leaf / browser / monitor / claude / split)
+const findAnyNode = (node: LayoutNode, id: string): LayoutNode | null => {
+  if (node.id === id) return node;
+  if (node.type === "split") {
+    return findAnyNode(node.children[0], id) ?? findAnyNode(node.children[1], id);
+  }
+  return null;
+};
+
+// Helper: collect all leaf-like nodes (not splits) in tree order, preserving identity
+const collectOrderedLeafNodes = (node: LayoutNode): LayoutNode[] => {
+  if (node.type === "split") {
+    return [
+      ...collectOrderedLeafNodes(node.children[0]),
+      ...collectOrderedLeafNodes(node.children[1]),
+    ];
+  }
+  return [node];
+};
+
+// Helper: rebuild a layout tree from a flat list of leaf nodes using a target layout mode.
+const buildLayout = (leaves: LayoutNode[], mode: LayoutMode): LayoutNode => {
+  if (leaves.length === 1) return leaves[0];
+  if (mode === "even-horizontal") return buildChain(leaves, "horizontal");
+  if (mode === "even-vertical") return buildChain(leaves, "vertical");
+  if (mode === "tiled") return buildTiled(leaves);
+  return buildChain(leaves, "horizontal");
+};
+
+const buildChain = (leaves: LayoutNode[], direction: SplitDirection): LayoutNode => {
+  if (leaves.length === 1) return leaves[0];
+  const mid = Math.floor(leaves.length / 2);
+  const left = buildChain(leaves.slice(0, mid), direction);
+  const right = buildChain(leaves.slice(mid), direction);
+  return {
+    type: "split",
+    id: genId(),
+    direction,
+    ratio: mid / leaves.length,
+    children: [left, right],
+  };
+};
+
+// Classify the current tree shape: if every split uses the same direction, return the corresponding
+// even-* mode; otherwise "free". Used when layoutMode is unset so the first cycle press does
+// something visible.
+const detectLayoutShape = (node: LayoutNode): LayoutMode | "free" => {
+  if (node.type !== "split") return "even-horizontal";
+  const allDir = (n: LayoutNode, dir: SplitDirection): boolean => {
+    if (n.type !== "split") return true;
+    return n.direction === dir && allDir(n.children[0], dir) && allDir(n.children[1], dir);
+  };
+  if (allDir(node, "horizontal")) return "even-horizontal";
+  if (allDir(node, "vertical")) return "even-vertical";
+  return "free";
+};
+
+const buildTiled = (leaves: LayoutNode[]): LayoutNode => {
+  if (leaves.length === 1) return leaves[0];
+  const n = leaves.length;
+  const rows = Math.ceil(Math.sqrt(n));
+  const cols = Math.ceil(n / rows);
+  const rowNodes: LayoutNode[] = [];
+  for (let r = 0; r < rows; r++) {
+    const slice = leaves.slice(r * cols, (r + 1) * cols);
+    if (slice.length === 0) continue;
+    rowNodes.push(buildChain(slice, "horizontal"));
+  }
+  return buildChain(rowNodes, "vertical");
+};
 
 // Helper: get a leaf with all its fields preserved (command, sshCommand, etc.)
 const preserveLeaf = (tree: LayoutNode, id: string): LeafNode => {
