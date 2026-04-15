@@ -342,13 +342,15 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     }
   }, [focusedLeafId, leafId]);
 
-  const handleClick = () => setFocusedLeaf(workspaceId, leafId);
+  const handleMouseDown = () => {
+    if (focusedLeafId !== leafId) setFocusedLeaf(workspaceId, leafId);
+  };
   const isFocused = focusedLeafId === leafId;
 
   return (
     <div
       ref={containerRef}
-      onClick={handleClick}
+      onMouseDown={handleMouseDown}
       style={{
         width: "100%",
         height: "100%",
