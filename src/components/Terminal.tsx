@@ -256,19 +256,36 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
     fitAddon.fit();
 
-    // Set up event listeners BEFORE spawning PTY to avoid missing output
+    // Set up event listeners BEFORE spawning PTY to avoid missing output.
+    // Race: the Rust reader thread starts emitting "pty-output" *before* the
+    // spawn_pty invoke returns with the id, so events arriving between listener
+    // registration and id assignment can't be filtered yet. Buffer them all and
+    // replay after the id is known. Empty terminals on session restore were
+    // caused by the initial shell prompt being dropped in that window.
     let ptyId = 0;
+    let idAssigned = false;
+    const bufferedOutput: PtyOutput[] = [];
+    const bufferedExit: PtyExit[] = [];
+
+    const handleOutput = (payload: PtyOutput) => {
+      const data = payload.data;
+      term.write(data);
+      if (data.includes("\x1b]")) parseOscSequences(data, workspaceId, leafId);
+    };
 
     const unlistenOutput = await listen<PtyOutput>("pty-output", (event) => {
-      if (event.payload.id === ptyId) {
-        const data = event.payload.data;
-        term.write(data);
-        // Only parse OSC sequences if ESC is present
-        if (data.includes("\x1b]")) parseOscSequences(data, workspaceId, leafId);
+      if (!idAssigned) {
+        bufferedOutput.push(event.payload);
+        return;
       }
+      if (event.payload.id === ptyId) handleOutput(event.payload);
     });
 
     const unlistenExit = await listen<PtyExit>("pty-exit", (event) => {
+      if (!idAssigned) {
+        bufferedExit.push(event.payload);
+        return;
+      }
       if (event.payload.id === ptyId) {
         term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
       }
@@ -342,6 +359,21 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
         return;
       }
     }
+
+    // Mark id as assigned and drain any events that arrived during the spawn
+    // window. Runs synchronously before any further awaits, so no other event
+    // handlers can interleave and reorder output.
+    idAssigned = true;
+    for (const payload of bufferedOutput) {
+      if (payload.id === ptyId) handleOutput(payload);
+    }
+    bufferedOutput.length = 0;
+    for (const payload of bufferedExit) {
+      if (payload.id === ptyId) {
+        term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
+      }
+    }
+    bufferedExit.length = 0;
 
     terminalInstances.set(leafId, {
       term,
