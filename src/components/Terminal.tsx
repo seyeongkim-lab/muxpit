@@ -437,9 +437,12 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     }
 
-    // Inject shell history hook (bash + zsh). Skip panes running claude directly.
+    // Inject shell history hook (bash + zsh). Skip:
+    //   - claude panes (their prompt is not a plain shell)
+    //   - tmux-persist panes (the hook ends with `clear`, which erases the existing tmux
+    //     screen on reconnect — history is already captured when the session was first started)
     const isClaudePane = !!(spawnCommand && spawnCommand.toLowerCase().includes("claude"));
-    if (!isClaudePane) {
+    if (!isClaudePane && !tmuxSession) {
       setTimeout(() => {
         invoke("write_pty", { id: ptyId, data: SHELL_HISTORY_HOOK }).catch(() => {});
       }, 700);
