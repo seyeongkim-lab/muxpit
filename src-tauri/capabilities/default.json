@@ -13,6 +13,7 @@
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
     "shell:allow-open",
-    "core:window:allow-destroy"
+    "core:window:allow-destroy",
+    "core:webview:allow-set-webview-zoom"
   ]
 }
