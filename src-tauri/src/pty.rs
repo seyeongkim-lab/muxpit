@@ -94,8 +94,13 @@ impl PtyManager {
         //   3. exec into attach so tmux replaces sh and ssh tracks tmux's lifetime
         // `safe` is [a-zA-Z0-9_-] only, so no inner quoting is needed. Inner uses `"` because the
         // whole thing is wrapped in `'` by shell_single_quote below.
+        // `-u` forces UTF-8 mode regardless of the remote locale. Without it, tmux auto-detects
+        // via LANG/LC_CTYPE, and SSH typically doesn't forward those — the remote tmux falls back
+        // to ASCII width calculation and Powerline/Nerd-Font glyphs (PUA U+E000-U+F8FF) render as
+        // replacement placeholders (`_`). The starship prompt shows up fine outside tmux because
+        // the login shell inherits the system locale directly.
         let tmux_inner = format!(
-            "sh -c \"tmux has-session -t {name} 2>/dev/null || tmux new-session -d -s {name}; tmux set-option -t {name} mouse off; exec tmux attach -t {name}\"",
+            "sh -c \"tmux -u has-session -t {name} 2>/dev/null || tmux -u new-session -d -s {name}; tmux -u set-option -t {name} mouse off; exec tmux -u attach -t {name}\"",
             name = safe
         );
         let full = format!("{} -t {}", ssh_command, shell_single_quote(&tmux_inner));
