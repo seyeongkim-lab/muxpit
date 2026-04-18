@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
+import { useSidebarLayoutStore } from "../stores/sidebarLayout";
 
 interface SidebarMonitorProps {
   monitorId: string;
@@ -156,8 +157,29 @@ export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitor
   const rxData = series.map((s) => s.net?.rxBytesPerSec ?? 0);
   const txData = series.map((s) => s.net?.txBytesPerSec ?? 0);
 
+  const height = useSidebarLayoutStore((s) => s.monitorHeight);
+  const setHeight = useSidebarLayoutStore((s) => s.setMonitorHeight);
+
+  const onResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = height;
+    const onMove = (ev: MouseEvent) => setHeight(startH + (startY - ev.clientY));
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   return (
-    <div style={styles.container}>
+    <div style={{ ...styles.container, height }}>
+      <div style={styles.resizeHandle} onMouseDown={onResizeStart} title="Drag to resize" />
       {/* Header */}
       <div style={styles.header}>
         <span style={styles.hostname}>{latest?.hostname || sshTarget}</span>
@@ -262,8 +284,18 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     fontSize: 13,
     fontFamily: "'JetBrains Mono', monospace",
-    maxHeight: "65%",
     overflow: "auto",
+    flexShrink: 0,
+    position: "relative",
+  },
+  resizeHandle: {
+    position: "absolute",
+    top: -2,
+    left: 0,
+    right: 0,
+    height: 6,
+    cursor: "ns-resize",
+    zIndex: 1,
   },
   header: {
     display: "flex",
