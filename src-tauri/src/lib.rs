@@ -192,7 +192,7 @@ fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
         cmd.arg(opt);
     }
     cmd.args([
-        "-o", "ConnectTimeout=10",
+        "-o", "ConnectTimeout=3",
         "-o", "BatchMode=yes",
         "-o", "StrictHostKeyChecking=accept-new",
     ]);

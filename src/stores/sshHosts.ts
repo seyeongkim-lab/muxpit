@@ -9,12 +9,31 @@ export interface SshHost {
   keyPath?: string;
   color?: string;
   /**
-   * When true, new sessions to this host are wrapped in `tmux -CC new -A -s wmux-<host>`
-   * so the remote shell survives SSH disconnection and wmux restarts. Requires
-   * tmux 3.2+ on the remote.
+   * Persist-mode policy for new sessions:
+   * - `"on"`: always wrap the remote shell in `tmux -CC new -A -s wmux-<host>`
+   * - `"off"`: never wrap; plain SSH
+   * - `"auto"` (default): probe the host for tmux 3.2+ at connect time and wrap when found
+   *
+   * Legacy values (boolean/undefined) from earlier versions are migrated on load:
+   * `true → "on"`, `false → "off"`, `undefined → "auto"`.
    */
-  persistMode?: boolean;
+  persistMode?: PersistMode;
 }
+
+export type PersistMode = "off" | "on" | "auto";
+
+export const PERSIST_MODE_CHOICES: { value: PersistMode; label: string; hint: string }[] = [
+  { value: "auto", label: "Auto", hint: "Probe for tmux 3.2+ on connect." },
+  { value: "on", label: "Always on", hint: "Force tmux wrapping; fails if unavailable." },
+  { value: "off", label: "Off", hint: "Plain SSH; no session persistence." },
+];
+
+const migratePersistMode = (value: unknown): PersistMode => {
+  if (value === "on" || value === "off" || value === "auto") return value;
+  if (value === true) return "on";
+  if (value === false) return "off";
+  return "auto";
+};
 
 interface SshHostsState {
   hosts: SshHost[];
@@ -31,7 +50,12 @@ const loadSaved = (): SshHost[] => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.map((h: SshHost & { persistMode?: unknown }) => ({
+          ...h,
+          persistMode: migratePersistMode(h.persistMode),
+        }));
+      }
     }
   } catch {}
   return [];
