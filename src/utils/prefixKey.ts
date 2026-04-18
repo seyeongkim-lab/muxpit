@@ -6,10 +6,14 @@ export const matchesPrefixKey = (
   prefixKey: PrefixKey,
 ): boolean => {
   if (prefixKey === "off") return false;
-  if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return false;
+  if (!e.ctrlKey || e.altKey || e.metaKey) return false;
+
+  const needsShift = prefixKey === "ctrl+shift+b";
+  if (needsShift !== e.shiftKey) return false;
 
   switch (prefixKey) {
     case "ctrl+b":
+    case "ctrl+shift+b":
       return e.key === "b" || e.key === "B" || e.code === "KeyB";
     case "ctrl+a":
       return e.key === "a" || e.key === "A" || e.code === "KeyA";
