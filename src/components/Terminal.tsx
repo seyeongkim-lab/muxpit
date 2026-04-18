@@ -478,12 +478,19 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     return () => resizeObserver.disconnect();
   }, [leafId]);
 
-  // Focus management
+  // Focus management — only force-focus when the browser focus is NOT already
+  // inside this terminal. A mousedown on an unfocused pane triggers
+  // `setFocusedLeaf`, which re-runs this effect; calling `term.focus()` during
+  // an active drag selection yanks focus to the helper textarea and clears the
+  // selection before `mouseup`, so the user cannot copy by drag. Native click
+  // already focuses xterm, so skipping the explicit focus() in that path is safe.
   useEffect(() => {
-    if (focusedLeafId === leafId) {
-      const instance = terminalInstances.get(leafId);
-      if (instance) instance.term.focus();
-    }
+    if (focusedLeafId !== leafId) return;
+    const instance = terminalInstances.get(leafId);
+    if (!instance) return;
+    const container = instance.term.element;
+    if (container && container.contains(document.activeElement)) return;
+    instance.term.focus();
   }, [focusedLeafId, leafId]);
 
   const handleMouseDown = () => {
