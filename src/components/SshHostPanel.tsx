@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useSshHostsStore,
   buildSshCommand,
@@ -9,6 +9,7 @@ import {
 
 interface SshHostPanelProps {
   open: boolean;
+  editHostId?: string | null;
   onClose: () => void;
   onConnect?: (host: SshHost) => void;
 }
@@ -23,11 +24,29 @@ const EMPTY_FORM = {
   persistMode: "auto" as PersistMode,
 };
 
-export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) => {
+export const SshHostPanel = ({ open, editHostId, onClose, onConnect }: SshHostPanelProps) => {
   const { hosts, addHost, updateHost, removeHost } = useSshHostsStore();
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+
+  // When opened via the sidebar's inline edit pencil, jump straight into edit mode.
+  useEffect(() => {
+    if (!open || !editHostId) return;
+    const host = hosts.find((h) => h.id === editHostId);
+    if (!host) return;
+    setForm({
+      name: host.name,
+      user: host.user,
+      host: host.host,
+      port: host.port,
+      keyPath: host.keyPath ?? "",
+      color: host.color ?? "",
+      persistMode: (host.persistMode ?? "auto") as PersistMode,
+    });
+    setEditingId(host.id);
+    setShowForm(true);
+  }, [open, editHostId, hosts]);
 
   if (!open) return null;
 

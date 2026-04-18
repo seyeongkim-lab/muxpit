@@ -54,9 +54,11 @@ impl PtyManager {
         self.spawn_internal(app, rows, cols, command, false)
     }
 
-    /// Spawn an SSH connection that wraps the remote shell in `tmux -CC new -A -s SESSION`.
-    /// Output is parsed through [`TmuxCcParser`]; user keystrokes are translated into
-    /// `send-keys -t PANE -l …` so tmux routes them to the active pane.
+    /// Spawn an SSH connection that wraps the remote shell in `tmux new-session -A -s SESSION`.
+    /// Uses *plain* tmux attach (not control mode): xterm renders tmux's own screen directly,
+    /// which gives us session persistence without the complexity of -CC protocol handling.
+    /// Reconnect is handled by the frontend retrying this same call with the same session_name;
+    /// tmux's `new -A` attaches to the existing server-side session if it's still alive.
     ///
     /// `ssh_command` is the user-supplied SSH invocation (e.g. `"ssh -p 22 user@host"`).
     /// `session_name` is the tmux session name to attach/create (sanitised internally).
@@ -76,9 +78,17 @@ impl PtyManager {
                 _ => c,
             })
             .collect();
-        let tmux_inner = format!("tmux -CC new-session -A -s {}", shell_single_quote(&safe));
+        // Hide tmux's status bar so the pane looks like a plain shell — wmux's own sidebar
+        // already shows session/pane info, and the bar is visual noise. `\; set ...` chains
+        // tmux commands so they run against the session we just created/attached.
+        let tmux_inner = format!(
+            "tmux new-session -A -s {} \\; set -g status off",
+            shell_single_quote(&safe),
+        );
         let full = format!("{} -t {}", ssh_command, shell_single_quote(&tmux_inner));
-        self.spawn_internal(app, rows, cols, Some(full), true)
+        // tmux_cc=false: we no longer use control mode. Keep the parser module for a future
+        // re-introduction of real pane mapping (see TODO Phase 10 Step 1: pane mapping policy).
+        self.spawn_internal(app, rows, cols, Some(full), false)
     }
 
     fn spawn_internal(

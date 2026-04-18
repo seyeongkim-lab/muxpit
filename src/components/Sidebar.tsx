@@ -2,7 +2,7 @@ import { useWorkspaceStore, collectLeafIds } from "../stores/workspace";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
-import { destroyAllTerminals } from "./Terminal";
+import { destroyAllTerminals } from "./terminalRegistry";
 import { SidebarMonitor } from "./SidebarMonitor";
 import { SidebarClaude } from "./SidebarClaude";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
@@ -16,6 +16,7 @@ interface SidebarMonitorInfo {
 interface SidebarProps {
   onOpenSettings?: () => void;
   onOpenSshPanel?: () => void;
+  onEditHost?: (hostId: string) => void;
   onConnectHost?: (host: SshHost) => void;
   monitor?: SidebarMonitorInfo | null;
   onCloseMonitor?: () => void;
@@ -25,7 +26,7 @@ interface SidebarProps {
   onToggleGridView?: () => void;
 }
 
-export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
+export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
   const { workspaces, activeId, addWorkspace, removeWorkspace, setActive, renameWorkspace, reorderWorkspaces } =
     useWorkspaceStore();
   const infoMap = useWorkspaceInfoStore((s) => s.info);
@@ -142,6 +143,16 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onConnectHost, monitor
                 />
                 <span style={styles.hostName}>{host.name}</span>
                 <span style={styles.hostTarget}>{target}</span>
+                <button
+                  style={styles.hostEditBtn}
+                  title="Edit host"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditHost?.(host.id);
+                  }}
+                >
+                  ✎
+                </button>
               </div>
             );
           })}
@@ -567,6 +578,17 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "8px 12px",
     cursor: "pointer",
     fontStyle: "italic" as const,
+  },
+  hostEditBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#6c7086",
+    cursor: "pointer",
+    fontSize: 12,
+    padding: "2px 6px",
+    marginLeft: 2,
+    flexShrink: 0,
+    lineHeight: 1,
   },
 
   connectBar: {

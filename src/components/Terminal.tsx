@@ -87,47 +87,7 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
   }
 };
 
-// Global map: keeps terminal instances alive across React re-renders
-const terminalInstances = new Map<
-  string,
-  {
-    term: XTerm;
-    fitAddon: FitAddon;
-    ptyId: number;
-    cleanup: {
-      unlistenOutput: () => void;
-      unlistenExit: () => void;
-      onData: { dispose: () => void };
-      onResize: { dispose: () => void };
-    };
-  }
->();
-
-export const destroyTerminal = (leafId: string) => {
-  const instance = terminalInstances.get(leafId);
-  if (!instance) return;
-  invoke("kill_pty", { id: instance.ptyId }).catch(() => {});
-  instance.cleanup.unlistenOutput();
-  instance.cleanup.unlistenExit();
-  instance.cleanup.onData.dispose();
-  instance.cleanup.onResize.dispose();
-  instance.term.dispose();
-  terminalInstances.delete(leafId);
-};
-
-export const destroyAllTerminals = (leafIds: string[]) => {
-  leafIds.forEach(destroyTerminal);
-};
-
-// Apply theme changes to all existing terminals in real-time
-useSettingsStore.subscribe((state, prev) => {
-  if (state.themeName !== prev.themeName || state.customColors !== prev.customColors) {
-    const theme = getResolvedTheme(state.themeName, state.customColors);
-    terminalInstances.forEach(({ term }) => {
-      term.options.theme = theme;
-    });
-  }
-});
+import { terminalInstances } from "./terminalRegistry";
 
 interface TerminalLeafProps {
   workspaceId: string;
