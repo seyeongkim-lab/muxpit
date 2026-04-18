@@ -80,10 +80,24 @@ impl PtyManager {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
             .collect();
-        // `safe` is now quote-free, so we only need to wrap the *outer* tmux_inner (because it
-        // contains spaces between tmux args). That single pair of quotes round-trips cleanly
-        // through shell_words_parse on Windows.
-        let tmux_inner = format!("tmux new-session -A -s {}", safe);
+        // Disable mouse on the target session so xterm's drag-to-select survives on the client:
+        // when tmux has `mouse on` (common via users' ~/.tmux.conf), tmux captures mousedown and
+        // swallows the browser-level selection, making copy-by-drag impossible in the wmux pane.
+        //
+        // Chaining via tmux's native `\; set -g mouse off` is NOT safe here — spawn_internal's
+        // shell_words_parse skips `\` handling on Windows (commit a3b6f10 lesson) so the escape
+        // drops through to tmux as a bare `;` and gets misinterpreted. Instead, do a three-step
+        // sequence inside a remote `sh -c`:
+        //   1. ensure the session exists (create detached if not)
+        //   2. set mouse off *only on that session* (don't touch global -g, so other tmux
+        //      sessions on the same server keep the user's preference)
+        //   3. exec into attach so tmux replaces sh and ssh tracks tmux's lifetime
+        // `safe` is [a-zA-Z0-9_-] only, so no inner quoting is needed. Inner uses `"` because the
+        // whole thing is wrapped in `'` by shell_single_quote below.
+        let tmux_inner = format!(
+            "sh -c \"tmux has-session -t {name} 2>/dev/null || tmux new-session -d -s {name}; tmux set-option -t {name} mouse off; exec tmux attach -t {name}\"",
+            name = safe
+        );
         let full = format!("{} -t {}", ssh_command, shell_single_quote(&tmux_inner));
         // tmux_cc=false: we no longer use control mode. Keep the parser module for a future
         // re-introduction of real pane mapping (see TODO Phase 10 Step 1: pane mapping policy).
