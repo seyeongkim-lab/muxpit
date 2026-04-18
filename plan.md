@@ -402,6 +402,85 @@
 
 ---
 
+### Phase 10: 원격 세션 지속성 (하이브리드)
+> 목표: Windows wmux GUI로 macOS/Linux **원격 서버**에 SSH 접속할 때, 연결이 끊기거나 wmux를 재시작해도 원격 쉘과 실행 중 프로세스(예: `vim`, `npm run dev`)가 살아있고 스크롤백이 복원됨. wmux 앱 자체는 Windows에서 계속 돌고, 지속성은 **원격 서버 쪽**에서 달성.
+
+**배경**: 현재 [src/stores/workspace.ts](src/stores/workspace.ts)는 SSH 명령줄만 저장하고, SSH 단절 시 원격 쉘이 SIGHUP로 종료됨. `tmux`/`screen`/`wmux-server` 등 원격 지속성 수단을 wmux가 **자동 감지·통합**하지 않으면 사용자가 수동 `tmux attach`를 매번 기억해야 함.
+
+**전략 (하이브리드 = 옵션 C)**: 원격 접속 시 지속성 수단을 **선호도 순으로 탐지**하여 자동 채택.
+
+1. **wmux-server** (원격 설치 필요): 완전한 기능 — 스크롤백 정확도, 사이드바·모니터·notify 원격 확장
+2. **tmux control mode** (원격 설치 불필요): 검증된 지속성, 대부분의 서버에 이미 있음
+3. **plain SSH** (둘 다 없음): 지속성 없음, 기존 동작
+
+#### Step 1: tmux control mode 통합 (B 경로) — 최우선 가치
+> 원격 설치 없이 즉시 얻는 효과가 가장 큼.
+
+1-1. **원격 tmux 감지** — [src-tauri/src/lib.rs](src-tauri/src/lib.rs)에 `check_remote_tmux(ssh_command)` 추가
+   - 패턴: 기존 `check_remote_claude`와 동일
+   - `ssh host 'tmux -V 2>/dev/null'` → `tmux 3.x` 파싱, 3.2 이상이면 활성화
+1-2. **SSH 명령 자동 래핑** — SSH 세션 생성 시 사용자 설정 "tmux 지속 모드 ON"이면 원본 명령을 변환
+   - Before: `ssh user@host`
+   - After: `ssh user@host -t 'tmux -CC new-session -A -s wmux-$(hostname)'`
+   - `-CC` = control mode, `-A` = 존재하면 attach, 없으면 생성
+1-3. **control mode 파서** — `src-tauri/src/tmux_cc.rs` 신규
+   - 파싱 대상 notification: `%begin ID TIME N`, `%end ID TIME N`, `%output %paneId data`, `%window-add`, `%session-changed`, `%exit`
+   - 출력 디코딩: tmux control mode는 octal escape (`\123`) 사용 → 디코더 구현
+1-4. **wmux pane ↔ tmux pane 매핑**
+   - wmux 패인 하나 = tmux window 하나 (단순화). split은 wmux 레이어에서만
+   - 또는: tmux window 하나 = 여러 wmux pane (tmux split을 wmux가 표현) — **Step 2에서 결정**
+1-5. **재접속 로직** — [src-tauri/src/pty.rs](src-tauri/src/pty.rs)에 재연결 가드
+   - SSH 프로세스 종료 감지 → 지수 백오프 (1s, 2s, 5s, 10s, 30s) → 동일 세션명으로 재접속
+   - `tmux new -A` 덕분에 재접속 시 기존 세션 attach 보장
+   - 사용자에게 "재연결 중..." 오버레이
+
+**검증**:
+- [ ] 원격에서 `while true; do date; sleep 1; done` 실행 → wmux 강제 종료 → 재실행 시 스크롤백 + 카운터 계속
+- [ ] wifi off 30초 → 자동 재연결 + 동일 세션
+- [ ] 원격 서버 `tmux list-sessions`에 `wmux-{hostname}` 세션 존재 확인
+- [ ] tmux 3.1 미만 서버에서 fallback 동작 확인
+
+#### Step 2: 자동 fallback + UI 상태 표시
+2-1. tmux 없음/버전 낮음 → plain SSH로 fallback, 명시적 토스트
+2-2. 상태 뱃지 (패인 헤더):
+   - `● tmux 지속` (초록)
+   - `● 미지속 (tmux 3.2+ 권장)` (노랑) — 클릭 시 설치 가이드
+   - `● wmux-server` (파랑, Step 3 이후)
+2-3. SSH 프로파일별 "지속 모드" 토글 ([src/stores/sshHosts.ts](src/stores/sshHosts.ts) 확장)
+2-4. tmux control mode의 한계 명시 (마우스 이벤트, 일부 SGR 속성)
+
+#### Step 3: wmux-server 프로토콜 (A 경로, 옵션)
+> tmux 한계를 넘기 원하는 사용자 대상. 기존 스파이크 재활용.
+
+3-1. [spike/wmux-daemon-spike/](spike/wmux-daemon-spike/)의 PDU/RingBuffer를 `wmux-server/` 정식 크레이트로 승격
+3-2. **전송 레이어 변경**: Unix socket → **SSH stdio**
+   - 기동: `ssh host 'wmux-server stdio-mode'` 으로 원격 실행
+   - stdin/stdout을 JSON lines PDU 전송 채널로
+   - 로컬 Unix socket 모드는 개발/테스트용으로 유지
+3-3. **Hello/협상 PDU** 추가: `{type: hello, version: X, capabilities: [...]}` → 클라이언트가 기능 결정
+3-4. wmux-server 기능 확장: 원격 `git` 정보, `ss -tlnp` 기반 포트, 프로세스 트리를 사이드바로
+3-5. 우선 감지: SSH 접속 시 `which wmux-server && wmux-server --version` → 있으면 이 경로 채택
+
+#### Step 4: 배포 & 설치 UX
+4-1. `wmux-server` GitHub release — `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`
+4-2. wmux 내 "원격에 서버 설치" 버튼:
+   - SSH로 접속 → 아키텍처 감지 → 해당 바이너리 scp → `~/.local/bin/wmux-server` 배치 → `chmod +x`
+4-3. 업데이트 확인: wmux GUI 버전과 원격 server 버전 불일치 시 경고 + 원클릭 갱신
+4-4. CLI: `wmux install-server <user@host>`
+
+**의존성 추가**:
+- Step 1~2: 추가 크레이트 **없음** (tmux control mode는 텍스트 프로토콜, 직접 파싱)
+- Step 3: `ssh2` 또는 `russh` (프로그래매틱 SSH) — 또는 `ssh.exe` CLI 그대로 사용하고 stdio 파이프만 가로채기
+
+**리스크**:
+- tmux control mode 버전 차이 (3.2 이전은 notification 일부 누락) → 호환성 매트릭스 필요
+- 멀티 pane 동기화 정책 (tmux split vs wmux split: Step 2에서 확정)
+- 재접속 중 사용자 입력 버퍼링/무시 정책
+- SSH 단절 감지 지연 (TCP keepalive 설정 필요, 클라이언트 측 `ServerAliveInterval` 강제)
+- wmux-server 배포·업데이트 신뢰 체인 (GitHub release 서명 검증)
+
+---
+
 ## 리스크
 
 | 리스크 | 대응 |
@@ -411,6 +490,8 @@
 | PTY cwd 추적 | Windows에서 `/proc` 없음 → OSC 7 시퀀스 의존 |
 | 브라우저 패인 복잡도 | Phase 7로 후순위, 생략 가능 |
 | 성능 (다수 PTY) | WebGL 렌더러 + 비활성 탭 최소화 |
+| Phase 10 원격 tmux 버전 편차 | 3.2 미만은 fallback, UI로 사용자에게 명시 |
+| Phase 10 wmux-server 배포 | Step 3 전까지는 tmux만으로 충분, A 경로는 후순위 |
 
 ## 프로젝트 구조 (예상)
 

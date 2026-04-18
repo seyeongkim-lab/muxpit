@@ -2,6 +2,7 @@ mod ipc;
 mod monitor;
 mod pty;
 mod sysinfo;
+mod tmux_cc;
 
 use monitor::MonitorManager;
 use pty::PtyManager;
@@ -12,6 +13,18 @@ use tauri::{AppHandle, State};
 #[tauri::command]
 fn spawn_pty(app: AppHandle, state: State<'_, PtyManager>, rows: u16, cols: u16, command: Option<String>) -> Result<u32, String> {
     state.spawn(app, rows, cols, command)
+}
+
+#[tauri::command]
+fn spawn_pty_tmux_cc(
+    app: AppHandle,
+    state: State<'_, PtyManager>,
+    rows: u16,
+    cols: u16,
+    ssh_command: String,
+    session_name: String,
+) -> Result<u32, String> {
+    state.spawn_tmux_cc(app, rows, cols, ssh_command, session_name)
 }
 
 #[tauri::command]
@@ -134,6 +147,80 @@ async fn check_remote_claude(ssh_command: String) -> Result<bool, String> {
         .map_err(|e| format!("Task join error: {e}"))
 }
 
+/// Returns the remote tmux version (e.g. `"3.4"`) when tmux is found on the
+/// target host and can execute `tmux -V`; otherwise `None`.
+#[tauri::command]
+async fn check_remote_tmux(ssh_command: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || check_remote_tmux_sync(&ssh_command))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))
+}
+
+fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
+    let parts: Vec<&str> = ssh_command.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut options: Vec<&str> = Vec::new();
+    let mut target: Option<&str> = None;
+    let mut i = 1;
+    while i < parts.len() {
+        match parts[i] {
+            "-p" | "-i" => {
+                options.push(parts[i]);
+                if i + 1 < parts.len() {
+                    options.push(parts[i + 1]);
+                    i += 2;
+                    continue;
+                }
+            }
+            s if s.contains('@') => {
+                target = Some(s);
+            }
+            _ => {
+                options.push(parts[i]);
+            }
+        }
+        i += 1;
+    }
+
+    let target = target?;
+
+    let mut cmd = Command::new(parts[0]);
+    for opt in &options {
+        cmd.arg(opt);
+    }
+    cmd.args([
+        "-o", "ConnectTimeout=10",
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=accept-new",
+    ]);
+    cmd.arg(target);
+    cmd.arg("tmux -V 2>/dev/null");
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    cmd.stderr(Stdio::null());
+
+    match cmd.output() {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            // Expected format: "tmux 3.4" or "tmux next-3.5" etc.
+            stdout
+                .split_whitespace()
+                .nth(1)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        }
+        _ => None,
+    }
+}
+
 fn check_remote_claude_sync(ssh_command: &str) -> bool {
     // Parse the SSH command: "ssh [-p port] [-i key] user@host"
     let parts: Vec<&str> = ssh_command.split_whitespace().collect();
@@ -215,6 +302,7 @@ pub fn run() {
         .manage(MonitorManager::new())
         .invoke_handler(tauri::generate_handler![
             spawn_pty,
+            spawn_pty_tmux_cc,
             write_pty,
             resize_pty,
             kill_pty,
@@ -224,6 +312,7 @@ pub fn run() {
             get_shell_ctx,
             list_fonts,
             check_remote_claude,
+            check_remote_tmux,
             send_notification,
             request_session_content,
             start_monitor,

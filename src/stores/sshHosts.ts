@@ -8,6 +8,12 @@ export interface SshHost {
   port: number;
   keyPath?: string;
   color?: string;
+  /**
+   * When true, new sessions to this host are wrapped in `tmux -CC new -A -s wmux-<host>`
+   * so the remote shell survives SSH disconnection and wmux restarts. Requires
+   * tmux 3.2+ on the remote.
+   */
+  persistMode?: boolean;
 }
 
 interface SshHostsState {
