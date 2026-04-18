@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import type { CustomColors, ThemeColorKey } from "../themes";
 
-export type PrefixKey = "off" | "ctrl+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
+export type PrefixKey = "off" | "ctrl+b" | "ctrl+shift+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
 
 export const PREFIX_KEY_CHOICES: { value: PrefixKey; label: string }[] = [
+  { value: "ctrl+shift+b", label: "Ctrl+Shift+B" },
   { value: "ctrl+b", label: "Ctrl+B (tmux default)" },
   { value: "ctrl+a", label: "Ctrl+A (screen default)" },
   { value: "ctrl+space", label: "Ctrl+Space" },
@@ -49,7 +50,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontFamily: saved.fontFamily ?? "'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace",
   themeName: saved.themeName ?? "Catppuccin Mocha",
   customColors: saved.customColors ?? {},
-  prefixKey: saved.prefixKey ?? "ctrl+b",
+  prefixKey: saved.prefixKey ?? "ctrl+shift+b",
 
   increaseFontSize: () => {
     const next = Math.min(get().fontSize + 1, FONT_SIZE_MAX);
