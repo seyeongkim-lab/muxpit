@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import type { ClaudeSessionInfo } from "../stores/monitor";
+import { useSidebarLayoutStore } from "../stores/sidebarLayout";
 
 interface SidebarClaudeProps {
   sessions: ClaudeSessionInfo[];
@@ -65,10 +66,31 @@ export const SidebarClaude = ({ sessions, sshTarget: _sshTarget, onViewSession, 
     return Array.from(map.values());
   }, [sessions]);
 
+  const height = useSidebarLayoutStore((s) => s.claudeHeight);
+  const setHeight = useSidebarLayoutStore((s) => s.setClaudeHeight);
+
+  const onResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = height;
+    const onMove = (ev: MouseEvent) => setHeight(startH + (startY - ev.clientY));
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   if (sessions.length === 0) return null;
 
   return (
-    <div style={styles.container}>
+    <div style={{ ...styles.container, height: collapsed ? undefined : height }}>
+      <div style={styles.resizeHandle} onMouseDown={onResizeStart} title="Drag to resize" />
       <div style={styles.header} onClick={() => setCollapsed((c) => !c)}>
         <span style={styles.headerText}>Claude Sessions</span>
         <span style={styles.toggle}>{collapsed ? "\u25B6" : "\u25BC"}</span>
@@ -120,6 +142,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontFamily: "'JetBrains Mono', monospace",
     flexShrink: 0,
+    display: "flex",
+    flexDirection: "column" as const,
+    position: "relative",
+  },
+  resizeHandle: {
+    position: "absolute",
+    top: -2,
+    left: 0,
+    right: 0,
+    height: 6,
+    cursor: "ns-resize",
+    zIndex: 1,
   },
   header: {
     display: "flex",
@@ -141,7 +175,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   body: {
     padding: "4px 0",
-    maxHeight: 120,
+    flex: 1,
+    minHeight: 0,
     overflowY: "auto" as const,
   },
   projectRow: {
