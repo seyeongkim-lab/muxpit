@@ -369,6 +369,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const parent = findLeaf(w.layout, leafId);
         const inheritedCmd =
           parent?.command && /^ssh\b/i.test(parent.command) ? parent.command : undefined;
+        // Inherit tmux-persist mode with a unique session name per pane so each leaf
+        // reconnects independently. Strip any prior `-n-<ts>-<cnt>` marker (from a
+        // previous split) so names stay bounded across repeated splits; the `n-`
+        // sentinel disambiguates from host names that may legitimately end in
+        // `-<digits>-<digits>` (e.g. `wmux-host-10-20`).
+        const parentBase = parent?.tmuxSession?.replace(/-n-\d+-\d+$/, "");
+        const inheritedTmuxSession = parentBase
+          ? `${parentBase}-${newLeafId}`
+          : undefined;
         const splitNode: SplitNode = {
           type: "split",
           id: genId(),
@@ -382,6 +391,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               ptyId: null,
               cloneFromPtyId: parent?.ptyId ?? undefined,
               command: inheritedCmd,
+              tmuxSession: inheritedTmuxSession,
             },
           ],
         };
@@ -398,6 +408,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   splitLeafWithCommand: (workspaceId: string, leafId: string, direction: SplitDirection, command: string) => {
+    // Intentionally does NOT inherit `tmuxSession` from the parent — callers pass a
+    // full ssh command that already embeds a remote command (e.g. claude auto-split
+    // uses `ssh -t user@host "bash -lc 'claude ...'"`). The tmux wrapper in
+    // `spawn_tmux_cc` appends `-t tmux new-session ...` to the ssh command, which
+    // would collide with the embedded remote command. The new pane is therefore a
+    // raw ssh invocation by design.
     const newLeafId = genId();
     set((s) => ({
       workspaces: s.workspaces.map((w) => {
