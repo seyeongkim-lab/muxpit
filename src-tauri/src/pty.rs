@@ -1,8 +1,9 @@
+use crate::tmux_cc::{shell_single_quote, TmuxCcParser, TmuxEvent};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,10 +18,17 @@ pub struct PtyExit {
     pub code: Option<i32>,
 }
 
+struct TmuxCcState {
+    /// Pane id (e.g. `%0`) that user keystrokes should be routed to via `send-keys`.
+    /// Set on first `%output` received after attach.
+    active_pane: Option<String>,
+}
+
 struct PtyInstance {
     writer: Box<dyn Write + Send>,
     _master: Box<dyn MasterPty + Send>,
     child_pid: Option<u32>,
+    tmux_state: Option<Arc<Mutex<TmuxCcState>>>,
 }
 
 pub struct PtyManager {
@@ -36,7 +44,51 @@ impl PtyManager {
         }
     }
 
-    pub fn spawn(&self, app: AppHandle, rows: u16, cols: u16, command: Option<String>) -> Result<u32, String> {
+    pub fn spawn(
+        &self,
+        app: AppHandle,
+        rows: u16,
+        cols: u16,
+        command: Option<String>,
+    ) -> Result<u32, String> {
+        self.spawn_internal(app, rows, cols, command, false)
+    }
+
+    /// Spawn an SSH connection that wraps the remote shell in `tmux -CC new -A -s SESSION`.
+    /// Output is parsed through [`TmuxCcParser`]; user keystrokes are translated into
+    /// `send-keys -t PANE -l …` so tmux routes them to the active pane.
+    ///
+    /// `ssh_command` is the user-supplied SSH invocation (e.g. `"ssh -p 22 user@host"`).
+    /// `session_name` is the tmux session name to attach/create (sanitised internally).
+    pub fn spawn_tmux_cc(
+        &self,
+        app: AppHandle,
+        rows: u16,
+        cols: u16,
+        ssh_command: String,
+        session_name: String,
+    ) -> Result<u32, String> {
+        // tmux session names cannot contain '.' or ':'; replace with '_'.
+        let safe: String = session_name
+            .chars()
+            .map(|c| match c {
+                '.' | ':' | ' ' | '\t' | '\n' | '\r' => '_',
+                _ => c,
+            })
+            .collect();
+        let tmux_inner = format!("tmux -CC new-session -A -s {}", shell_single_quote(&safe));
+        let full = format!("{} -t {}", ssh_command, shell_single_quote(&tmux_inner));
+        self.spawn_internal(app, rows, cols, Some(full), true)
+    }
+
+    fn spawn_internal(
+        &self,
+        app: AppHandle,
+        rows: u16,
+        cols: u16,
+        command: Option<String>,
+        tmux_cc: bool,
+    ) -> Result<u32, String> {
         let pty_system = native_pty_system();
 
         let pair = pty_system
@@ -81,7 +133,13 @@ impl PtyManager {
             id
         };
 
-        // Read thread: PTY stdout -> frontend event
+        let tmux_state = if tmux_cc {
+            Some(Arc::new(Mutex::new(TmuxCcState { active_pane: None })))
+        } else {
+            None
+        };
+
+        // Read thread: PTY stdout -> frontend event (optionally via tmux-CC parser)
         let mut reader = pair
             .master
             .try_clone_reader()
@@ -89,7 +147,13 @@ impl PtyManager {
 
         let app_clone = app.clone();
         let pty_id = id;
+        let reader_tmux_state = tmux_state.clone();
         std::thread::spawn(move || {
+            let mut parser = if reader_tmux_state.is_some() {
+                Some(TmuxCcParser::new())
+            } else {
+                None
+            };
             let mut buf = [0u8; 4096];
             loop {
                 match reader.read(&mut buf) {
@@ -104,15 +168,23 @@ impl PtyManager {
                         break;
                     }
                     Ok(n) => {
-                        // Use lossy conversion for terminal output
-                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let _ = app_clone.emit(
-                            "pty-output",
-                            PtyOutput {
-                                id: pty_id,
-                                data: text,
-                            },
-                        );
+                        let chunk = &buf[..n];
+                        if let (Some(p), Some(state)) =
+                            (parser.as_mut(), reader_tmux_state.as_ref())
+                        {
+                            for event in p.feed(chunk) {
+                                handle_tmux_event(event, pty_id, state, &app_clone);
+                            }
+                        } else {
+                            let text = String::from_utf8_lossy(chunk).to_string();
+                            let _ = app_clone.emit(
+                                "pty-output",
+                                PtyOutput {
+                                    id: pty_id,
+                                    data: text,
+                                },
+                            );
+                        }
                     }
                     Err(_) => {
                         let _ = app_clone.emit(
@@ -156,6 +228,7 @@ impl PtyManager {
                     writer,
                     _master: pair.master,
                     child_pid,
+                    tmux_state,
                 },
             );
         }
@@ -168,9 +241,31 @@ impl PtyManager {
         let instance = instances
             .get_mut(&id)
             .ok_or_else(|| format!("PTY {id} not found"))?;
+
+        let payload: Vec<u8> = if let Some(state) = &instance.tmux_state {
+            let pane = state.lock().unwrap().active_pane.clone();
+            match pane {
+                Some(pane) => {
+                    // Route via tmux send-keys so keystrokes go to the active remote pane
+                    // rather than being interpreted as tmux control-mode commands.
+                    let cmd = format!(
+                        "send-keys -t {} -l {}\n",
+                        pane,
+                        shell_single_quote(data)
+                    );
+                    cmd.into_bytes()
+                }
+                // No pane discovered yet (pre-attach). Pass through — tmux may echo as command,
+                // but this window is brief (before first %output).
+                None => data.as_bytes().to_vec(),
+            }
+        } else {
+            data.as_bytes().to_vec()
+        };
+
         instance
             .writer
-            .write_all(data.as_bytes())
+            .write_all(&payload)
             .map_err(|e| format!("Write error: {e}"))?;
         instance
             .writer
@@ -211,6 +306,47 @@ impl PtyManager {
             .get(&id)
             .ok_or_else(|| format!("PTY {id} not found"))?;
         Ok(instance.child_pid)
+    }
+}
+
+fn handle_tmux_event(
+    event: TmuxEvent,
+    pty_id: u32,
+    state: &Arc<Mutex<TmuxCcState>>,
+    app: &AppHandle,
+) {
+    match event {
+        TmuxEvent::Output { pane_id, data } => {
+            // First pane we observe becomes the active send-keys target for this session.
+            {
+                let mut s = state.lock().unwrap();
+                if s.active_pane.is_none() {
+                    s.active_pane = Some(pane_id);
+                }
+            }
+            let text = String::from_utf8_lossy(&data).into_owned();
+            let _ = app.emit(
+                "pty-output",
+                PtyOutput {
+                    id: pty_id,
+                    data: text,
+                },
+            );
+        }
+        TmuxEvent::WindowPaneChanged { pane_id, .. } => {
+            state.lock().unwrap().active_pane = Some(pane_id);
+        }
+        TmuxEvent::Exit { .. } => {
+            let _ = app.emit(
+                "pty-exit",
+                PtyExit {
+                    id: pty_id,
+                    code: None,
+                },
+            );
+        }
+        // Other notifications are not acted on for MVP; ignore silently.
+        _ => {}
     }
 }
 

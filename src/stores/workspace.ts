@@ -18,6 +18,11 @@ export interface LeafNode {
   cloneFromPtyId?: number; // PTY ID of the source pane when split
   sshCommand?: string; // SSH command to restore on session reload
   command?: string; // Direct command to run as PTY process (e.g., "ssh user@host")
+  /**
+   * When set, spawn via `spawn_pty_tmux_cc` using `command` as ssh_command and this
+   * field as tmux session name. Enables tmux-CC persistence on the remote.
+   */
+  tmuxSession?: string;
 }
 
 export interface BrowserNode {
@@ -67,6 +72,7 @@ interface SavedLeaf {
   id: string;
   sshCommand?: string;
   command?: string;
+  tmuxSession?: string;
 }
 
 interface SavedBrowser {
@@ -117,7 +123,7 @@ interface WorkspaceState {
   workspaces: Workspace[];
   activeId: string | null;
 
-  addWorkspace: (name?: string, command?: string) => string;
+  addWorkspace: (name?: string, command?: string, tmuxSession?: string) => string;
   removeWorkspace: (id: string) => void;
   setActive: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
@@ -208,10 +214,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   activeId: null,
 
-  addWorkspace: (name?: string, command?: string) => {
+  addWorkspace: (name?: string, command?: string, tmuxSession?: string) => {
     const leafId = genId();
     const wsId = genId();
-    const leaf: LeafNode = { type: "leaf", id: leafId, ptyId: null, command: command ?? undefined };
+    const leaf: LeafNode = {
+      type: "leaf",
+      id: leafId,
+      ptyId: null,
+      command: command ?? undefined,
+      tmuxSession: tmuxSession ?? undefined,
+    };
     const ws: Workspace = {
       id: wsId,
       name: name ?? `Shell ${get().workspaces.length + 1}`,
@@ -459,7 +471,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   saveSession: () => {
     const state = get();
     const stripPty = (node: LayoutNode): SavedLayout => {
-      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command };
+      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, tmuxSession: node.tmuxSession };
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, monitorId: node.monitorId };
       if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, project: node.project, sessionId: node.sessionId, monitorId: node.monitorId };
@@ -496,7 +508,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (!session.workspaces || session.workspaces.length === 0) return false;
 
       const restoreLayout = (node: SavedLayout): LayoutNode => {
-        if (node.type === "leaf") return { type: "leaf", id: node.id, ptyId: null, sshCommand: node.sshCommand, command: node.command };
+        if (node.type === "leaf") return { type: "leaf", id: node.id, ptyId: null, sshCommand: node.sshCommand, command: node.command, tmuxSession: node.tmuxSession };
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
         // Monitor nodes are now sidebar-based; restore as plain leaf
         if (node.type === "monitor") return { type: "leaf", id: node.id, ptyId: null };

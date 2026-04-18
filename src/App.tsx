@@ -361,10 +361,12 @@ export const App = () => {
       if (target) st.setFocusedLeaf(ws.id, target.id);
     };
 
-    const dispatchPrefixCommand = (e: KeyboardEvent) => {
+    // Returns true if prefix mode should stay active (sticky) so the user
+    // can chain the same command — e.g. arrow navigation — without re-pressing prefix.
+    const dispatchPrefixCommand = (e: KeyboardEvent): boolean => {
       const st = useWorkspaceStore.getState();
       const ws = st.workspaces.find((w) => w.id === st.activeId);
-      if (!ws) return;
+      if (!ws) return false;
 
       // Directional focus / resize
       const arrowMap: Record<string, Direction> = {
@@ -375,72 +377,71 @@ export const App = () => {
       };
       const dir = arrowMap[e.key];
       if (dir) {
-        if (e.ctrlKey) {
+        if (e.ctrlKey && !e.shiftKey) {
           const r = computeResize(ws.layout, ws.focusedLeafId, dir);
           if (r) st.setSplitRatio(ws.id, r.splitId, r.ratio);
         } else {
           const neighborId = findNeighbor(ws.layout, ws.focusedLeafId, dir);
           if (neighborId) st.setFocusedLeaf(ws.id, neighborId);
         }
-        return;
+        return true;
       }
 
       switch (e.key) {
         case " ":
         case "Spacebar":
           st.cycleLayout(ws.id);
-          return;
+          return false;
         case '"':
-          // tmux ": split horizontally → divider is horizontal → wmux "vertical"
           st.splitLeaf(ws.id, ws.focusedLeafId, "vertical");
-          return;
+          return false;
         case "%":
-          // tmux %: split vertically → divider is vertical → wmux "horizontal"
           st.splitLeaf(ws.id, ws.focusedLeafId, "horizontal");
-          return;
+          return false;
         case "x": {
           const leaves = collectLeafIds(ws.layout);
           if (leaves.length > 1) {
             destroyTerminal(ws.focusedLeafId);
             st.closeLeaf(ws.id, ws.focusedLeafId);
           }
-          return;
+          return false;
         }
         case "z":
           st.toggleZoom(ws.id);
-          return;
+          return false;
         case "o": {
           const leaves = collectOrderedLeaves(ws.layout);
-          if (leaves.length < 2) return;
+          if (leaves.length < 2) return false;
           const curIdx = leaves.findIndex((n) => n.id === ws.focusedLeafId);
           const next = leaves[(curIdx + 1) % leaves.length];
           st.setFocusedLeaf(ws.id, next.id);
-          return;
+          return false;
         }
         case "c":
           st.addWorkspace();
-          return;
+          return false;
         case "n":
           switchWorkspaceDelta(1);
-          return;
+          return false;
         case "p":
           switchWorkspaceDelta(-1);
-          return;
+          return false;
         case "q":
           triggerPaneNumbers();
-          return;
+          return false;
         case "!":
           st.breakPane(ws.id, ws.focusedLeafId);
-          return;
+          return false;
         case "h":
           usePrefixStore.getState().setHistoryOpen(true);
-          return;
+          return false;
       }
 
       if (/^[0-9]$/.test(e.key)) {
         selectWorkspaceByIndex(parseInt(e.key, 10));
-        return;
+        return false;
       }
+      return false;
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -485,9 +486,13 @@ export const App = () => {
         }
         e.preventDefault();
         e.stopPropagation();
-        deactivatePrefix();
-        if (e.key === "Escape") return; // Escape just cancels
-        dispatchPrefixCommand(e);
+        if (e.key === "Escape") { deactivatePrefix(); return; }
+        const keepActive = dispatchPrefixCommand(e);
+        if (keepActive) {
+          activatePrefix(); // refresh timeout so arrows can be chained
+        } else {
+          deactivatePrefix();
+        }
         return;
       }
 
@@ -571,7 +576,10 @@ export const App = () => {
 
   const handleConnectHost = useCallback((host: SshHost) => {
     const cmd = buildSshCommand(host);
-    const wsId = addWorkspace(host.name, cmd);
+    // When persist mode is enabled, tag the leaf with a session name so Terminal.tsx
+    // dispatches spawn_pty_tmux_cc instead of spawn_pty. Rust sanitises `.`/`:`.
+    const tmuxSession = host.persistMode ? `wmux-${host.host}` : undefined;
+    const wsId = addWorkspace(host.name, cmd, tmuxSession);
     // Start monitor immediately — no need to wait for SSH auto-detection
     const target = `${host.user}@${host.host}`;
     const monitorId = `mon-${Date.now()}`;

@@ -7,7 +7,15 @@ interface SshHostPanelProps {
   onConnect?: (host: SshHost) => void;
 }
 
-const EMPTY_FORM = { name: "", user: "", host: "", port: 22, keyPath: "", color: "" };
+const EMPTY_FORM = {
+  name: "",
+  user: "",
+  host: "",
+  port: 22,
+  keyPath: "",
+  color: "",
+  persistMode: false,
+};
 
 export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) => {
   const { hosts, addHost, updateHost, removeHost } = useSshHostsStore();
@@ -33,6 +41,7 @@ export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) =>
       port: form.port || 22,
       keyPath: form.keyPath.trim() || undefined,
       color: form.color.trim() || undefined,
+      persistMode: form.persistMode,
     };
 
     if (editingId) {
@@ -51,6 +60,7 @@ export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) =>
       port: host.port,
       keyPath: host.keyPath ?? "",
       color: host.color ?? "",
+      persistMode: host.persistMode ?? false,
     });
     setEditingId(host.id);
     setShowForm(true);
@@ -186,6 +196,18 @@ export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) =>
                     ))}
                   </div>
                 </div>
+
+                <label style={styles.toggleRow}>
+                  <input
+                    type="checkbox"
+                    checked={form.persistMode}
+                    onChange={(e) => setForm({ ...form, persistMode: e.target.checked })}
+                  />
+                  <span style={styles.toggleLabel}>Persist session via tmux</span>
+                  <span style={styles.toggleHint}>
+                    Requires tmux 3.2+ on the remote. Session survives disconnects.
+                  </span>
+                </label>
               </div>
 
               {/* Preview */}
@@ -448,5 +470,23 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     padding: "5px 16px",
     cursor: "pointer",
+  },
+  toggleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap" as const,
+    cursor: "pointer",
+    paddingTop: 4,
+  },
+  toggleLabel: {
+    color: "#cdd6f4",
+    fontSize: 12,
+  },
+  toggleHint: {
+    color: "#585b70",
+    fontSize: 10,
+    flexBasis: "100%",
+    marginLeft: 20,
   },
 };

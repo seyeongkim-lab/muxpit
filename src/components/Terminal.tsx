@@ -155,6 +155,18 @@ const findCloneFromPtyId = (wsId: string, leafId: string): number | undefined =>
   return find(ws.layout);
 };
 
+const findTmuxSession = (wsId: string, leafId: string): string | undefined => {
+  const state = useWorkspaceStore.getState();
+  const ws = state.workspaces.find((w) => w.id === wsId);
+  if (!ws) return undefined;
+  const find = (node: any): string | undefined => {
+    if (node.type === "leaf" && node.id === leafId) return node.tmuxSession;
+    if (node.type === "split") return find(node.children[0]) ?? find(node.children[1]);
+    return undefined;
+  };
+  return find(ws.layout);
+};
+
 export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
@@ -325,12 +337,23 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // If spawning with an explicit command fails (e.g. ssh binary missing after a
     // session restore), fall back to the default shell so the pane is usable instead
     // of leaving a silent empty xterm.
+    const tmuxSession = findTmuxSession(workspaceId, leafId);
     try {
-      ptyId = await invoke<number>("spawn_pty", {
-        rows: Math.max(term.rows, 1),
-        cols: Math.max(term.cols, 1),
-        command: spawnCommand,
-      });
+      if (tmuxSession && spawnCommand) {
+        // Persist-mode SSH: wrap remote shell in `tmux -CC new -A -s ...`.
+        ptyId = await invoke<number>("spawn_pty_tmux_cc", {
+          rows: Math.max(term.rows, 1),
+          cols: Math.max(term.cols, 1),
+          sshCommand: spawnCommand,
+          sessionName: tmuxSession,
+        });
+      } else {
+        ptyId = await invoke<number>("spawn_pty", {
+          rows: Math.max(term.rows, 1),
+          cols: Math.max(term.cols, 1),
+          command: spawnCommand,
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       term.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
