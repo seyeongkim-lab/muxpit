@@ -18,6 +18,7 @@ import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspac
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { LayoutNode, LeafNode } from "./stores/workspace";
 import {
   findNeighbor,
@@ -103,9 +104,15 @@ export const App = () => {
 
   const uiFontSize = useSettingsStore((s) => s.fontSize);
 
-  // Scale entire UI based on font size
+  // Use Tauri's webview page-zoom (same mechanism as Ctrl+mouse-wheel in a browser).
+  // The CSS `zoom` property scales pixels after layout, so DOM APIs like clientWidth
+  // still return the pre-zoom size — xterm's fitAddon then picked too few cols/rows and
+  // left top/right gaps. Page zoom, by contrast, scales the viewport itself so all
+  // measurements stay consistent. Baseline: fontSize=14 → zoom=1.0.
   useEffect(() => {
-    document.documentElement.style.fontSize = `${uiFontSize}px`;
+    getCurrentWebview()
+      .setZoom(uiFontSize / 14)
+      .catch((err) => console.error("[wmux] setZoom failed:", err));
   }, [uiFontSize]);
 
   // Poll workspace metadata (git, ports) every 5 seconds
