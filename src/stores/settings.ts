@@ -34,6 +34,13 @@ interface SettingsState {
 const FONT_SIZE_MIN = 8;
 const FONT_SIZE_MAX = 32;
 
+// Default font stack — Nerd Font variants first so Powerline/starship glyphs (PUA code
+// points) render. Windows ships the Caskaydia NFM variant via the "Cascadia Code Nerd Font"
+// installer; the other names are common macOS/Linux installs. xterm requires a monospace
+// family, hence the NFM/Mono suffix where available.
+const DEFAULT_FONT_FAMILY =
+  "'CaskaydiaMono NFM', 'CaskaydiaCove NFM', 'JetBrainsMono NFM', 'MesloLGS NF', 'FiraCode Nerd Font Mono', 'Hack Nerd Font Mono', 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace";
+
 // Load saved settings from localStorage
 const loadSaved = () => {
   try {
@@ -45,9 +52,18 @@ const loadSaved = () => {
 
 const saved = loadSaved();
 
+// One-shot migration: if the user's persisted fontFamily predates the Nerd-Font default
+// (saved before any NF glyph was referenced), upgrade it so terminal prompts render.
+if (saved.fontFamily && !/\b(Nerd|NF|NFM|Powerline)\b/i.test(saved.fontFamily)) {
+  saved.fontFamily = DEFAULT_FONT_FAMILY;
+  try {
+    localStorage.setItem("wmux-settings", JSON.stringify(saved));
+  } catch {}
+}
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontSize: saved.fontSize ?? 14,
-  fontFamily: saved.fontFamily ?? "'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace",
+  fontFamily: saved.fontFamily ?? DEFAULT_FONT_FAMILY,
   themeName: saved.themeName ?? "Catppuccin Mocha",
   customColors: saved.customColors ?? {},
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
