@@ -26,6 +26,9 @@ interface PtyExit {
   code: number | null;
 }
 
+// Exponential backoff between tmux-CC reconnection attempts.
+const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
+
 // Shell history capture hook: injects a bash PROMPT_COMMAND + zsh preexec hook into the spawned
 // shell (local or SSH remote) so it emits OSC 777;cmd;<command> before every interactive command.
 // wmux parses those sequences and stores them in the shared history store.
@@ -293,12 +296,58 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       if (event.payload.id === ptyId) handleOutput(event.payload);
     });
 
+    // Guard against overlapping reconnect loops when pty-exit fires multiple times
+    // (e.g. both the child-watcher and reader thread report EOF).
+    let reconnecting = false;
+
+    const tryReconnect = async (sshCommand: string, sessionName: string) => {
+      if (reconnecting) return;
+      reconnecting = true;
+      try {
+        for (let i = 0; i < RECONNECT_BACKOFF_MS.length; i++) {
+          const delay = RECONNECT_BACKOFF_MS[i];
+          term.write(
+            `\r\n\x1b[33m[disconnected — reconnecting in ${delay / 1000}s ` +
+              `(attempt ${i + 1}/${RECONNECT_BACKOFF_MS.length})]\x1b[0m\r\n`,
+          );
+          await new Promise((r) => setTimeout(r, delay));
+          // If the terminal was destroyed while we were waiting, bail out.
+          if (!terminalInstances.has(leafId)) return;
+          try {
+            const newId = await invoke<number>("spawn_pty_tmux_cc", {
+              rows: Math.max(term.rows, 1),
+              cols: Math.max(term.cols, 1),
+              sshCommand,
+              sessionName,
+            });
+            ptyId = newId;
+            const inst = terminalInstances.get(leafId);
+            if (inst) inst.ptyId = newId;
+            setPtyId(workspaceId, leafId, newId);
+            term.write(`\x1b[32m[reconnected]\x1b[0m\r\n`);
+            return;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            term.write(`\x1b[31m[reconnect attempt failed: ${msg}]\x1b[0m\r\n`);
+          }
+        }
+        term.write(`\r\n\x1b[31m[reconnect gave up after ${RECONNECT_BACKOFF_MS.length} attempts]\x1b[0m\r\n`);
+      } finally {
+        reconnecting = false;
+      }
+    };
+
     const unlistenExit = await listen<PtyExit>("pty-exit", (event) => {
       if (!idAssigned) {
         bufferedExit.push(event.payload);
         return;
       }
-      if (event.payload.id === ptyId) {
+      if (event.payload.id !== ptyId) return;
+
+      // Tmux-CC persist mode: attempt to re-attach the remote session.
+      if (tmuxSession && spawnCommand) {
+        tryReconnect(spawnCommand, tmuxSession);
+      } else {
         term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
       }
     });

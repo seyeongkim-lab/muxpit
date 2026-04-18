@@ -34,6 +34,15 @@ const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
   return null;
 };
 
+// tmux control mode needs 3.2+ (window/session notifications stabilised).
+const isTmuxVersionSupported = (version: string): boolean => {
+  const m = version.match(/(\d+)\.(\d+)/);
+  if (!m) return false;
+  const major = parseInt(m[1], 10);
+  const minor = parseInt(m[2], 10);
+  return major > 3 || (major === 3 && minor >= 2);
+};
+
 
 // Parse "user@host" from SSH command like: ssh user@host -t bash, "C:\...\ssh.exe" user@host
 const parseSshTarget = (cmd: string): string | null => {
@@ -574,14 +583,25 @@ export const App = () => {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [activeWs, workspaces, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser, gridView]);
 
-  const handleConnectHost = useCallback((host: SshHost) => {
+  const handleConnectHost = useCallback(async (host: SshHost) => {
     const cmd = buildSshCommand(host);
-    // When persist mode is enabled, tag the leaf with a session name so Terminal.tsx
-    // dispatches spawn_pty_tmux_cc instead of spawn_pty. Rust sanitises `.`/`:`.
-    const tmuxSession = host.persistMode ? `wmux-${host.host}` : undefined;
-    const wsId = addWorkspace(host.name, cmd, tmuxSession);
-    // Start monitor immediately — no need to wait for SSH auto-detection
     const target = `${host.user}@${host.host}`;
+    const mode = host.persistMode ?? "auto";
+
+    // Decide tmux wrapping policy. For "auto", probe the remote for tmux 3.2+
+    // before opening the workspace so the first spawn already uses tmux-CC.
+    let useTmux = mode === "on";
+    if (mode === "auto") {
+      try {
+        const version = await invoke<string | null>("check_remote_tmux", { sshCommand: cmd });
+        useTmux = !!version && isTmuxVersionSupported(version);
+      } catch {
+        useTmux = false;
+      }
+    }
+    const tmuxSession = useTmux ? `wmux-${host.host}` : undefined;
+
+    const wsId = addWorkspace(host.name, cmd, tmuxSession);
     const monitorId = `mon-${Date.now()}`;
     setSidebarMonitor((prev) => {
       if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
@@ -589,7 +609,6 @@ export const App = () => {
     });
     monitorTargetRef.current = target;
 
-    // Auto-split with Claude if available on remote server
     autoClaudeSplit(wsId, cmd, host);
   }, [addWorkspace]);
 

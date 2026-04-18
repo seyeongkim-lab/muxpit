@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { useSshHostsStore, buildSshCommand, type SshHost } from "../stores/sshHosts";
+import {
+  useSshHostsStore,
+  buildSshCommand,
+  PERSIST_MODE_CHOICES,
+  type PersistMode,
+  type SshHost,
+} from "../stores/sshHosts";
 
 interface SshHostPanelProps {
   open: boolean;
@@ -14,7 +20,7 @@ const EMPTY_FORM = {
   port: 22,
   keyPath: "",
   color: "",
-  persistMode: false,
+  persistMode: "auto" as PersistMode,
 };
 
 export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) => {
@@ -60,7 +66,7 @@ export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) =>
       port: host.port,
       keyPath: host.keyPath ?? "",
       color: host.color ?? "",
-      persistMode: host.persistMode ?? false,
+      persistMode: (host.persistMode ?? "auto") as PersistMode,
     });
     setEditingId(host.id);
     setShowForm(true);
@@ -197,17 +203,25 @@ export const SshHostPanel = ({ open, onClose, onConnect }: SshHostPanelProps) =>
                   </div>
                 </div>
 
-                <label style={styles.toggleRow}>
-                  <input
-                    type="checkbox"
-                    checked={form.persistMode}
-                    onChange={(e) => setForm({ ...form, persistMode: e.target.checked })}
-                  />
+                <div style={styles.toggleRow}>
                   <span style={styles.toggleLabel}>Persist session via tmux</span>
+                  <select
+                    value={form.persistMode}
+                    onChange={(e) =>
+                      setForm({ ...form, persistMode: e.target.value as PersistMode })
+                    }
+                    style={styles.persistSelect}
+                  >
+                    {PERSIST_MODE_CHOICES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
                   <span style={styles.toggleHint}>
-                    Requires tmux 3.2+ on the remote. Session survives disconnects.
+                    {PERSIST_MODE_CHOICES.find((c) => c.value === form.persistMode)?.hint}
                   </span>
-                </label>
+                </div>
               </div>
 
               {/* Preview */}
@@ -488,5 +502,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 10,
     flexBasis: "100%",
     marginLeft: 20,
+  },
+  persistSelect: {
+    backgroundColor: "#313244",
+    color: "#cdd6f4",
+    border: "1px solid #45475a",
+    borderRadius: 4,
+    padding: "2px 6px",
+    fontSize: 12,
+    fontFamily: "inherit",
   },
 };
