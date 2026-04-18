@@ -45,6 +45,14 @@ interface SshHostsState {
 
 const STORAGE_KEY = "wmux-ssh-hosts";
 
+// Strip an accidental leading dot from id_rsa/ed25519/ecdsa/dsa filenames in saved keyPaths
+// (e.g. `~/.ssh/.id_ed25519` → `~/.ssh/id_ed25519`). OpenSSH prints "Identity file ... not
+// accessible" at connect when the path is wrong; we silently fix it on load.
+const normalizeKeyPath = (p?: string): string | undefined => {
+  if (!p) return p;
+  return p.replace(/([\\/])\.id_(rsa|ed25519|ecdsa|dsa)\b/gi, "$1id_$2");
+};
+
 const loadSaved = (): SshHost[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -53,6 +61,7 @@ const loadSaved = (): SshHost[] => {
       if (Array.isArray(parsed)) {
         return parsed.map((h: SshHost & { persistMode?: unknown }) => ({
           ...h,
+          keyPath: normalizeKeyPath(h.keyPath),
           persistMode: migratePersistMode(h.persistMode),
         }));
       }
@@ -70,8 +79,12 @@ const saveHosts = (hosts: SshHost[]) => {
 let counter = 0;
 const genId = () => `ssh-${Date.now()}-${counter++}`;
 
+const initialHosts = loadSaved();
+// Persist any keyPath corrections made during load so the cleanup is permanent.
+if (initialHosts.length) saveHosts(initialHosts);
+
 export const useSshHostsStore = create<SshHostsState>((set, get) => ({
-  hosts: loadSaved(),
+  hosts: initialHosts,
 
   addHost: (host) => {
     const newHost: SshHost = { ...host, id: genId() };
