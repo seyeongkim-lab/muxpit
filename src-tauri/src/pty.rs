@@ -70,21 +70,20 @@ impl PtyManager {
         ssh_command: String,
         session_name: String,
     ) -> Result<u32, String> {
-        // tmux session names cannot contain '.' or ':'; replace with '_'.
+        // Sanitise strictly to [a-zA-Z0-9_-]. tmux rejects `.` and `:`, and we *also* want the
+        // result to be shell-safe so we don't have to quote it — any `'` in the inner string
+        // would end up escaped as `'\''` by shell_single_quote, and spawn_internal's
+        // shell_words_parse skips `\` handling on Windows (to preserve paths like `C:\Users\…`),
+        // leaving stray backslashes inside the session name. Past symptoms: `wmux-host\\`,
+        // `wmux-host `, each connect creating a brand new session.
         let safe: String = session_name
             .chars()
-            .map(|c| match c {
-                '.' | ':' | ' ' | '\t' | '\n' | '\r' => '_',
-                _ => c,
-            })
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
             .collect();
-        // NOTE: earlier iterations chained `\\; set -g status off` here, but the round-trip
-        // through shell_words_parse (which intentionally skips `\\` on Windows so paths like
-        // `C:\Users\…` survive) mangled the backslash and produced inconsistent session names
-        // (`wmux-host `, `wmux-host\\`) on each connect — a fresh session every time. Keep the
-        // tmux invocation free of `\\;` chaining; users who want status bar hidden can add
-        // `set -g status off` to their remote `~/.tmux.conf`.
-        let tmux_inner = format!("tmux new-session -A -s {}", shell_single_quote(&safe));
+        // `safe` is now quote-free, so we only need to wrap the *outer* tmux_inner (because it
+        // contains spaces between tmux args). That single pair of quotes round-trips cleanly
+        // through shell_words_parse on Windows.
+        let tmux_inner = format!("tmux new-session -A -s {}", safe);
         let full = format!("{} -t {}", ssh_command, shell_single_quote(&tmux_inner));
         // tmux_cc=false: we no longer use control mode. Keep the parser module for a future
         // re-introduction of real pane mapping (see TODO Phase 10 Step 1: pane mapping policy).
