@@ -229,7 +229,11 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       // WebGL not available, use default DOM renderer
     }
 
-    fitAddon.fit();
+    // Defer to next frame so document-level zoom (set by App.tsx via the settings store)
+    // has taken effect on layout before xterm measures the container. Without this,
+    // fitAddon sees the pre-zoom pixel size and picks too few cols/rows, leaving
+    // top/right gaps.
+    requestAnimationFrame(() => fitAddon.fit());
 
     // Set up event listeners BEFORE spawning PTY to avoid missing output.
     // Race: the Rust reader thread starts emitting "pty-output" *before* the
@@ -441,8 +445,11 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     //   - claude panes (their prompt is not a plain shell)
     //   - tmux-persist panes (the hook ends with `clear`, which erases the existing tmux
     //     screen on reconnect — history is already captured when the session was first started)
+    //   - PowerShell / cmd panes (POSIX `[ -n ... ]` syntax raises a ParserError)
     const isClaudePane = !!(spawnCommand && spawnCommand.toLowerCase().includes("claude"));
-    if (!isClaudePane && !tmuxSession) {
+    const isWindowsLocalShell = !spawnCommand && /^win/i.test(navigator.platform);
+    const isPowerShellTarget = !!(spawnCommand && /\b(pwsh|powershell|cmd\.exe)\b/i.test(spawnCommand));
+    if (!isClaudePane && !tmuxSession && !isWindowsLocalShell && !isPowerShellTarget) {
       setTimeout(() => {
         invoke("write_pty", { id: ptyId, data: SHELL_HISTORY_HOOK }).catch(() => {});
       }, 700);
@@ -457,13 +464,18 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     });
   }, [initTerminal, leafId]);
 
-  // Apply font settings changes to existing terminals
+  // Apply font settings changes to existing terminals.
+  // xterm renders its own canvas, so Chromium's `zoom` on <html> (used by App.tsx to
+  // scale the chrome) does not reach the WebGL canvas. The terminal font must be
+  // resized through xterm's own options. fit() runs in the next frame because the
+  // zoom useEffect in App.tsx also fires on fontSize changes and the relative order
+  // isn't guaranteed — waiting a frame ensures zoom is already applied.
   useEffect(() => {
     const instance = terminalInstances.get(leafId);
     if (instance) {
       instance.term.options.fontSize = fontSize;
       instance.term.options.fontFamily = fontFamily;
-      instance.fitAddon.fit();
+      requestAnimationFrame(() => instance.fitAddon.fit());
     }
   }, [fontSize, fontFamily, leafId]);
 
