@@ -103,9 +103,20 @@ export const useSshHostsStore = create<SshHostsState>((set, get) => ({
   },
 }));
 
+// Common SSH options for wmux sessions:
+// - accept-new: first-contact hosts are auto-added to known_hosts (no stdin prompt that
+//   stalls the PTY). Key-change conflicts still reject, preserving TOFU safety.
+// - ServerAliveInterval/CountMax: detect dead peers within ~90s so tmux-CC reconnect
+//   can trigger instead of hanging indefinitely.
+const SSH_DEFAULT_OPTS = [
+  "-o", "StrictHostKeyChecking=accept-new",
+  "-o", "ServerAliveInterval=30",
+  "-o", "ServerAliveCountMax=3",
+];
+
 /** Build an SSH command string from a host config */
 export const buildSshCommand = (host: SshHost): string => {
-  const parts: string[] = ["ssh"];
+  const parts: string[] = ["ssh", ...SSH_DEFAULT_OPTS];
 
   if (host.port !== 22) {
     parts.push("-p", String(host.port));
@@ -122,7 +133,7 @@ export const buildSshCommand = (host: SshHost): string => {
 
 /** Build an SSH command that executes a remote command (with -t for PTY allocation) */
 export const buildSshCommandWithRemoteCmd = (host: SshHost, remoteCmd: string): string => {
-  const parts: string[] = ["ssh", "-t"];
+  const parts: string[] = ["ssh", "-t", ...SSH_DEFAULT_OPTS];
 
   if (host.port !== 22) {
     parts.push("-p", String(host.port));

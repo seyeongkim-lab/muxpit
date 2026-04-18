@@ -18,5 +18,5 @@ export const usePrefixStore = create<PrefixState>((set) => ({
   setHistoryOpen: (v) => set({ historyOpen: v }),
 }));
 
-export const PREFIX_TIMEOUT_MS = 2000;
+export const PREFIX_TIMEOUT_MS = 500;
 export const PANE_NUMBER_TIMEOUT_MS = 2000;

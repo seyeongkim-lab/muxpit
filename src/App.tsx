@@ -13,7 +13,7 @@ import { buildSshCommand, buildSshCommandWithRemoteCmd, type SshHost } from "./s
 import { useNotificationStore } from "./stores/notifications";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
-import { destroyTerminal, destroyAllTerminals } from "./components/Terminal";
+import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegistry";
 import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspaceInfo";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -97,6 +97,7 @@ export const App = () => {
   const activeWs = workspaces.find((w) => w.id === activeId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sshPanelOpen, setSshPanelOpen] = useState(false);
+  const [sshPanelEditId, setSshPanelEditId] = useState<string | null>(null);
   const [gridView, setGridView] = useState(false);
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string } | null>(null);
 
@@ -386,7 +387,9 @@ export const App = () => {
       };
       const dir = arrowMap[e.key];
       if (dir) {
-        if (e.ctrlKey && !e.shiftKey) {
+        // Ctrl + arrow → resize (Shift is ignored so Ctrl+Shift+B prefix users
+        // can keep Ctrl+Shift held and chain resize presses).
+        if (e.ctrlKey) {
           const r = computeResize(ws.layout, ws.focusedLeafId, dir);
           if (r) st.setSplitRatio(ws.id, r.splitId, r.ratio);
         } else {
@@ -634,7 +637,8 @@ export const App = () => {
     <div style={styles.container}>
       <Sidebar
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenSshPanel={() => setSshPanelOpen(true)}
+        onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
+        onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
         onConnectHost={handleConnectHost}
         monitor={sidebarMonitor}
         onCloseMonitor={handleCloseMonitor}
@@ -681,8 +685,9 @@ export const App = () => {
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <SshHostPanel
         open={sshPanelOpen}
-        onClose={() => setSshPanelOpen(false)}
-        onConnect={(host) => { handleConnectHost(host); setSshPanelOpen(false); }}
+        editHostId={sshPanelEditId}
+        onClose={() => { setSshPanelEditId(null); setSshPanelOpen(false); }}
+        onConnect={(host) => { handleConnectHost(host); setSshPanelEditId(null); setSshPanelOpen(false); }}
       />
     </div>
   );
