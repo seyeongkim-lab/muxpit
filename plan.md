@@ -5,6 +5,23 @@
 ## 아키텍처
 
 ```
+
+## 2026-04-25 Design Follow-up
+
+1. Build -> `pnpm build` 성공 여부 확인.
+2. Inspect -> sidebar, AI toolbar, card chrome의 theme variable 적용 범위 확인.
+3. Implement -> 고정 색/음수 letter spacing/card radius만 좁게 수정.
+4. Verify -> `pnpm build` 재실행, Chrome headless preview 가능 여부 확인.
+5. Refine -> 산발적인 gradient/glow를 제거하고 solid accent, flat surface, hairline 위주로 정리.
+6. Custom titlebar -> native decorations 비활성화, theme 변수 기반 titlebar 추가, window button 권한/동작 검증.
+
+## 2026-04-25 Linux Deb Build on 0.7
+
+1. Research -> local docs/repo와 Tauri CLI `--bundles deb` 확인.
+2. Stage -> local dirty worktree를 tar snapshot으로 0.7 임시 빌드 디렉터리에 전송.
+3. Build -> `pnpm install --frozen-lockfile`, `pnpm tauri build --bundles deb`.
+4. Install -> generated `.deb`를 `apt-get install`로 설치.
+5. Verify -> `dpkg -s`, installed files, `ldd`, desktop file validation 확인.
 ┌─────────────────────────────────────────────────┐
 │                    wmux Window                   │
 │ ┌──────────┐ ┌────────────────────────────────┐ │

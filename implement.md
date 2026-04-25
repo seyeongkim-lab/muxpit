@@ -68,3 +68,23 @@
 - `cargo check`: ✓
 - `tsc --noEmit`: ✓
 - `pnpm tauri build --debug`: ✓ (바이너리 생성 완료)
+
+## 2026-04-25 Design Follow-up
+
+- `src/styles/linear.css`: logo/section/AI toolbar letter-spacing을 0으로 정리하고 card radius를 8px로 조정.
+- `src/components/Sidebar.tsx`: sidebar row, badge, footer, connect bar의 chrome 색을 `--wmux-*` 변수로 전환.
+- `src/components/SidebarMonitor.tsx`, `src/components/SidebarClaude.tsx`: card header/text/border/track 색을 theme CSS 변수로 전환.
+- `src/App.tsx`: welcome logo의 accent와 letter-spacing을 sidebar chrome 규칙에 맞춤.
+- `src/styles/linear.css`: logo/header/row/active bar/AI hover의 gradient와 glow를 제거하고 solid accent 및 flat background로 전환.
+- `src/themes.ts`: 더 이상 사용하지 않는 `--wmux-accent-grad` 주입 제거.
+- `src-tauri/tauri.conf.json`: `decorations`를 `false`로 전환.
+- `src-tauri/capabilities/default.json`: custom titlebar용 close/minimize/start-dragging/toggle-maximize 권한 추가.
+- `src/App.tsx`: `--wmux-*` theme 변수를 쓰는 32px custom titlebar와 minimize/maximize/close 버튼 추가.
+- `src/styles/linear.css`: titlebar 버튼 hover/close hover 상태 추가.
+
+## 2026-04-25 Linux Deb Build on 0.7
+
+- 로컬 worktree snapshot을 `/home/seyeongkim/build/wmux-codex`로 전송.
+- 0.7에서 `pnpm install --frozen-lockfile` 후 `pnpm tauri build --bundles deb` 실행.
+- 생성된 패키지: `/home/seyeongkim/build/wmux-codex/src-tauri/target/release/bundle/deb/wmux_0.1.0_amd64.deb`.
+- 설치 명령: `sudo -n apt-get install -y /home/seyeongkim/build/wmux-codex/src-tauri/target/release/bundle/deb/wmux_0.1.0_amd64.deb`.

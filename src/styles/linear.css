@@ -1,0 +1,230 @@
+/* Linear-style chrome polish for wmux. All colours come from CSS custom
+ * properties that App.tsx (re)writes whenever the user picks a different
+ * terminal theme — the chrome therefore tracks the selected palette
+ * without any per-component plumbing. The terminal area itself is
+ * intentionally untouched (xterm renders to canvas; chrome effects don't
+ * reach it anyway). */
+
+:root {
+  /* Sensible defaults so the chrome still renders before the JS theme
+   * sync runs (e.g. during the first paint of a session restore). */
+  --wmux-bg: #0e0e16;
+  --wmux-bg-soft: #14141d;
+  --wmux-bg-elev: rgba(255, 255, 255, 0.025);
+
+  --wmux-text: #cdd6f4;
+  --wmux-subtext: #6c7086;
+
+  --wmux-hairline: rgba(255, 255, 255, 0.06);
+  --wmux-hairline-strong: rgba(255, 255, 255, 0.10);
+
+  --wmux-accent: #89b4fa;
+  --wmux-accent-2: #cba6f7;
+  --wmux-accent-soft: rgba(137, 180, 250, 0.07);
+  --wmux-accent-mid: rgba(137, 180, 250, 0.18);
+  --wmux-accent-strong: rgba(137, 180, 250, 0.55);
+  --wmux-accent-glow: rgba(137, 180, 250, 0.35);
+  --wmux-accent-2-soft: rgba(203, 166, 247, 0.08);
+
+  --wmux-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+                      0 4px 14px rgba(0, 0, 0, 0.35);
+
+  --wmux-font-display: 'Inter', 'SF Pro Display', -apple-system,
+                       BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* ---------- Logo ---------- */
+
+.wmux-titlebar-btn {
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.wmux-titlebar-btn:hover {
+  background-color: var(--wmux-accent-soft) !important;
+  color: var(--wmux-text) !important;
+}
+
+.wmux-titlebar-close:hover {
+  background-color: #e5484d !important;
+  color: #ffffff !important;
+}
+
+.wmux-logo {
+  font-family: var(--wmux-font-display);
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: var(--wmux-accent);
+  user-select: none;
+}
+
+/* ---------- Generic icon buttons ---------- */
+
+.wmux-btn {
+  transition: transform 120ms ease,
+              border-color 120ms ease,
+              color 120ms ease,
+              background-color 120ms ease,
+              box-shadow 120ms ease;
+}
+.wmux-btn:hover {
+  transform: scale(1.04);
+  border-color: var(--wmux-hairline-strong) !important;
+  color: var(--wmux-text) !important;
+}
+.wmux-btn:active {
+  transform: scale(0.96);
+}
+
+/* ---------- Sidebar list rows ---------- */
+
+.wmux-host-row {
+  position: relative;
+  transition: background 160ms ease;
+}
+.wmux-host-row:hover {
+  background-color: var(--wmux-accent-soft) !important;
+}
+
+.wmux-ws-item {
+  position: relative;
+  transition: background-color 120ms ease;
+}
+.wmux-ws-item:not(.wmux-ws-active):hover {
+  background-color: rgba(255, 255, 255, 0.025) !important;
+}
+
+.wmux-active-bar {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  background: var(--wmux-accent);
+  border-radius: 0 2px 2px 0;
+  pointer-events: none;
+}
+
+.wmux-host-dot {
+  position: relative;
+  box-shadow: 0 0 0 1px currentColor inset;
+  filter: saturate(1.2);
+  transition: box-shadow 160ms ease, transform 120ms ease;
+}
+.wmux-host-dot::after {
+  /* Outer glow ring — slightly larger than the dot, low-opacity stroke
+   * pulled from the dot's `color` so each host's badge ring matches its
+   * own colour. */
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.wmux-host-row:hover .wmux-host-dot {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 1px currentColor inset;
+}
+
+/* ---------- Cards (Monitor, Claude Sessions) ---------- */
+
+.wmux-card {
+  background: var(--wmux-bg-elev);
+  border: 1px solid var(--wmux-hairline);
+  border-radius: 8px;
+  box-shadow: var(--wmux-shadow-card);
+  margin: 6px 8px;
+  overflow: hidden;
+}
+
+/* ---------- Sidebar header / section labels ---------- */
+
+.wmux-sidebar-header {
+  border-bottom: 1px solid var(--wmux-hairline);
+  background: var(--wmux-bg);
+}
+
+.wmux-section-label {
+  font-family: var(--wmux-font-display);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--wmux-subtext);
+}
+
+/* ---------- AI pane toolbar ---------- */
+
+.wmux-ai-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  flex-shrink: 0;
+  background: var(--wmux-bg-soft);
+  border-bottom: 1px solid var(--wmux-hairline);
+}
+
+.wmux-ai-bar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wmux-subtext);
+  font-family: var(--wmux-font-display);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.wmux-ai-bar-label svg {
+  width: 11px;
+  height: 11px;
+  color: var(--wmux-accent);
+}
+
+.wmux-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--wmux-accent-soft);
+  border: 1px solid var(--wmux-accent-mid);
+  color: var(--wmux-text);
+  font-family: var(--wmux-font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  border-radius: 999px;
+  padding: 2px 11px 3px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background 160ms ease,
+              border-color 160ms ease,
+              color 160ms ease,
+              box-shadow 160ms ease,
+              transform 120ms ease;
+}
+.wmux-ai-btn::before {
+  /* Tiny "+" prefix so the button reads as an additive action. */
+  content: "+";
+  font-weight: 600;
+  opacity: 0.55;
+  margin-right: 1px;
+  transition: opacity 160ms ease;
+}
+.wmux-ai-btn:hover {
+  background: var(--wmux-accent);
+  border-color: transparent;
+  color: var(--wmux-bg);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15) inset;
+  transform: translateY(-1px);
+}
+.wmux-ai-btn:hover::before {
+  opacity: 1;
+}
+.wmux-ai-btn:active {
+  transform: translateY(0);
+}

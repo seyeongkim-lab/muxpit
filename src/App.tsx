@@ -9,12 +9,14 @@ import { PrefixIndicator } from "./components/PrefixIndicator";
 import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
-import { buildSshCommand, buildSshCommandWithRemoteCmd, type SshHost } from "./stores/sshHosts";
+import { buildSshCommand, type SshHost } from "./stores/sshHosts";
+import { useAiCliStore, buildAiLaunchCommand, parseSshTarget } from "./stores/aiCli";
 import { useNotificationStore } from "./stores/notifications";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegistry";
 import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspaceInfo";
+import { applyThemeVars, getResolvedTheme } from "./themes";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -45,50 +47,45 @@ const isTmuxVersionSupported = (version: string): boolean => {
 };
 
 
-// Parse "user@host" from SSH command like: ssh user@host -t bash, "C:\...\ssh.exe" user@host
-const parseSshTarget = (cmd: string): string | null => {
-  const parts = cmd.split(/\s+/);
-  for (const part of parts) {
-    // Skip flags, quoted paths, and the ssh binary itself
-    if (part.startsWith("-") || part.startsWith('"') || part.toLowerCase().includes("ssh")) continue;
-    if (part.includes("@")) return part;
-  }
-  // Fallback: look for user@host pattern anywhere
-  const match = cmd.match(/(\S+@\S+)/);
-  return match ? match[1] : null;
-};
-
-/** Check if claude CLI exists on remote and auto-split if found */
-const autoClaudeSplit = async (wsId: string, sshCommand: string, host?: SshHost) => {
+/**
+ * Probe the remote for installed AI CLIs and (when claude is found) auto-split a
+ * second pane into it. Probe results are cached on `useAiCliStore` so the
+ * per-pane toolbar can render the same set without a second SSH call.
+ */
+const autoAiSplit = async (wsId: string, sshCommand: string, host?: SshHost) => {
   try {
-    const hasClaude = await invoke<boolean>("check_remote_claude", { sshCommand });
-    if (!hasClaude) return;
+    const target = host ? `${host.user}@${host.host}` : parseSshTarget(sshCommand);
+    if (!target) return;
+
+    await useAiCliStore.getState().probe(target, sshCommand);
+    const available = useAiCliStore.getState().available(target);
+    if (!available || !available.has("claude")) return;
 
     const state = useWorkspaceStore.getState();
     const ws = state.workspaces.find((w) => w.id === wsId);
     if (!ws) return;
 
-    // Check if there's already a claude pane in this workspace
-    const hasClaudePane = (node: LayoutNode): boolean => {
-      if (node.type === "leaf") return !!node.command?.includes("claude");
-      if (node.type === "split") return hasClaudePane(node.children[0]) || hasClaudePane(node.children[1]);
+    // Skip if any AI pane already exists in this workspace. Backwards-compat:
+    // leaves saved before the aiKind field landed only carry a command string,
+    // so we also sniff the embedded remote command for a known AI CLI name.
+    const hasAiPane = (node: LayoutNode): boolean => {
+      if (node.type === "leaf") {
+        if (node.aiKind) return true;
+        return /(?:^|['" /])(claude|codex|gemini|copilot)\b/.test(node.command ?? "");
+      }
+      if (node.type === "split") return hasAiPane(node.children[0]) || hasAiPane(node.children[1]);
       return false;
     };
-    if (hasClaudePane(ws.layout)) return;
+    if (hasAiPane(ws.layout)) return;
 
-    // Build the claude SSH command
-    let claudeCmd: string;
-    if (host) {
-      claudeCmd = buildSshCommandWithRemoteCmd(host, "bash -lc 'claude --dangerously-skip-permissions'");
-    } else {
-      // Build from raw SSH command: insert -t and append remote command
-      claudeCmd = sshCommand.replace(/^ssh\b/, "ssh -t") + ` "bash -lc 'claude --dangerously-skip-permissions'"`;
-    }
-
+    const claudeCmd = buildAiLaunchCommand("claude", sshCommand, host);
     const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
-    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claudeCmd);
+    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claudeCmd, {
+      aiKind: "claude",
+      aiSshTarget: target,
+    });
   } catch {
-    // Silently ignore
+    // Silently ignore — probe failures already cache an empty set.
   }
 };
 
@@ -103,6 +100,14 @@ export const App = () => {
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string } | null>(null);
 
   const uiFontSize = useSettingsStore((s) => s.fontSize);
+  const themeName = useSettingsStore((s) => s.themeName);
+  const customColors = useSettingsStore((s) => s.customColors);
+
+  // Push resolved theme colours onto :root as CSS custom properties so the
+  // sidebar/toolbar chrome stays in sync when the user switches themes.
+  useEffect(() => {
+    applyThemeVars(getResolvedTheme(themeName, customColors));
+  }, [themeName, customColors]);
 
   // Use Tauri's webview page-zoom (same mechanism as Ctrl+mouse-wheel in a browser).
   // The CSS `zoom` property scales pixels after layout, so DOM APIs like clientWidth
@@ -224,7 +229,7 @@ export const App = () => {
         };
         const sshCmd = findSshLeaf(ws.layout);
         if (sshCmd) {
-          autoClaudeSplit(ws.id, sshCmd);
+          autoAiSplit(ws.id, sshCmd);
         }
       }
     }
@@ -619,7 +624,7 @@ export const App = () => {
     });
     monitorTargetRef.current = target;
 
-    autoClaudeSplit(wsId, cmd, host);
+    autoAiSplit(wsId, cmd, host);
   }, [addWorkspace]);
 
   const handleViewClaudeSession = useCallback((sshTarget: string, project: string, sessionId: string) => {
@@ -640,62 +645,113 @@ export const App = () => {
     }
   }, [sidebarMonitor]);
 
+  const handleWindowMinimize = useCallback(() => {
+    getCurrentWindow().minimize().catch((err) => console.error("[wmux] minimize failed:", err));
+  }, []);
+
+  const handleWindowMaximize = useCallback(() => {
+    getCurrentWindow().toggleMaximize().catch((err) => console.error("[wmux] toggleMaximize failed:", err));
+  }, []);
+
+  const handleWindowClose = useCallback(() => {
+    getCurrentWindow().close().catch((err) => console.error("[wmux] close failed:", err));
+  }, []);
+
   return (
     <div style={styles.container}>
-      <Sidebar
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
-        onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
-        onConnectHost={handleConnectHost}
-        monitor={sidebarMonitor}
-        onCloseMonitor={handleCloseMonitor}
-        onViewClaudeSession={handleViewClaudeSession}
-        onResumeClaudeSession={handleResumeClaudeSession}
-        gridView={gridView}
-        onToggleGridView={() => setGridView((prev) => !prev)}
-      />
-      <div style={styles.terminalArea}>
-        {gridView ? (
-          <GridOverview
-            workspaces={workspaces}
-            activeId={activeId}
-          />
-        ) : activeWs ? (
-          <>
-            <SplitPane
-              node={
-                activeWs.zoomedLeafId
-                  ? collectOrderedLeaves(activeWs.layout).find((n) => n.id === activeWs.zoomedLeafId) ?? activeWs.layout
-                  : activeWs.layout
-              }
-              workspaceId={activeWs.id}
-            />
-            <PaneNumberOverlay workspaceId={activeWs.id} />
-          </>
-        ) : (
-          <div style={styles.welcome}>
-            <div style={styles.welcomeLogo}>wmux</div>
-            <div style={styles.welcomeTagline}>Terminal Multiplexer</div>
-            <div style={styles.welcomeHints}>
-              <span><b>Ctrl+Shift+T</b> New session</span>
-              <span><b>Ctrl+Shift+D</b> Split horizontal</span>
-              <span><b>Ctrl+Shift+E</b> Split vertical</span>
-              <span><b>Ctrl+Shift+G</b> Grid overview</span>
-              <span><b>H</b> button to manage SSH hosts</span>
-            </div>
-          </div>
-        )}
+      <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
+        <div data-tauri-drag-region style={styles.titlebarBrand}>
+          <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
+          <span data-tauri-drag-region style={styles.titlebarSubtitle}>
+            {activeWs?.name ?? "Terminal Multiplexer"}
+          </span>
+        </div>
+        <div style={styles.titlebarControls} onDoubleClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="wmux-titlebar-btn"
+            style={styles.titlebarButton}
+            onClick={handleWindowMinimize}
+            title="Minimize"
+          >
+            -
+          </button>
+          <button
+            type="button"
+            className="wmux-titlebar-btn"
+            style={styles.titlebarButton}
+            onClick={handleWindowMaximize}
+            title="Maximize"
+          >
+            □
+          </button>
+          <button
+            type="button"
+            className="wmux-titlebar-btn wmux-titlebar-close"
+            style={{ ...styles.titlebarButton, ...styles.titlebarCloseButton }}
+            onClick={handleWindowClose}
+            title="Close"
+          >
+            ×
+          </button>
+        </div>
       </div>
-      <PrefixIndicator />
-      <HistoryPanel />
-      <NotificationPanel />
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <SshHostPanel
-        open={sshPanelOpen}
-        editHostId={sshPanelEditId}
-        onClose={() => { setSshPanelEditId(null); setSshPanelOpen(false); }}
-        onConnect={(host) => { handleConnectHost(host); setSshPanelEditId(null); setSshPanelOpen(false); }}
-      />
+      <div style={styles.appBody}>
+        <Sidebar
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
+          onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
+          onConnectHost={handleConnectHost}
+          monitor={sidebarMonitor}
+          onCloseMonitor={handleCloseMonitor}
+          onViewClaudeSession={handleViewClaudeSession}
+          onResumeClaudeSession={handleResumeClaudeSession}
+          gridView={gridView}
+          onToggleGridView={() => setGridView((prev) => !prev)}
+        />
+        <div style={styles.terminalArea}>
+          {gridView ? (
+            <GridOverview
+              workspaces={workspaces}
+              activeId={activeId}
+            />
+          ) : activeWs ? (
+            <>
+              <SplitPane
+                node={
+                  activeWs.zoomedLeafId
+                    ? collectOrderedLeaves(activeWs.layout).find((n) => n.id === activeWs.zoomedLeafId) ?? activeWs.layout
+                    : activeWs.layout
+                }
+                workspaceId={activeWs.id}
+              />
+              <PaneNumberOverlay workspaceId={activeWs.id} />
+            </>
+          ) : (
+            <div style={styles.welcome}>
+              <div style={styles.welcomeLogo}>wmux</div>
+              <div style={styles.welcomeTagline}>Terminal Multiplexer</div>
+              <div style={styles.welcomeHints}>
+                <span><b>Ctrl+Shift+T</b> New session</span>
+                <span><b>Ctrl+Shift+D</b> Split horizontal</span>
+                <span><b>Ctrl+Shift+E</b> Split vertical</span>
+                <span><b>Ctrl+Shift+G</b> Grid overview</span>
+                <span><b>H</b> button to manage SSH hosts</span>
+              </div>
+            </div>
+          )}
+        </div>
+        <PrefixIndicator />
+        <HistoryPanel />
+        <NotificationPanel />
+        <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <SshHostPanel
+          open={sshPanelOpen}
+          editHostId={sshPanelEditId}
+          onClose={() => { setSshPanelEditId(null); setSshPanelOpen(false); }}
+          onConnect={(host) => { handleConnectHost(host); setSshPanelEditId(null); setSshPanelOpen(false); }}
+        />
+      </div>
     </div>
   );
 };
@@ -703,8 +759,71 @@ export const App = () => {
 const styles: Record<string, React.CSSProperties> = {
   container: {
     display: "flex",
+    flexDirection: "column" as const,
     width: "100%",
     height: "100%",
+    overflow: "hidden",
+    backgroundColor: "var(--wmux-bg)",
+  },
+  titlebar: {
+    height: 32,
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "var(--wmux-bg)",
+    borderBottom: "1px solid var(--wmux-hairline)",
+    color: "var(--wmux-text)",
+    userSelect: "none" as const,
+  },
+  titlebarBrand: {
+    minWidth: 0,
+    flex: 1,
+    height: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 12,
+  },
+  titlebarLogo: {
+    color: "var(--wmux-accent)",
+    fontFamily: "var(--wmux-font-display)",
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1,
+  },
+  titlebarSubtitle: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+    color: "var(--wmux-subtext)",
+    fontSize: 12,
+    lineHeight: 1,
+  },
+  titlebarControls: {
+    height: "100%",
+    display: "flex",
+    flexShrink: 0,
+  },
+  titlebarButton: {
+    width: 42,
+    height: "100%",
+    border: "none",
+    borderLeft: "1px solid transparent",
+    backgroundColor: "transparent",
+    color: "var(--wmux-subtext)",
+    fontSize: 13,
+    lineHeight: 1,
+    cursor: "default",
+  },
+  titlebarCloseButton: {
+    fontSize: 16,
+  },
+  appBody: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
     overflow: "hidden",
   },
   terminalArea: {
@@ -725,9 +844,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   welcomeLogo: {
     fontSize: 48,
-    fontWeight: 700,
-    color: "#89b4fa",
-    letterSpacing: -2,
+    fontWeight: 800,
+    color: "var(--wmux-accent)",
+    letterSpacing: 0,
   },
   welcomeTagline: {
     fontSize: 14,

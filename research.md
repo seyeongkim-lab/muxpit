@@ -292,3 +292,17 @@ The **rtop model** (SSH + `/proc` reading) is the most appropriate for a termina
 - macOS remotes need different commands (`sysctl`, `vm_stat`, `iostat`)
 - FreeBSD remotes also differ (`sysctl`, `vmstat`)
 - Some hardened servers may restrict SSH command execution
+
+## 2026-04-25 Design Follow-up
+
+- 확인 대상: 테마 CSS 변수 주입(`src/themes.ts`), chrome CSS(`src/styles/linear.css`), sidebar/card 컴포넌트(`src/components/Sidebar*.tsx`), welcome logo(`src/App.tsx`).
+- 확인 결과: root CSS 변수 주입은 동작하도록 구성되어 있었지만 일부 카드/사이드바 내부 텍스트와 헤더가 Catppuccin 고정 색을 계속 사용했다.
+- 추가 발견: 일반 Chrome preview는 `@tauri-apps/api/window`의 Tauri runtime 의존성 때문에 `metadata` 오류로 빈 화면이 된다. 디자인 검증은 빌드와 코드 기준으로 수행했다.
+- 추가 피드백: `src/styles/linear.css`에 logo gradient, sidebar radial gradient, host row wash, active bar gradient, AI button hover gradient가 산재해 Raycast식 절제된 chrome보다 과장되어 보였다.
+- Window header theme: Tauri v2 공식 문서 기준 네이티브 titlebar는 시스템 theme 영향이 커서 앱 theme 동기화에 한계가 있다. 커스텀 titlebar는 `decorations: false`, `data-tauri-drag-region`, window 권한 및 window API 버튼으로 구현한다.
+
+## 2026-04-25 Linux Deb Build on 0.7
+
+- 공식 Tauri v2 CLI help와 문서 기준 `tauri build --bundles deb`가 Linux `.deb` 생성 옵션이다.
+- 0.7 host: `seyeongkim@192.168.0.7`, hostname `seyeongkim-ThinkPad-P14s-Gen-6`, x86_64 Ubuntu 26.04 dev branch.
+- 원격 repo `/home/seyeongkim/Projects/wmux`는 clean 상태였지만 로컬 변경이 dirty/untracked라 원격 repo를 건드리지 않고 `/home/seyeongkim/build/wmux-codex` 임시 스냅샷에서 빌드했다.

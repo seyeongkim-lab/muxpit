@@ -3,6 +3,11 @@ import { create } from "zustand";
 // Split tree types
 export type SplitDirection = "horizontal" | "vertical";
 
+// Known AI CLI tools that we surface as a per-pane toolbar. The list is closed so
+// callers can switch on it; remote install detection (`check_remote_clis`) decides
+// which ones are actually offered.
+export type AiKind = "claude" | "codex" | "gemini" | "copilot";
+
 export interface SplitNode {
   type: "split";
   id: string;
@@ -23,6 +28,11 @@ export interface LeafNode {
    * field as tmux session name. Enables tmux-CC persistence on the remote.
    */
   tmuxSession?: string;
+  // AI CLI metadata: lets the UI render an "add another AI pane" toolbar on top of
+  // any pane that was started as a known AI CLI. `aiSshTarget` is the parsed
+  // user@host string and is what AI availability is keyed by.
+  aiKind?: AiKind;
+  aiSshTarget?: string;
 }
 
 export interface BrowserNode {
@@ -73,6 +83,8 @@ interface SavedLeaf {
   sshCommand?: string;
   command?: string;
   tmuxSession?: string;
+  aiKind?: AiKind;
+  aiSshTarget?: string;
 }
 
 interface SavedBrowser {
@@ -134,7 +146,13 @@ interface WorkspaceState {
 
   // Split operations
   splitLeaf: (workspaceId: string, leafId: string, direction: SplitDirection) => string;
-  splitLeafWithCommand: (workspaceId: string, leafId: string, direction: SplitDirection, command: string) => string;
+  splitLeafWithCommand: (
+    workspaceId: string,
+    leafId: string,
+    direction: SplitDirection,
+    command: string,
+    aiMeta?: { aiKind: AiKind; aiSshTarget?: string },
+  ) => string;
   closeLeaf: (workspaceId: string, leafId: string) => void;
   setFocusedLeaf: (workspaceId: string, leafId: string) => void;
   setSplitRatio: (workspaceId: string, splitId: string, ratio: number) => void;
@@ -155,6 +173,24 @@ interface WorkspaceState {
 
 let counter = 0;
 const genId = () => `n-${Date.now()}-${counter++}`;
+
+// Infer AI CLI metadata from a free-form ssh command stored in `leaf.command`.
+// Used by `restoreSession` so leaves saved by a pre-aiKind build still get a
+// toolbar and don't trigger a duplicate auto-split on first launch after upgrade.
+const AI_KIND_PATTERN = /(?:^|['" /])(claude|codex|gemini|copilot)\b/;
+const SSH_TARGET_PATTERN = /(\S+@\S+)/;
+const inferAiMetaFromCommand = (
+  command: string | undefined,
+): { aiKind: AiKind; aiSshTarget: string } | undefined => {
+  if (!command) return undefined;
+  const km = command.match(AI_KIND_PATTERN);
+  if (!km) return undefined;
+  const tm = command.match(SSH_TARGET_PATTERN);
+  if (!tm) return undefined;
+  // Strip a trailing quote if the matched token is something like `"user@host"`.
+  const target = tm[1].replace(/^["']|["']$/g, "");
+  return { aiKind: km[1] as AiKind, aiSshTarget: target };
+};
 
 // Helper: find and replace a node in the tree
 const replaceNode = (
@@ -407,7 +443,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return newLeafId;
   },
 
-  splitLeafWithCommand: (workspaceId: string, leafId: string, direction: SplitDirection, command: string) => {
+  splitLeafWithCommand: (workspaceId, leafId, direction, command, aiMeta) => {
     // Intentionally does NOT inherit `tmuxSession` from the parent — callers pass a
     // full ssh command that already embeds a remote command (e.g. claude auto-split
     // uses `ssh -t user@host "bash -lc 'claude ...'"`). The tmux wrapper in
@@ -425,7 +461,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           ratio: 0.5,
           children: [
             preserveLeaf(w.layout, leafId),
-            { type: "leaf", id: newLeafId, ptyId: null, command },
+            {
+              type: "leaf",
+              id: newLeafId,
+              ptyId: null,
+              command,
+              aiKind: aiMeta?.aiKind,
+              aiSshTarget: aiMeta?.aiSshTarget,
+            },
           ],
         };
         return {
@@ -487,7 +530,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   saveSession: () => {
     const state = get();
     const stripPty = (node: LayoutNode): SavedLayout => {
-      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, tmuxSession: node.tmuxSession };
+      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget };
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, monitorId: node.monitorId };
       if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, project: node.project, sessionId: node.sessionId, monitorId: node.monitorId };
@@ -524,7 +567,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (!session.workspaces || session.workspaces.length === 0) return false;
 
       const restoreLayout = (node: SavedLayout): LayoutNode => {
-        if (node.type === "leaf") return { type: "leaf", id: node.id, ptyId: null, sshCommand: node.sshCommand, command: node.command, tmuxSession: node.tmuxSession };
+        if (node.type === "leaf") {
+          // Migration: leaves saved by builds before aiKind existed have only the
+          // command string. Try to infer kind+target so the toolbar still works
+          // and `hasAiPane` checks aren't fooled into adding a duplicate.
+          const inferred = node.aiKind ? undefined : inferAiMetaFromCommand(node.command);
+          return {
+            type: "leaf",
+            id: node.id,
+            ptyId: null,
+            sshCommand: node.sshCommand,
+            command: node.command,
+            tmuxSession: node.tmuxSession,
+            aiKind: node.aiKind ?? inferred?.aiKind,
+            aiSshTarget: node.aiSshTarget ?? inferred?.aiSshTarget,
+          };
+        }
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
         // Monitor nodes are now sidebar-based; restore as plain leaf
         if (node.type === "monitor") return { type: "leaf", id: node.id, ptyId: null };

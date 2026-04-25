@@ -89,7 +89,7 @@ export const SidebarClaude = ({ sessions, sshTarget: _sshTarget, onViewSession, 
   if (sessions.length === 0) return null;
 
   return (
-    <div style={{ ...styles.container, height: collapsed ? undefined : height }}>
+    <div className="wmux-card" style={{ ...styles.container, height: collapsed ? undefined : height }}>
       <div style={styles.resizeHandle} onMouseDown={onResizeStart} title="Drag to resize" />
       <div style={styles.header} onClick={() => setCollapsed((c) => !c)}>
         <span style={styles.headerText}>Claude Sessions</span>
@@ -137,8 +137,6 @@ export const SidebarClaude = ({ sessions, sshTarget: _sshTarget, onViewSession, 
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    borderTop: `1px solid ${COLORS.surface}`,
-    backgroundColor: COLORS.bg,
     fontSize: 13,
     fontFamily: "'JetBrains Mono', monospace",
     flexShrink: 0,
@@ -159,18 +157,19 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "4px 8px",
-    backgroundColor: COLORS.surface,
+    padding: "5px 10px",
+    background: "var(--wmux-bg-elev)",
+    borderBottom: "1px solid var(--wmux-hairline)",
     cursor: "pointer",
     userSelect: "none",
   },
   headerText: {
-    color: COLORS.mauve,
+    color: "var(--wmux-accent-2)",
     fontWeight: 600,
     fontSize: 12,
   },
   toggle: {
-    color: COLORS.subtext,
+    color: "var(--wmux-subtext)",
     fontSize: 10,
   },
   body: {
@@ -189,7 +188,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
   },
   projectName: {
-    color: COLORS.text,
+    color: "var(--wmux-text)",
     fontSize: 12,
     fontWeight: 600,
     overflow: "hidden",
@@ -211,7 +210,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   sessionId: {
-    color: COLORS.subtext,
+    color: "var(--wmux-subtext)",
     fontSize: 11,
     flex: 1,
     overflow: "hidden",
@@ -219,7 +218,7 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   sessionTime: {
-    color: COLORS.overlay,
+    color: "var(--wmux-subtext)",
     fontSize: 10,
     flexShrink: 0,
   },

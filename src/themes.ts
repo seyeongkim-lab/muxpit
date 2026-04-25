@@ -189,3 +189,58 @@ export const getResolvedTheme = (name: string, customColors: CustomColors): IThe
   if (!overrides) return base;
   return { ...base, ...overrides };
 };
+
+// --- Chrome theming helpers ---------------------------------------------
+
+/** Parse `#rrggbb` (or short `#rgb`) to `[r,g,b]`. Returns black on bad input. */
+const parseHex = (hex: string): [number, number, number] => {
+  let m = hex.replace("#", "");
+  if (m.length === 3) m = m.split("").map((c) => c + c).join("");
+  if (m.length !== 6) return [0, 0, 0];
+  return [parseInt(m.slice(0, 2), 16), parseInt(m.slice(2, 4), 16), parseInt(m.slice(4, 6), 16)];
+};
+
+const toHex = (r: number, g: number, b: number): string =>
+  `#${[r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("")}`;
+
+const hexToRgba = (hex: string, alpha: number): string => {
+  const [r, g, b] = parseHex(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+/** Mix the colour towards black. factor=0 returns input, factor=1 returns black. */
+const darken = (hex: string, factor: number): string => {
+  const [r, g, b] = parseHex(hex);
+  return toHex(r * (1 - factor), g * (1 - factor), b * (1 - factor));
+};
+
+/**
+ * Push the resolved xterm theme onto `:root` as CSS custom properties so the
+ * chrome (sidebar, toolbars, cards) automatically follows whichever theme the
+ * user has picked. The sidebar bg is deliberately darker than the terminal
+ * bg so the two surfaces read as separate planes — terminal is content,
+ * sidebar is chrome.
+ */
+export const applyThemeVars = (theme: ITheme): void => {
+  const root = document.documentElement;
+  const bg = theme.background ?? "#1e1e2e";
+  const accent = theme.blue ?? "#89b4fa";
+  const accent2 = theme.magenta ?? "#cba6f7";
+  const text = theme.foreground ?? "#cdd6f4";
+  const subtext = theme.brightBlack ?? "#6c7086";
+
+  root.style.setProperty("--wmux-bg", darken(bg, 0.4));
+  root.style.setProperty("--wmux-bg-soft", bg);
+  root.style.setProperty("--wmux-bg-elev", "rgba(255, 255, 255, 0.025)");
+  root.style.setProperty("--wmux-text", text);
+  root.style.setProperty("--wmux-subtext", subtext);
+  root.style.setProperty("--wmux-hairline", "rgba(255, 255, 255, 0.06)");
+  root.style.setProperty("--wmux-hairline-strong", "rgba(255, 255, 255, 0.10)");
+  root.style.setProperty("--wmux-accent", accent);
+  root.style.setProperty("--wmux-accent-2", accent2);
+  root.style.setProperty("--wmux-accent-soft", hexToRgba(accent, 0.07));
+  root.style.setProperty("--wmux-accent-mid", hexToRgba(accent, 0.18));
+  root.style.setProperty("--wmux-accent-strong", hexToRgba(accent, 0.55));
+  root.style.setProperty("--wmux-accent-glow", hexToRgba(accent, 0.35));
+  root.style.setProperty("--wmux-accent-2-soft", hexToRgba(accent2, 0.08));
+};

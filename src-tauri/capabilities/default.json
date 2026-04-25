@@ -14,6 +14,10 @@
     "notification:allow-is-permission-granted",
     "shell:allow-open",
     "core:window:allow-destroy",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "core:webview:allow-set-webview-zoom"
   ]
 }
