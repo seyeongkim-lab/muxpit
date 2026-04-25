@@ -4,6 +4,7 @@ import { TerminalLeaf } from "./Terminal";
 import { BrowserPane } from "./BrowserPane";
 import { MonitorPane } from "./MonitorPane";
 import { ClaudeSessionPane } from "./ClaudeSessionPane";
+import { AiPaneToolbar } from "./AiPaneToolbar";
 
 interface SplitPaneProps {
   node: LayoutNode;
@@ -12,6 +13,24 @@ interface SplitPaneProps {
 
 export const SplitPane = ({ node, workspaceId }: SplitPaneProps) => {
   if (node.type === "leaf") {
+    if (node.aiKind && node.aiSshTarget) {
+      // Wrap the terminal so the toolbar sits above it without breaking xterm's
+      // ResizeObserver — the wrapper is a column flex and the terminal slot
+      // claims the remaining space (`flex: 1, minHeight: 0`).
+      return (
+        <div key={node.id} style={leafWrapperStyle}>
+          <AiPaneToolbar
+            workspaceId={workspaceId}
+            leafId={node.id}
+            currentKind={node.aiKind}
+            sshTarget={node.aiSshTarget}
+          />
+          <div style={leafTerminalSlotStyle}>
+            <TerminalLeaf workspaceId={workspaceId} leafId={node.id} />
+          </div>
+        </div>
+      );
+    }
     return <TerminalLeaf key={node.id} workspaceId={workspaceId} leafId={node.id} />;
   }
 
@@ -116,4 +135,18 @@ const SplitContainer = ({ node, workspaceId }: SplitContainerProps) => {
       </div>
     </div>
   );
+};
+
+const leafWrapperStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  width: "100%",
+  height: "100%",
+  minHeight: 0,
+};
+
+const leafTerminalSlotStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  width: "100%",
 };

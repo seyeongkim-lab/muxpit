@@ -7,6 +7,7 @@ mod tmux_cc;
 use monitor::MonitorManager;
 use pty::PtyManager;
 use sysinfo::{gather_workspace_info, get_listening_ports, get_shell_context, ShellContext, WorkspaceInfo};
+use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, State};
 
@@ -141,8 +142,11 @@ fn request_session_content(state: State<'_, MonitorManager>, monitor_id: Option<
 }
 
 #[tauri::command]
-async fn check_remote_claude(ssh_command: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || check_remote_claude_sync(&ssh_command))
+async fn check_remote_clis(
+    ssh_command: String,
+    names: Vec<String>,
+) -> Result<HashMap<String, bool>, String> {
+    tauri::async_runtime::spawn_blocking(move || check_remote_clis_sync(&ssh_command, &names))
         .await
         .map_err(|e| format!("Task join error: {e}"))
 }
@@ -221,14 +225,29 @@ fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
     }
 }
 
-fn check_remote_claude_sync(ssh_command: &str) -> bool {
+fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String, bool> {
+    // Result map seeded with `false` for every requested name. Callers always get a
+    // complete answer even if SSH fails or some names are filtered out below.
+    let mut result: HashMap<String, bool> = names.iter().map(|n| (n.clone(), false)).collect();
+
+    // Drop names that contain anything other than [A-Za-z0-9_-]; we splice them
+    // unquoted into the remote shell command, so we refuse to forward characters
+    // that could break out of the `for` loop.
+    let safe_names: Vec<&str> = names
+        .iter()
+        .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .map(|n| n.as_str())
+        .collect();
+    if safe_names.is_empty() {
+        return result;
+    }
+
     // Parse the SSH command: "ssh [-p port] [-i key] user@host"
     let parts: Vec<&str> = ssh_command.split_whitespace().collect();
     if parts.is_empty() {
-        return false;
+        return result;
     }
 
-    // Separate SSH options and the user@host target
     let mut options: Vec<&str> = Vec::new();
     let mut target: Option<&str> = None;
     let mut i = 1;
@@ -253,11 +272,9 @@ fn check_remote_claude_sync(ssh_command: &str) -> bool {
     }
 
     let Some(target) = target else {
-        return false;
+        return result;
     };
 
-    // Build command: ssh [options] [-o ...] user@host "remote command"
-    // SSH options MUST come before the hostname
     let mut cmd = Command::new(parts[0]);
     for opt in &options {
         cmd.arg(opt);
@@ -268,7 +285,15 @@ fn check_remote_claude_sync(ssh_command: &str) -> bool {
         "-o", "StrictHostKeyChecking=accept-new",
     ]);
     cmd.arg(target);
-    cmd.arg("bash -lc 'command -v claude 2>/dev/null'");
+
+    // One SSH invocation iterates all candidates and prints the names that resolve.
+    // Outer single-quotes wrap the bash -lc payload; only ASCII-safe names land
+    // unquoted inside the `for` list (filtered above).
+    let remote = format!(
+        "for n in {}; do command -v \"$n\" >/dev/null 2>&1 && echo \"$n\"; done",
+        safe_names.join(" ")
+    );
+    cmd.arg(format!("bash -lc '{remote}'"));
 
     #[cfg(windows)]
     {
@@ -276,12 +301,23 @@ fn check_remote_claude_sync(ssh_command: &str) -> bool {
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
-    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.stderr(Stdio::null());
 
-    match cmd.status() {
-        Ok(status) => status.success(),
-        Err(_) => false,
+    let Ok(output) = cmd.output() else {
+        return result;
+    };
+    // Even on non-zero exit (e.g. no candidates resolved), stdout is the source of truth.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let n = line.trim();
+        if n.is_empty() {
+            continue;
+        }
+        if let Some(v) = result.get_mut(n) {
+            *v = true;
+        }
     }
+    result
 }
 
 #[tauri::command]
@@ -311,7 +347,7 @@ pub fn run() {
             get_pty_pid,
             get_shell_ctx,
             list_fonts,
-            check_remote_claude,
+            check_remote_clis,
             check_remote_tmux,
             send_notification,
             request_session_content,

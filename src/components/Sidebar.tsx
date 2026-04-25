@@ -66,15 +66,16 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
 
   return (
     <div style={styles.sidebar}>
-      <div style={styles.header}>
-        <span style={styles.logo}>wmux</span>
+      <div className="wmux-sidebar-header" style={styles.header}>
+        <span className="wmux-logo">wmux</span>
         <div style={styles.headerBtns}>
-          <button onClick={handleAdd} style={styles.addBtn} title="New workspace (Ctrl+Shift+T)">
+          <button className="wmux-btn" onClick={handleAdd} style={styles.addBtn} title="New workspace (Ctrl+Shift+T)">
             +
           </button>
           <button
+            className="wmux-btn"
             onClick={onToggleGridView}
-            style={{ ...styles.addBtn, ...(gridView ? { backgroundColor: "#313244", borderColor: "#89b4fa" } : {}) }}
+            style={{ ...styles.addBtn, ...(gridView ? { backgroundColor: "#313244", borderColor: "#89b4fa", color: "#cdd6f4" } : {}) }}
             title="Grid overview (Ctrl+Shift+G)"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -84,7 +85,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
               <rect x="14" y="14" width="7" height="7" />
             </svg>
           </button>
-          <button onClick={onOpenSettings} style={styles.addBtn} title="Settings (Ctrl+,)">
+          <button className="wmux-btn" onClick={onOpenSettings} style={styles.addBtn} title="Settings (Ctrl+,)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -96,8 +97,9 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
       {/* SSH Hosts list */}
       <div style={styles.section}>
         <div style={styles.sectionHeader}>
-          <span style={styles.sectionLabel}>HOSTS</span>
+          <span className="wmux-section-label">HOSTS</span>
           <button
+            className="wmux-btn"
             onClick={() => onOpenSshPanel?.()}
             style={styles.sectionAction}
             title="Manage SSH Hosts"
@@ -114,9 +116,11 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
           {sshHosts.map((host) => {
             const isSelected = selectedHostIds.has(host.id);
             const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
+            const dotColor = host.color ?? "#89b4fa";
             return (
               <div
                 key={host.id}
+                className="wmux-host-row"
                 style={{
                   ...styles.hostRow,
                   ...(isSelected ? styles.hostRowSelected : {}),
@@ -136,14 +140,17 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                 title={`${host.name} — ${target}\nCtrl+Click to multi-select`}
               >
                 <span
+                  className="wmux-host-dot"
                   style={{
                     ...styles.hostDot,
-                    backgroundColor: host.color ?? "#89b4fa",
+                    backgroundColor: dotColor,
+                    color: dotColor,
                   }}
                 />
                 <span style={styles.hostName}>{host.name}</span>
                 <span style={styles.hostTarget}>{target}</span>
                 <button
+                  className="wmux-btn"
                   style={styles.hostEditBtn}
                   title="Edit host"
                   onClick={(e) => {
@@ -179,7 +186,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
 
       <div style={styles.sessionSection}>
         <div style={styles.sectionHeader}>
-          <span style={styles.sectionLabel}>SESSIONS</span>
+          <span className="wmux-section-label">SESSIONS</span>
         </div>
         <div style={styles.list}>
           {workspaces.map((ws, i) => {
@@ -195,6 +202,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
             return (
               <div
                 key={ws.id}
+                className={`wmux-ws-item${isActive ? " wmux-ws-active" : ""}`}
                 draggable={editingId !== ws.id}
                 onDragStart={(e) => {
                   dragFromIdxRef.current = i;
@@ -235,6 +243,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                   ...(isDropTarget ? styles.itemDropTarget : {}),
                 }}
               >
+                {isActive && <span className="wmux-active-bar" />}
                 <div style={styles.itemMain}>
                   <div style={styles.itemRow}>
                     <span style={styles.index}>{i + 1}</span>
@@ -262,6 +271,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                       <span style={styles.badge}>{wsUnread}</span>
                     )}
                     <button
+                      className="wmux-btn"
                       onClick={(e) => handleClose(e, ws.id)}
                       style={styles.closeBtn}
                       title="Close workspace"
@@ -329,8 +339,8 @@ const styles: Record<string, React.CSSProperties> = {
     width: "16em",
     minWidth: "16em",
     height: "100%",
-    backgroundColor: "#181825",
-    borderRight: "1px solid #313244",
+    backgroundColor: "var(--wmux-bg)",
+    borderRight: "1px solid var(--wmux-hairline)",
     display: "flex",
     flexDirection: "column",
     userSelect: "none",
@@ -340,23 +350,18 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "12px 12px 8px",
-    borderBottom: "1px solid #313244",
   },
   headerBtns: {
     display: "flex",
     gap: 4,
   },
-  logo: {
-    color: "#89b4fa",
-    fontWeight: 700,
-    fontSize: 17,
-    fontFamily: "'JetBrains Mono', monospace",
-  },
+  // Logo styling moved to .wmux-logo.
+  logo: {},
   addBtn: {
-    background: "none",
-    border: "1px solid #45475a",
-    borderRadius: 4,
-    color: "#a6adc8",
+    background: "var(--wmux-bg-elev)",
+    border: "1px solid var(--wmux-hairline-strong)",
+    borderRadius: 6,
+    color: "var(--wmux-subtext)",
     fontSize: 18,
     width: 28,
     height: 28,
@@ -379,23 +384,21 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "2px 0",
   },
   item: {
-    padding: "8px 12px",
+    padding: "8px 12px 8px 14px",
     cursor: "grab",
-    color: "#a6adc8",
+    color: "var(--wmux-subtext)",
     fontSize: 14,
-    borderLeft: "3px solid transparent",
     transition: "background 0.1s, opacity 0.1s",
   },
   itemActive: {
-    backgroundColor: "#1e1e2e",
-    color: "#cdd6f4",
-    borderLeftColor: "#89b4fa",
+    backgroundColor: "var(--wmux-accent-soft)",
+    color: "var(--wmux-text)",
   },
   itemDragging: {
     opacity: 0.4,
   },
   itemDropTarget: {
-    borderTop: "2px solid #89b4fa",
+    borderTop: "2px solid var(--wmux-accent)",
   },
   itemMain: {
     display: "flex",
@@ -408,7 +411,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   index: {
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
     fontSize: 12,
     fontFamily: "monospace",
     minWidth: 16,
@@ -420,10 +423,10 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   renameInput: {
-    background: "#313244",
-    border: "1px solid #89b4fa",
+    background: "var(--wmux-bg-soft)",
+    border: "1px solid var(--wmux-accent)",
     borderRadius: 3,
-    color: "#cdd6f4",
+    color: "var(--wmux-text)",
     fontSize: 14,
     padding: "1px 4px",
     flex: 1,
@@ -432,7 +435,7 @@ const styles: Record<string, React.CSSProperties> = {
   closeBtn: {
     background: "none",
     border: "none",
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
     fontSize: 13,
     cursor: "pointer",
     padding: "2px 4px",
@@ -455,7 +458,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#f9e2af",
   },
   panes: {
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
     fontSize: 12,
   },
   ports: {
@@ -464,8 +467,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "monospace",
   },
   badge: {
-    backgroundColor: "#89b4fa",
-    color: "#1e1e2e",
+    backgroundColor: "var(--wmux-accent)",
+    color: "var(--wmux-bg)",
     fontSize: 11,
     fontWeight: 700,
     borderRadius: 8,
@@ -476,13 +479,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   footer: {
     padding: "8px 12px",
-    borderTop: "1px solid #313244",
+    borderTop: "1px solid var(--wmux-hairline)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
   },
   footerText: {
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
     fontSize: 12,
   },
   notifBadge: {
@@ -494,7 +497,7 @@ const styles: Record<string, React.CSSProperties> = {
 
   // Section (shared by HOSTS and SESSIONS)
   section: {
-    borderBottom: "1px solid #313244",
+    borderBottom: "1px solid var(--wmux-hairline)",
     display: "flex",
     flexDirection: "column" as const,
     flexShrink: 0,
@@ -503,20 +506,20 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "8px 12px 4px",
+    padding: "10px 12px 5px",
   },
   sectionLabel: {
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
     fontSize: 10,
     fontWeight: 700,
-    letterSpacing: 1.2,
+    letterSpacing: 0,
     fontFamily: "'JetBrains Mono', monospace",
   },
   sectionAction: {
-    background: "none",
-    border: "1px solid #313244",
-    borderRadius: 3,
-    color: "#585b70",
+    background: "var(--wmux-bg-elev)",
+    border: "1px solid var(--wmux-hairline)",
+    borderRadius: 4,
+    color: "var(--wmux-subtext)",
     fontSize: 13,
     width: 18,
     height: 18,
@@ -539,13 +542,12 @@ const styles: Record<string, React.CSSProperties> = {
   hostRow: {
     display: "flex",
     alignItems: "center",
-    gap: 8,
-    padding: "5px 12px",
+    gap: 10,
+    padding: "5px 12px 5px 14px",
     cursor: "pointer",
-    transition: "background 0.1s",
   },
   hostRowSelected: {
-    backgroundColor: "#313244",
+    backgroundColor: "var(--wmux-accent-mid)",
   },
   hostDot: {
     width: 8,
@@ -554,7 +556,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   hostName: {
-    color: "#cdd6f4",
+    color: "var(--wmux-text)",
     fontSize: 13,
     flexShrink: 0,
     maxWidth: 80,
@@ -563,7 +565,7 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   hostTarget: {
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
     fontSize: 11,
     fontFamily: "'JetBrains Mono', monospace",
     marginLeft: "auto",
@@ -573,7 +575,7 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   hostEmpty: {
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
     fontSize: 12,
     padding: "8px 12px",
     cursor: "pointer",
@@ -582,7 +584,7 @@ const styles: Record<string, React.CSSProperties> = {
   hostEditBtn: {
     background: "transparent",
     border: "none",
-    color: "#6c7086",
+    color: "var(--wmux-subtext)",
     cursor: "pointer",
     fontSize: 12,
     padding: "2px 6px",
@@ -593,13 +595,13 @@ const styles: Record<string, React.CSSProperties> = {
 
   connectBar: {
     padding: "4px 10px",
-    borderBottom: "1px solid #313244",
+    borderBottom: "1px solid var(--wmux-hairline)",
   },
   connectAllBtn: {
-    background: "#89b4fa",
+    background: "var(--wmux-accent)",
     border: "none",
     borderRadius: 3,
-    color: "#1e1e2e",
+    color: "var(--wmux-bg)",
     fontSize: 12,
     fontWeight: 600,
     padding: "4px 8px",
