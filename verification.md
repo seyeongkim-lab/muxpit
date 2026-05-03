@@ -22,6 +22,8 @@
 - 0.7 deploy: `/home/seyeongkim/Projects/wmux`를 `e6df8c5`로 fast-forward 후 `pnpm install --frozen-lockfile`, `pnpm tauri build --bundles deb` 통과.
 - 설치 패키지: `/home/seyeongkim/Projects/wmux/src-tauri/target/release/bundle/deb/wmux_0.1.0_amd64.deb`.
 - 설치 확인: `dpkg -s wmux`가 `Status: install ok installed`, `Version: 0.1.0`, `Architecture: amd64`를 보고했다.
+- Windows deploy: 바탕화면 `wmux.lnk` 대상이 `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`임을 확인하고 `pnpm tauri build --no-bundle`로 해당 exe를 갱신했다.
+- Windows exe 확인: `LastWriteTime` 2026-05-03 10:22:49, SHA256 `C2F2F1E7A187615546C81E256BE4C3EF2B2521F5D07C777BAF2EDE77D318D1D0`.
 - 0.7 install: `apt-get install` 성공, `wmux (0.1.0) over (0.1.0)` 업그레이드 처리.
 - `dpkg -s wmux`: `install ok installed`, `Architecture: amd64`, `Version: 0.1.0`.
 - Installed binary: `/usr/bin/wmux`, ELF x86-64, `ldd` missing dependency 없음.

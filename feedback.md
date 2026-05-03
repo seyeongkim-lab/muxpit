@@ -16,4 +16,5 @@
 - 커밋: `e6df8c5 Fix AI pane hook leak`.
 - 푸시: `origin/master`에 반영.
 - 배포: 0.7 Linux host에서 `.deb` 빌드 및 `apt-get install` 완료.
+- Windows 배포: 바탕화면 `wmux.lnk`가 가리키는 release exe 갱신 완료.
 - 남은 확인: 실제 GUI에서 codex/gemini pane을 열어 hook 문자열이 입력되지 않는지 수동 smoke test.
