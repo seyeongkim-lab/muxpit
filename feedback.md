@@ -18,3 +18,14 @@
 - 배포: 0.7 Linux host에서 `.deb` 빌드 및 `apt-get install` 완료.
 - Windows 배포: 바탕화면 `wmux.lnk`가 가리키는 release exe 갱신 완료.
 - 남은 확인: 실제 GUI에서 codex/gemini pane을 열어 hook 문자열이 입력되지 않는지 수동 smoke test.
+
+## 2026-05-03 Close Confirmation
+
+- 구현: 창 닫기 요청 시 확인창을 먼저 띄우고, 승인한 경우만 세션 저장 후 종료한다.
+- 검증: `pnpm build` 통과.
+- 남은 확인: 실제 GUI에서 닫기 버튼과 커스텀 close 버튼 모두 확인창을 띄우는지 수동 smoke test.
+
+## 2026-05-03 Deployment Instructions
+
+- `AGENTS.md`에 Linux 0.7 `.deb` 배포와 Windows desktop shortcut exe 갱신 절차를 고정했다.
+- `CLAUDE.md`는 `@AGENTS.md` import만 둔다.

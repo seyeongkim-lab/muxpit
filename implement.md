@@ -94,3 +94,15 @@
 - `src/components/Terminal.tsx`에 leaf의 `aiKind`를 조회하는 `findAiKind` helper를 추가했다.
 - `SHELL_HISTORY_HOOK` 주입 skip 조건을 `claude` 문자열 체크에서 `aiKind` 메타데이터 또는 알려진 AI CLI command 패턴(`claude`, `codex`, `gemini`, `copilot`) 체크로 바꿨다.
 - 결과: AI CLI pane에서는 일반 shell history hook을 입력하지 않는다.
+
+## 2026-05-03 Close Confirmation
+
+- `src/App.tsx`의 close-requested handler가 먼저 `event.preventDefault()`를 호출하도록 변경했다.
+- `window.confirm("wmux를 닫을까요?")`에서 승인한 경우에만 세션 저장 후 `appWindow.destroy()`를 호출한다.
+- 중복 close 요청으로 확인창이 여러 번 뜨지 않도록 `promptOpen`/`closing` guard를 추가했다.
+
+## 2026-05-03 Deployment Instructions
+
+- `AGENTS.md`를 추가해 Linux 0.7 `.deb` 배포와 Windows desktop shortcut exe 갱신 절차를 고정했다.
+- `CLAUDE.md`를 추가하고 `@AGENTS.md`만 import하도록 했다.
+- 배포 후 기록 위치를 `verification.md`/`feedback.md`로 명시했다.

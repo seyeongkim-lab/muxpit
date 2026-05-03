@@ -27,4 +27,14 @@
 - 0.7 install: `apt-get install` 성공, `wmux (0.1.0) over (0.1.0)` 업그레이드 처리.
 - `dpkg -s wmux`: `install ok installed`, `Architecture: amd64`, `Version: 0.1.0`.
 - Installed binary: `/usr/bin/wmux`, ELF x86-64, `ldd` missing dependency 없음.
+
+## 2026-05-03 Close Confirmation
+
+- `pnpm build`: 통과.
+- 실행 내용: `tsc && vite build`.
+- 잔여 경고: Vite chunk size warning만 발생. 이번 변경과 무관한 번들 크기 경고다.
 - Desktop entry: `/usr/share/applications/wmux.desktop`, `desktop-file-validate` 문제 출력 없음.
+
+## 2026-05-03 Deployment Instructions
+
+- `git diff --check -- AGENTS.md CLAUDE.md research.md plan.md implement.md verification.md feedback.md`: 통과.

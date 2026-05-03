@@ -548,3 +548,21 @@ wmux/
    - 검증: `codex` 명령 문자열과 `aiKind` 기반 pane 모두 hook 주입 조건에서 제외된다.
 3. `pnpm build`를 실행한다.
    - 검증: `tsc && vite build` 성공.
+
+## 2026-05-03 Close Confirmation Plan
+
+1. `src/App.tsx`의 `onCloseRequested` handler에서 `event.preventDefault()`를 호출한다.
+   - 검증: close 이벤트가 확인 전 즉시 종료되지 않는다.
+2. 확인 승인 시 기존 세션 저장 후 `appWindow.destroy()`를 호출한다.
+   - 검증: 승인한 경우만 종료 경로로 들어간다.
+3. `pnpm build`를 실행한다.
+   - 검증: `tsc && vite build` 성공.
+
+## 2026-05-03 Deployment Instructions Plan
+
+1. repo 루트에 `AGENTS.md`를 만들고 Linux/Windows 배포 절차를 고정한다.
+   - 검증: 실제 사용한 host/path/command만 포함한다.
+2. `CLAUDE.md`를 `@AGENTS.md` import로 추가한다.
+   - 검증: Claude/Codex가 같은 프로젝트 지시를 읽는다.
+3. 문서 변경을 검증한다.
+   - 검증: `git diff --check` 통과.

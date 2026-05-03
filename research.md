@@ -313,3 +313,17 @@ The **rtop model** (SSH + `/proc` reading) is the most appropriate for a termina
 - 근거: `src/components/Terminal.tsx`의 hook 주입 skip 조건은 `spawnCommand`에 `claude`가 포함된 경우만 제외했다.
 - AI pane 생성은 `src/components/AiPaneToolbar.tsx` -> `splitLeafWithCommand(..., { aiKind, aiSshTarget })` 경로로 leaf에 `aiKind`를 저장한다.
 - 결론: shell history hook은 일반 shell용이므로 `claude`뿐 아니라 `codex`, `gemini`, `copilot` 등 알려진 AI CLI pane 전체에서 주입하지 않아야 한다.
+
+## 2026-05-03 Close Confirmation
+
+- 확인 대상: `src/App.tsx`의 close-requested hook.
+- 현재 동작: `onCloseRequested`에서 세션 저장 후 곧바로 `appWindow.destroy()`를 호출해 확인 없이 종료한다.
+- Tauri v2 공식 문서: `onCloseRequested` handler에서 `event.preventDefault()`로 종료를 막을 수 있고, `destroy()`는 closeRequested 이벤트를 다시 내지 않는 강제 종료 API다.
+- 결론: close-requested 이벤트를 항상 막고, `window.confirm` 승인 시 세션 저장 후 `destroy()`를 호출하면 기존 저장 동작을 유지하면서 닫기 확인을 추가할 수 있다.
+
+## 2026-05-03 Deployment Instructions
+
+- repo 루트에 `AGENTS.md`/`CLAUDE.md`가 없었다.
+- 기존 배포 기록 기준 Linux 배포는 0.7 `/home/seyeongkim/Projects/wmux`를 `origin/master`로 fast-forward한 뒤 `.deb`를 빌드/설치하는 방식이다.
+- 기존 배포 기록 기준 Windows 배포는 바탕화면 `wmux.lnk`가 가리키는 `src-tauri/target/release/wmux.exe`를 `pnpm tauri build --no-bundle`로 갱신하는 방식이다.
+- 결론: 이 절차를 `AGENTS.md`에 고정하고, `CLAUDE.md`는 `@AGENTS.md`로 import한다.
