@@ -244,10 +244,21 @@ export const App = () => {
     }, 500);
   }, [workspaces, activeId]);
 
-  // Save session on window close (Tauri close-requested + beforeunload fallback)
+  // Confirm before closing, then save session (Tauri close-requested + beforeunload fallback)
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    const unlistenPromise = appWindow.onCloseRequested(async () => {
+    let promptOpen = false;
+    let closing = false;
+    const unlistenPromise = appWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      if (promptOpen || closing) return;
+
+      promptOpen = true;
+      const confirmed = window.confirm("wmux를 닫을까요?");
+      promptOpen = false;
+      if (!confirmed) return;
+
+      closing = true;
       useWorkspaceStore.getState().saveSession();
       await appWindow.destroy();
     });
