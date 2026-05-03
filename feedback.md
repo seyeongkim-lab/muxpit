@@ -11,3 +11,9 @@
 
 - 0.7에 `.deb` 빌드 및 설치 완료.
 - GUI launch는 SSH 세션에서 display/session 연결이 불확실해 실행하지 않고 패키지/파일/동적 의존성 기준으로 검증했다.
+## 2026-05-03 AI Pane Hook Leak
+
+- 커밋: `e6df8c5 Fix AI pane hook leak`.
+- 푸시: `origin/master`에 반영.
+- 배포: 0.7 Linux host에서 `.deb` 빌드 및 `apt-get install` 완료.
+- 남은 확인: 실제 GUI에서 codex/gemini pane을 열어 hook 문자열이 입력되지 않는지 수동 smoke test.
