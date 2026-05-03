@@ -435,6 +435,7 @@
 
 1-1. **원격 tmux 감지** — [src-tauri/src/lib.rs](src-tauri/src/lib.rs)에 `check_remote_tmux(ssh_command)` 추가
    - 패턴: 기존 `check_remote_claude`와 동일
+
    - `ssh host 'tmux -V 2>/dev/null'` → `tmux 3.x` 파싱, 3.2 이상이면 활성화
 1-2. **SSH 명령 자동 래핑** — SSH 세션 생성 시 사용자 설정 "tmux 지속 모드 ON"이면 원본 명령을 변환
    - Before: `ssh user@host`
@@ -538,3 +539,12 @@ wmux/
 ├── package.json
 └── vite.config.ts
 ```
+
+## 2026-05-03 AI Pane Hook Leak Plan
+
+1. `src/components/Terminal.tsx`에서 leaf의 `aiKind` 메타데이터 조회 helper를 추가한다.
+   - 검증: TypeScript 컴파일이 통과한다.
+2. history hook skip 조건을 `claude` 전용에서 알려진 AI CLI pane 전체로 확장한다.
+   - 검증: `codex` 명령 문자열과 `aiKind` 기반 pane 모두 hook 주입 조건에서 제외된다.
+3. `pnpm build`를 실행한다.
+   - 검증: `tsc && vite build` 성공.

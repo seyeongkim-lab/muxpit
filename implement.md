@@ -88,3 +88,9 @@
 - 0.7에서 `pnpm install --frozen-lockfile` 후 `pnpm tauri build --bundles deb` 실행.
 - 생성된 패키지: `/home/seyeongkim/build/wmux-codex/src-tauri/target/release/bundle/deb/wmux_0.1.0_amd64.deb`.
 - 설치 명령: `sudo -n apt-get install -y /home/seyeongkim/build/wmux-codex/src-tauri/target/release/bundle/deb/wmux_0.1.0_amd64.deb`.
+
+## 2026-05-03 AI Pane Hook Leak
+
+- `src/components/Terminal.tsx`에 leaf의 `aiKind`를 조회하는 `findAiKind` helper를 추가했다.
+- `SHELL_HISTORY_HOOK` 주입 skip 조건을 `claude` 문자열 체크에서 `aiKind` 메타데이터 또는 알려진 AI CLI command 패턴(`claude`, `codex`, `gemini`, `copilot`) 체크로 바꿨다.
+- 결과: AI CLI pane에서는 일반 shell history hook을 입력하지 않는다.

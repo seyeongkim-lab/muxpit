@@ -306,3 +306,10 @@ The **rtop model** (SSH + `/proc` reading) is the most appropriate for a termina
 - 공식 Tauri v2 CLI help와 문서 기준 `tauri build --bundles deb`가 Linux `.deb` 생성 옵션이다.
 - 0.7 host: `seyeongkim@192.168.0.7`, hostname `seyeongkim-ThinkPad-P14s-Gen-6`, x86_64 Ubuntu 26.04 dev branch.
 - 원격 repo `/home/seyeongkim/Projects/wmux`는 clean 상태였지만 로컬 변경이 dirty/untracked라 원격 repo를 건드리지 않고 `/home/seyeongkim/build/wmux-codex` 임시 스냅샷에서 빌드했다.
+
+## 2026-05-03 AI Pane History Hook Leak
+
+- 현상: AI pane에서 `codex`를 열면 `SHELL_HISTORY_HOOK` 문자열이 Codex 입력으로 들어가 `{ if ... __wmux_emit ... }` 프롬프트가 붙는다.
+- 근거: `src/components/Terminal.tsx`의 hook 주입 skip 조건은 `spawnCommand`에 `claude`가 포함된 경우만 제외했다.
+- AI pane 생성은 `src/components/AiPaneToolbar.tsx` -> `splitLeafWithCommand(..., { aiKind, aiSshTarget })` 경로로 leaf에 `aiKind`를 저장한다.
+- 결론: shell history hook은 일반 shell용이므로 `claude`뿐 아니라 `codex`, `gemini`, `copilot` 등 알려진 AI CLI pane 전체에서 주입하지 않아야 한다.
