@@ -6,7 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
-import { useWorkspaceStore } from "../stores/workspace";
+import { useWorkspaceStore, type AiKind } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
 import { usePrefixStore } from "../stores/prefix";
 import { useHistoryStore } from "../stores/history";
@@ -129,6 +129,20 @@ const findTmuxSession = (wsId: string, leafId: string): string | undefined => {
   };
   return find(ws.layout);
 };
+
+const findAiKind = (wsId: string, leafId: string): AiKind | undefined => {
+  const state = useWorkspaceStore.getState();
+  const ws = state.workspaces.find((w) => w.id === wsId);
+  if (!ws) return undefined;
+  const find = (node: any): AiKind | undefined => {
+    if (node.type === "leaf" && node.id === leafId) return node.aiKind;
+    if (node.type === "split") return find(node.children[0]) ?? find(node.children[1]);
+    return undefined;
+  };
+  return find(ws.layout);
+};
+
+const AI_CLI_COMMAND_PATTERN = /(?:^|[\s"'\/])(claude|codex|gemini|copilot)(?=$|[\s;"'])/i;
 
 export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -442,14 +456,14 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     }
 
     // Inject shell history hook (bash + zsh). Skip:
-    //   - claude panes (their prompt is not a plain shell)
+    //   - AI CLI panes (their prompt is not a plain shell)
     //   - tmux-persist panes (the hook ends with `clear`, which erases the existing tmux
     //     screen on reconnect — history is already captured when the session was first started)
     //   - PowerShell / cmd panes (POSIX `[ -n ... ]` syntax raises a ParserError)
-    const isClaudePane = !!(spawnCommand && spawnCommand.toLowerCase().includes("claude"));
+    const isAiCliPane = !!findAiKind(workspaceId, leafId) || !!(spawnCommand && AI_CLI_COMMAND_PATTERN.test(spawnCommand));
     const isWindowsLocalShell = !spawnCommand && /^win/i.test(navigator.platform);
     const isPowerShellTarget = !!(spawnCommand && /\b(pwsh|powershell|cmd\.exe)\b/i.test(spawnCommand));
-    if (!isClaudePane && !tmuxSession && !isWindowsLocalShell && !isPowerShellTarget) {
+    if (!isAiCliPane && !tmuxSession && !isWindowsLocalShell && !isPowerShellTarget) {
       setTimeout(() => {
         invoke("write_pty", { id: ptyId, data: SHELL_HISTORY_HOOK }).catch(() => {});
       }, 700);
