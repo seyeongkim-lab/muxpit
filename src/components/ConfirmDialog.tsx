@@ -60,7 +60,7 @@ const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: "fixed",
     inset: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.65)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -69,11 +69,13 @@ const styles: Record<string, React.CSSProperties> = {
   panel: {
     minWidth: 320,
     maxWidth: 480,
-    backgroundColor: "var(--wmux-bg-elev, #181825)",
-    border: "1px solid var(--wmux-hairline-strong, #45475a)",
+    // Solid color (not the theme var, which can be semi-transparent and lets
+    // the terminal grid bleed through the dialog).
+    backgroundColor: "#1e1e2e",
+    border: "1px solid #45475a",
     borderRadius: 8,
     padding: "20px 22px 16px",
-    boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
+    boxShadow: "0 10px 40px rgba(0,0,0,0.7)",
   },
   message: {
     color: "var(--wmux-text, #cdd6f4)",
