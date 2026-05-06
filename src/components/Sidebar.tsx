@@ -2,9 +2,12 @@ import { useWorkspaceStore, collectLeafIds } from "../stores/workspace";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
+import { useTmuxSessionsStore } from "../stores/tmuxSessions";
+import { sanitizeTmuxSessionName } from "../utils/tmuxSession";
 import { destroyAllTerminals } from "./terminalRegistry";
 import { SidebarMonitor } from "./SidebarMonitor";
 import { SidebarClaude } from "./SidebarClaude";
+import { SidebarTmuxSessions } from "./SidebarTmuxSessions";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useState, useRef } from "react";
 
@@ -34,6 +37,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
   const togglePanel = useNotificationStore((s) => s.togglePanel);
   const markRead = useNotificationStore((s) => s.markRead);
   const sshHosts = useSshHostsStore((s) => s.hosts);
+  const tmuxAttach = useTmuxSessionsStore((s) => s._attach);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
   const dragFromIdxRef = useRef<number | null>(null);
@@ -117,9 +121,13 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
             const isSelected = selectedHostIds.has(host.id);
             const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
             const dotColor = host.color ?? "#89b4fa";
+            const expectedWrapper = sanitizeTmuxSessionName(`wmux-${host.host}`);
+            const attachedWsId = Object.entries(tmuxAttach).find(
+              ([, info]) => info.wrapperSession === expectedWrapper,
+            )?.[0];
             return (
+              <div key={host.id}>
               <div
-                key={host.id}
                 className="wmux-host-row"
                 style={{
                   ...styles.hostRow,
@@ -160,6 +168,10 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                 >
                   ✎
                 </button>
+              </div>
+              {attachedWsId && (
+                <SidebarTmuxSessions wsId={attachedWsId} wrapperSession={expectedWrapper} />
+              )}
               </div>
             );
           })}

@@ -3,16 +3,25 @@ mod monitor;
 mod pty;
 mod sysinfo;
 mod tmux_cc;
+mod tmux_remote;
 
 use monitor::MonitorManager;
 use pty::PtyManager;
-use sysinfo::{gather_workspace_info, get_listening_ports, get_shell_context, ShellContext, WorkspaceInfo};
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
+use sysinfo::{
+    gather_workspace_info, get_listening_ports, get_shell_context, ShellContext, WorkspaceInfo,
+};
 use tauri::{AppHandle, State};
 
 #[tauri::command]
-fn spawn_pty(app: AppHandle, state: State<'_, PtyManager>, rows: u16, cols: u16, command: Option<String>) -> Result<u32, String> {
+fn spawn_pty(
+    app: AppHandle,
+    state: State<'_, PtyManager>,
+    rows: u16,
+    cols: u16,
+    command: Option<String>,
+) -> Result<u32, String> {
     state.spawn(app, rows, cols, command)
 }
 
@@ -93,13 +102,11 @@ fn list_fonts_sync() -> Vec<String> {
         .output();
 
     match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect()
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
         _ => vec![],
     }
 }
@@ -127,7 +134,12 @@ fn list_fonts_sync() -> Vec<String> {
 }
 
 #[tauri::command]
-fn start_monitor(app: AppHandle, state: State<'_, MonitorManager>, monitor_id: String, ssh_target: String) -> Result<(), String> {
+fn start_monitor(
+    app: AppHandle,
+    state: State<'_, MonitorManager>,
+    monitor_id: String,
+    ssh_target: String,
+) -> Result<(), String> {
     state.start(app, monitor_id, ssh_target)
 }
 
@@ -137,7 +149,13 @@ fn stop_monitor(state: State<'_, MonitorManager>, monitor_id: String) -> Result<
 }
 
 #[tauri::command]
-fn request_session_content(state: State<'_, MonitorManager>, monitor_id: Option<String>, project: String, session_id: String, request_id: String) -> Result<(), String> {
+fn request_session_content(
+    state: State<'_, MonitorManager>,
+    monitor_id: Option<String>,
+    project: String,
+    session_id: String,
+    request_id: String,
+) -> Result<(), String> {
     state.request_session_content(monitor_id.as_deref(), project, session_id, request_id)
 }
 
@@ -161,44 +179,18 @@ async fn check_remote_tmux(ssh_command: String) -> Result<Option<String>, String
 }
 
 fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
-    let parts: Vec<&str> = ssh_command.split_whitespace().collect();
-    if parts.is_empty() {
-        return None;
-    }
-
-    let mut options: Vec<&str> = Vec::new();
-    let mut target: Option<&str> = None;
-    let mut i = 1;
-    while i < parts.len() {
-        match parts[i] {
-            "-p" | "-i" => {
-                options.push(parts[i]);
-                if i + 1 < parts.len() {
-                    options.push(parts[i + 1]);
-                    i += 2;
-                    continue;
-                }
-            }
-            s if s.contains('@') => {
-                target = Some(s);
-            }
-            _ => {
-                options.push(parts[i]);
-            }
-        }
-        i += 1;
-    }
-
-    let target = target?;
-
-    let mut cmd = Command::new(parts[0]);
+    let (program, options, target) = tmux_remote::parse_ssh_args(ssh_command)?;
+    let mut cmd = Command::new(program);
     for opt in &options {
         cmd.arg(opt);
     }
     cmd.args([
-        "-o", "ConnectTimeout=3",
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ConnectTimeout=3",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
     ]);
     cmd.arg(target);
     cmd.arg("tmux -V 2>/dev/null");
@@ -235,7 +227,11 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String
     // that could break out of the `for` loop.
     let safe_names: Vec<&str> = names
         .iter()
-        .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .filter(|n| {
+            !n.is_empty()
+                && n.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        })
         .map(|n| n.as_str())
         .collect();
     if safe_names.is_empty() {
@@ -243,46 +239,21 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String
     }
 
     // Parse the SSH command: "ssh [-p port] [-i key] user@host"
-    let parts: Vec<&str> = ssh_command.split_whitespace().collect();
-    if parts.is_empty() {
-        return result;
-    }
-
-    let mut options: Vec<&str> = Vec::new();
-    let mut target: Option<&str> = None;
-    let mut i = 1;
-    while i < parts.len() {
-        match parts[i] {
-            "-p" | "-i" => {
-                options.push(parts[i]);
-                if i + 1 < parts.len() {
-                    options.push(parts[i + 1]);
-                    i += 2;
-                    continue;
-                }
-            }
-            s if s.contains('@') => {
-                target = Some(s);
-            }
-            _ => {
-                options.push(parts[i]);
-            }
-        }
-        i += 1;
-    }
-
-    let Some(target) = target else {
+    let Some((program, options, target)) = tmux_remote::parse_ssh_args(ssh_command) else {
         return result;
     };
 
-    let mut cmd = Command::new(parts[0]);
+    let mut cmd = Command::new(program);
     for opt in &options {
         cmd.arg(opt);
     }
     cmd.args([
-        "-o", "ConnectTimeout=10",
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
     ]);
     cmd.arg(target);
 
@@ -321,6 +292,42 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String
 }
 
 #[tauri::command]
+async fn tmux_list_sessions(ssh_command: String) -> Result<Vec<tmux_remote::TmuxSession>, String> {
+    tauri::async_runtime::spawn_blocking(move || tmux_remote::list_sessions(&ssh_command))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn tmux_switch_client(
+    ssh_command: String,
+    wrapper_session: String,
+    target_session: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        tmux_remote::switch_client(&ssh_command, &wrapper_session, &target_session)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn tmux_new_session(ssh_command: String, name: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        tmux_remote::new_session(&ssh_command, name.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn tmux_kill_session(ssh_command: String, session: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || tmux_remote::kill_session(&ssh_command, &session))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
 fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
     app.notification()
@@ -349,6 +356,10 @@ pub fn run() {
             list_fonts,
             check_remote_clis,
             check_remote_tmux,
+            tmux_list_sessions,
+            tmux_switch_client,
+            tmux_new_session,
+            tmux_kill_session,
             send_notification,
             request_session_content,
             start_monitor,
