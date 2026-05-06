@@ -51,10 +51,17 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   return (
     <div
       style={styles.container}
-      // The parent .wmux-ws-item is draggable; without this, mousedown on a
-      // session row starts a workspace drag and the click never fires.
-      onDragStart={(e) => e.preventDefault()}
-      draggable={false}
+      // The parent .wmux-ws-item is draggable. The HTML5 drag system uses the
+      // closest draggable ancestor, so unless this container also marks itself
+      // draggable, mousedown on a session row starts a workspace drag and the
+      // click never fires. We mark it draggable and immediately preventDefault
+      // the dragstart so neither this nor the parent actually drags.
+      draggable
+      onDragStart={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
     >
       {entry.error && (
         <div style={styles.error} title={entry.error} onClick={() => void refresh(wsId)}>
