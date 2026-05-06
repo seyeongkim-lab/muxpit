@@ -137,8 +137,11 @@ const styles: Record<string, React.CSSProperties> = {
   container: {
     display: "flex",
     flexDirection: "column" as const,
-    paddingLeft: 22,
-    paddingBottom: 4,
+    // ws-item left padding (14) + index column (~22 incl gap) so rows align
+    // visually under the workspace name.
+    paddingLeft: 36,
+    paddingBottom: 6,
+    marginTop: -4,
   },
   row: {
     display: "flex",
