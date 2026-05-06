@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { sanitizeTmuxSessionName } from "../utils/tmuxSession";
 
 export interface TmuxSession {
   id: string;          // "$0"
@@ -63,15 +64,20 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   _attach: {},
 
   attach: (wsId, sshCommand, wrapperSession) => {
+    // Always normalise the wrapper to its server-side form so older saved
+    // workspaces (which stored the unsanitised `wmux-192.168.0.7`) match what
+    // tmux actually returns from list-sessions (`wmux-192_168_0_7`).
+    const wrapper = sanitizeTmuxSessionName(wrapperSession);
     // Idempotent: re-attaching with the same context is a no-op beyond a
     // refresh. Different ssh/wrapper replaces and resets state.
     const prev = get()._attach[wsId];
-    if (prev && prev.sshCommand === sshCommand && prev.wrapperSession === wrapperSession) {
+    if (prev && prev.sshCommand === sshCommand && prev.wrapperSession === wrapper) {
       void get().refresh(wsId);
       return;
     }
+    console.log("[wmux] tmuxSessions attach", { wsId, wrapper });
     set((s) => ({
-      _attach: { ...s._attach, [wsId]: { sshCommand, wrapperSession } },
+      _attach: { ...s._attach, [wsId]: { sshCommand, wrapperSession: wrapper } },
       byWs: {
         ...s.byWs,
         [wsId]: { sessions: [], loading: true, error: null, lastFetch: 0 },
@@ -99,6 +105,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       const sessions = await invoke<TmuxSession[]>("tmux_list_sessions", {
         sshCommand: ctx.sshCommand,
       });
+      console.log("[wmux] tmuxSessions refresh", { wsId, count: sessions.length, names: sessions.map((s) => s.name) });
       set((s) => ({
         byWs: {
           ...s.byWs,
