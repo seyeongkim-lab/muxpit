@@ -99,8 +99,14 @@ impl PtyManager {
         // to ASCII width calculation and Powerline/Nerd-Font glyphs (PUA U+E000-U+F8FF) render as
         // replacement placeholders (`_`). The starship prompt shows up fine outside tmux because
         // the login shell inherits the system locale directly.
+        // `set -g detach-on-destroy off`: when the user ends the session they
+        // are currently in (typing `exit`, kill-session from inside, etc.),
+        // tmux switches the client to another live session instead of
+        // detaching. Without this the SSH connection drops and wmux tears
+        // down the pane (taking any AI split with it). Applied with -g so
+        // it covers user-created sessions too, not just the wrapper.
         let tmux_inner = format!(
-            "sh -c \"tmux -u has-session -t {name} 2>/dev/null || tmux -u new-session -d -s {name}; tmux -u set-option -t {name} mouse off; exec tmux -u attach -t {name}\"",
+            "sh -c \"tmux -u has-session -t {name} 2>/dev/null || tmux -u new-session -d -s {name}; tmux -u set-option -t {name} mouse off; tmux -u set-option -g detach-on-destroy off; exec tmux -u attach -t {name}\"",
             name = safe
         );
         let full = format!("{} -t {}", ssh_command, shell_single_quote(&tmux_inner));
