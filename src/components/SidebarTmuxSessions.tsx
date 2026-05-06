@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTmuxSessionsStore, pickActiveSession, type TmuxSession } from "../stores/tmuxSessions";
+import { useWorkspaceStore } from "../stores/workspace";
 
 interface Props {
   wsId: string;
@@ -12,6 +13,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   const createNew = useTmuxSessionsStore((s) => s.createNew);
   const killSession = useTmuxSessionsStore((s) => s.killSession);
   const refresh = useTmuxSessionsStore((s) => s.refresh);
+  const setActiveWs = useWorkspaceStore((s) => s.setActive);
 
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -34,6 +36,9 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   if (!entry) return null;
 
   const handleSwitch = (sessionId: string) => {
+    // Activate the workspace too so the user lands on the pane that's about
+    // to display the new session.
+    setActiveWs(wsId);
     void switchTo(wsId, sessionId).catch((e) => console.error("[wmux] switch session:", e));
   };
 
