@@ -548,7 +548,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column" as const,
     paddingBottom: 6,
-    maxHeight: 180,
+    maxHeight: "45vh",
     overflowY: "auto" as const,
   },
   hostRow: {
