@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -31,7 +32,9 @@ export const ConfirmDialog = ({
 
   if (!open) return null;
 
-  return (
+  // Portal to document.body so ancestor stacking contexts / overflow can't
+  // clip or offset the modal — it must center to the viewport.
+  return createPortal(
     <div style={styles.overlay} onClick={onCancel}>
       <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
         <div style={styles.message}>{message}</div>
@@ -48,7 +51,8 @@ export const ConfirmDialog = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
