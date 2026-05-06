@@ -183,8 +183,20 @@ pub fn new_session(ssh_command: &str, name: Option<&str>) -> Result<String, Stri
 pub fn kill_session(ssh_command: &str, session: &str) -> Result<(), String> {
     let s = safe_session_token(session).ok_or_else(|| "invalid session".to_string())?;
     let mut cmd = build_ssh(ssh_command).ok_or_else(|| "invalid ssh command".to_string())?;
-    // Single-quote the target so the remote shell does not expand `$N`.
-    cmd.arg(format!("tmux kill-session -t '{s}'"));
+    // tmux defaults to `detach-on-destroy on`, so killing the session our
+    // wmux client is attached to would close the SSH connection and tear
+    // down the wmux pane (taking the AI split with it). Pre-migrate any
+    // client attached to this session to another live session, then kill.
+    let remote = format!(
+        "alt=$(tmux list-sessions -F '#{{session_id}}' 2>/dev/null \
+                | grep -F -v -x '{s}' | head -n1); \
+         ttys=$(tmux list-clients -t '{s}' -F '#{{client_tty}}' 2>/dev/null); \
+         if [ -n \"$ttys\" ] && [ -n \"$alt\" ]; then \
+           for t in $ttys; do tmux switch-client -c \"$t\" -t \"$alt\"; done; \
+         fi; \
+         tmux kill-session -t '{s}'"
+    );
+    cmd.arg(remote);
     let out = cmd.output().map_err(|e| format!("ssh exec: {e}"))?;
     if !out.status.success() {
         return Err(format!("kill-session exited with {}", out.status));
