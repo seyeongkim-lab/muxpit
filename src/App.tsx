@@ -219,19 +219,27 @@ export const App = () => {
       addWorkspace("Shell 1");
     }
 
-    // Auto claude split for restored SSH workspaces
+    // Auto claude split for restored SSH workspaces, and re-attach the tmux
+    // session list poller for any leaf that was persisted with a tmuxSession.
     if (restored) {
       const state = useWorkspaceStore.getState();
       for (const ws of state.workspaces) {
-        // Find first SSH leaf in the layout tree
-        const findSshLeaf = (node: LayoutNode): string | null => {
-          if (node.type === "leaf") return node.command?.toLowerCase().includes("ssh") ? node.command : null;
+        // Find first SSH leaf with its tmuxSession (if any).
+        const findSshLeaf = (node: LayoutNode): { cmd: string; tmuxSession: string | undefined } | null => {
+          if (node.type === "leaf") {
+            return node.command?.toLowerCase().includes("ssh")
+              ? { cmd: node.command, tmuxSession: node.tmuxSession }
+              : null;
+          }
           if (node.type === "split") return findSshLeaf(node.children[0]) ?? findSshLeaf(node.children[1]);
           return null;
         };
-        const sshCmd = findSshLeaf(ws.layout);
-        if (sshCmd) {
-          autoAiSplit(ws.id, sshCmd);
+        const ssh = findSshLeaf(ws.layout);
+        if (ssh) {
+          if (ssh.tmuxSession) {
+            useTmuxSessionsStore.getState().attach(ws.id, ssh.cmd, ssh.tmuxSession);
+          }
+          autoAiSplit(ws.id, ssh.cmd);
         }
       }
     }
