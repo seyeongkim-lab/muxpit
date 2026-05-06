@@ -203,17 +203,11 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
             const isDropTarget = dragOverIdx === i && dragFromIdx !== null && dragFromIdx !== i;
 
             return (
+              <div key={ws.id}>
               <div
-                key={ws.id}
                 className={`wmux-ws-item${isActive ? " wmux-ws-active" : ""}`}
                 draggable={editingId !== ws.id}
                 onDragStart={(e) => {
-                  // Don't initiate workspace drag when the drag started inside
-                  // the tmux session sub-tree — children's clicks must survive.
-                  if ((e.target as HTMLElement).closest(".wmux-tmux-sessions")) {
-                    e.preventDefault();
-                    return;
-                  }
                   dragFromIdxRef.current = i;
                   setDragFromIdx(i);
                   e.dataTransfer.effectAllowed = "move";
@@ -306,14 +300,16 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                       </span>
                     )}
                   </div>
-
-                  {tmuxAttach[ws.id] && (
-                    <SidebarTmuxSessions
-                      wsId={ws.id}
-                      wrapperSession={tmuxAttach[ws.id].wrapperSession}
-                    />
-                  )}
                 </div>
+              </div>
+              {/* Sibling, NOT child of the draggable ws-item: HTML5 drag would
+                  otherwise hijack mousedown on session rows. */}
+              {tmuxAttach[ws.id] && (
+                <SidebarTmuxSessions
+                  wsId={ws.id}
+                  wrapperSession={tmuxAttach[ws.id].wrapperSession}
+                />
+              )}
               </div>
             );
           })}
