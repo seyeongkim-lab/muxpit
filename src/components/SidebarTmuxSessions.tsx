@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTmuxSessionsStore, pickActiveSession, type TmuxSession } from "../stores/tmuxSessions";
 import { useWorkspaceStore } from "../stores/workspace";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface Props {
   wsId: string;
@@ -17,6 +18,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
 
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
+  const [killTarget, setKillTarget] = useState<TmuxSession | null>(null);
 
   const ordered = useMemo<TmuxSession[]>(() => {
     if (!entry) return [];
@@ -43,9 +45,14 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   };
 
   const handleKill = (s: TmuxSession) => {
-    const label = s.name === wrapperSession ? `wrapper "${s.name}"` : `"${s.name}"`;
-    if (!window.confirm(`Kill tmux session ${label}?`)) return;
-    void killSession(wsId, s.id).catch((e) => console.error("[wmux] kill session:", e));
+    setKillTarget(s);
+  };
+
+  const confirmKill = () => {
+    if (!killTarget) return;
+    const id = killTarget.id;
+    setKillTarget(null);
+    void killSession(wsId, id).catch((e) => console.error("[wmux] kill session:", e));
   };
 
   const submitNew = () => {
@@ -137,6 +144,20 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
           + new session
         </div>
       )}
+      <ConfirmDialog
+        open={killTarget !== null}
+        message={
+          killTarget
+            ? killTarget.name === wrapperSession
+              ? `Kill the wmux wrapper session "${killTarget.name}"?\nThis will close the SSH connection.`
+              : `Kill tmux session "${killTarget.name}"?`
+            : ""
+        }
+        confirmLabel="Kill"
+        destructive
+        onConfirm={confirmKill}
+        onCancel={() => setKillTarget(null)}
+      />
     </div>
   );
 };
