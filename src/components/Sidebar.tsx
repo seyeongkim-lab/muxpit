@@ -291,7 +291,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                         {info.gitDirty && <span style={styles.dirty}> *</span>}
                       </span>
                     )}
-                    {paneCount > 1 && (
+                    {paneCount > 1 && !tmuxAttach[ws.id] && (
                       <span style={styles.panes}>{paneCount} panes</span>
                     )}
                     {info?.ports && info.ports.length > 0 && (
