@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useTmuxSessionsStore } from "./tmuxSessions";
 
 // Split tree types
 export type SplitDirection = "horizontal" | "vertical";
@@ -353,6 +354,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   removeWorkspace: (id: string) => {
+    useTmuxSessionsStore.getState().detach(id);
     set((s) => {
       const filtered = s.workspaces.filter((w) => w.id !== id);
       const newActive =

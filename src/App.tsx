@@ -12,6 +12,7 @@ import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/wor
 import { buildSshCommand, type SshHost } from "./stores/sshHosts";
 import { useAiCliStore, buildAiLaunchCommand, parseSshTarget } from "./stores/aiCli";
 import { useNotificationStore } from "./stores/notifications";
+import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegistry";
@@ -30,6 +31,7 @@ import {
   type Direction,
 } from "./utils/layoutGeometry";
 import { matchesPrefixKey } from "./utils/prefixKey";
+import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 
 const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
   if (node.type === "leaf") return node.id === id ? node : null;
@@ -268,8 +270,16 @@ export const App = () => {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
 
+    const handleVisibility = () => {
+      const store = useTmuxSessionsStore.getState();
+      if (document.hidden) store.pauseAll();
+      else store.resumeAll();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("visibilitychange", handleVisibility);
       unlistenPromise.then((fn) => fn());
     };
   }, []);
@@ -625,9 +635,12 @@ export const App = () => {
         useTmux = false;
       }
     }
-    const tmuxSession = useTmux ? `wmux-${host.host}` : undefined;
+    const tmuxSession = useTmux ? sanitizeTmuxSessionName(`wmux-${host.host}`) : undefined;
 
     const wsId = addWorkspace(host.name, cmd, tmuxSession);
+    if (tmuxSession) {
+      useTmuxSessionsStore.getState().attach(wsId, cmd, tmuxSession);
+    }
     const monitorId = `mon-${Date.now()}`;
     setSidebarMonitor((prev) => {
       if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});

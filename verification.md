@@ -38,3 +38,16 @@
 ## 2026-05-03 Deployment Instructions
 
 - `git diff --check -- AGENTS.md CLAUDE.md research.md plan.md implement.md verification.md feedback.md`: 통과.
+
+## 2026-05-06 Multi-Session Sidebar (Plan A)
+
+- `cargo check` (src-tauri): 통과.
+- `cargo test --lib tmux_remote`: 5 passed (parse_basic, parse_passthrough_options, parse_no_target, safe_token_accepts, safe_token_rejects).
+- `pnpm tsc --noEmit`: 통과.
+- `pnpm build`: 통과 (`tsc && vite build`). Vite chunk size warning만 잔존.
+- 변경 파일:
+  - 추가: `src-tauri/src/tmux_remote.rs`, `src/stores/tmuxSessions.ts`, `src/components/SidebarTmuxSessions.tsx`, `src/utils/tmuxSession.ts`.
+  - 수정: `src-tauri/src/lib.rs` (모듈 등록 + 4 IPC + 기존 두 함수 SSH 파싱 헬퍼화), `src/App.tsx` (attach 호출 + visibility pause/resume + sanitize 적용), `src/stores/workspace.ts` (removeWorkspace 시 detach), `src/components/Sidebar.tsx` (호스트 행 아래 SidebarTmuxSessions 렌더).
+- 미수행 (수동 검증 필요):
+  - 0.7 호스트 manual smoke test: `tmux new -d -s foo; tmux new -d -s bar` 후 wmux 연결 → 사이드바에 wrapper + foo + bar 표시 / 각 클릭 전환 / kill 시 다음 세션 자동 attach.
+  - SSH 프로세스 leak (5s polling) 확인.

@@ -566,3 +566,71 @@ wmux/
    - 검증: Claude/Codex가 같은 프로젝트 지시를 읽는다.
 3. 문서 변경을 검증한다.
    - 검증: `git diff --check` 통과.
+
+## 2026-05-06 Multi-Session Sidebar (Plan A: side-channel polling)
+
+### Goal
+- 한 호스트에 여러 tmux session이 살아 있을 때, Sidebar의 호스트 행 아래에 서브 메뉴로 세션 목록을 노출.
+- 서브 항목 클릭 → attached client를 그 session으로 `switch-client`.
+- 활성 세션이 종료되면 tmux가 알아서 남은 세션으로 옮겨붙고, sidebar는 다음 polling tick에 새 active session을 반영.
+
+### Design constraint (확정)
+- 현재 `pty.rs`는 `tmux_cc=false`로 plain attach만 사용 ([pty.rs:107-109](src-tauri/src/pty.rs#L107-L109)). 따라서 attached PTY 스트림에서 `%sessions-changed`를 직접 못 받는다.
+- 대안: 사이드 채널 `ssh ... tmux <cmd>` exec. `check_remote_tmux_sync`가 동일 패턴 ([lib.rs:163-226](src-tauri/src/lib.rs#L163-L226)).
+- v1은 5s polling으로 시작. 활성 세션 kill 시 tmux가 attached client를 즉시 전환하므로 사용자 화면 반영은 즉시이고, sidebar 표시만 polling lag(≤5s)을 가진다.
+
+### Phase 1 — Backend RPC (`src-tauri/src/`)
+1. 신규 모듈 `tmux_remote.rs`
+   - `parse_ssh_args(ssh_command: &str) -> Option<(Vec<String>, String)>`: 기존 `check_remote_tmux_sync`의 옵션/타겟 파싱을 함수로 추출. 두 곳에서 재사용.
+   - `pub fn list_sessions(ssh_command: &str) -> Result<Vec<TmuxSession>, String>`: `ssh ... tmux list-sessions -F '#{session_id}|#{session_name}|#{session_attached}|#{session_windows}|#{session_activity}'`. 빈 출력 / `no server running` → `Ok(vec![])`.
+   - `pub fn switch_client(ssh_command: &str, wrapper_session: &str, target_session: &str) -> Result<(), String>`: `tmux list-clients -t <wrapper> -F '#{client_tty}'`로 우리 client tty를 찾고, 각 tty에 대해 `tmux switch-client -c <tty> -t <target>`. `target`은 session_id(`$N`) 또는 name. shell 인자는 `[A-Za-z0-9_$@-]`만 허용.
+   - `pub fn new_session(ssh_command: &str, name: Option<&str>) -> Result<String, String>`: `tmux new-session -d -P -F '#{session_id}' [-s NAME]`. NAME은 sanitize.
+   - `pub fn kill_session(ssh_command: &str, session: &str) -> Result<(), String>`: `tmux kill-session -t <sanitized>`.
+   - 검증: 단위테스트로 파서·sanitizer만. 통합은 Phase 6.
+2. `lib.rs`에 4개 `#[tauri::command]` 등록 + `check_remote_tmux_sync`를 신 모듈로 이관 또는 헬퍼 공유.
+   - 검증: `cargo check` 통과.
+
+### Phase 2 — Frontend store (`src/stores/`)
+3. 신규 `tmuxSessions.ts` (zustand)
+   - 상태: `Record<wsId, { sessions: TmuxSession[]; activeSessionId: string | null; loading: boolean; error: string | null; lastFetch: number }>`.
+   - actions:
+     - `attach(wsId, sshCommand, wrapperSession)` — polling timer 시작, 즉시 1회 fetch. 동일 wsId 재호출 시 idempotent.
+     - `detach(wsId)` — timer 정리, 상태 제거.
+     - `refresh(wsId)` — 수동 트리거 (switch/new/kill 직후 호출).
+     - `switchTo(wsId, sessionId)` / `createNew(wsId, name?)` / `killSession(wsId, sessionId)` — 백엔드 RPC + refresh.
+   - active 추정: `list-sessions`의 `session_attached>0`이면서 wrapper가 아닌 첫 항목. tie-break는 `session_activity` 최신.
+4. workspace 스토어 확장 — wsId → `{ sshCommand, wrapperSession }` 메타 보관(이미 `addWorkspace(name, cmd, tmuxSession)` 시그니처가 있음, 여기에 read accessor만).
+   - 검증: type 체크 + 빈 상태 동작.
+
+### Phase 3 — Polling 수명주기
+5. `App.tsx`의 `handleConnectHost` 흐름에서 `useTmux && tmuxSession` 일 때 `tmuxSessionsStore.attach(wsId, cmd, tmuxSession)` 호출.
+6. 워크스페이스가 닫힐 때(`removeWorkspace`) `detach(wsId)` 호출 — Sidebar의 `handleClose`에서 추가.
+7. 폴링 간격: 5s 기본. window blur → pause, focus → 즉시 refresh.
+   - 검증: 연결/해제 사이클에서 ssh 프로세스 leak 없음(`ps -ef | grep ssh`).
+
+### Phase 4 — Sidebar UI (`src/components/Sidebar.tsx`)
+8. 호스트 행 바로 아래에 서브 트리 렌더. expandable but **연결된 호스트는 자동 expand**, 미연결 호스트는 컴포넌트 자체를 숨김.
+9. 서브 행 표시: `● session-name  (3w)` — 활성은 진한 dot + bg accent. wrapper(`wmux-<host>`)는 회색 뱃지로 구분 + 항상 최상단 pin.
+10. hover actions: `→` (switch), `x` (kill, confirm), 더블클릭 = rename(rename은 v2로 보류).
+11. `+ New session` 행 — 입력 inline, blank이면 tmux가 번호로 자동 명명.
+12. 어느 워크스페이스에 속한 sessions인지: 현재 active workspace의 wsId만 표시(다른 host의 노이즈 방지).
+   - 검증: 0.7에 `tmux new -d -s foo; tmux new -d -s bar` 후 wmux 연결 → sidebar에서 wmux-0.7 / foo / bar 3행 보임.
+
+### Phase 5 — Auto-fall-through 검증
+13. 활성 세션 kill 후, 다음 polling tick에 active 추정이 새 attached session으로 갱신되는지 확인. 별도 자동전환 코드 없음 — tmux 위임.
+14. 마지막 세션이 kill되면 wrapper만 남아 그쪽으로 fallback. wrapper도 kill되면 SSH 종료 → 기존 disconnect path 동작.
+
+### Phase 6 — Verify
+15. 0.7 호스트에 multi-session 시나리오 수동 테스트, `verification.md` 기록.
+16. `cargo check` + `pnpm build` + `pnpm tsc --noEmit` 통과.
+17. ssh process leak / polling 부하 sanity check (top 5초간).
+
+### Risks / Tradeoffs
+- 5s polling × 연결호스트 수 = ssh 프로세스 부담. 완화: detach 시 즉시 timer 해제, blur 시 pause.
+- `switch-client -c <tty>` 매칭 실패(여러 client / tty 변동) → fallback으로 `-t <session>`만 호출 후 모든 동일-host client에 영향. v1 수용.
+- Sanitizer가 너무 좁으면 사용자가 만든 점/콜론 들어간 세션명을 못 띄움. 표시는 raw, 명령 인자에는 session_id(`$N`) 사용해 우회.
+
+### Out of scope (이 사이클)
+- tmux-CC 모드 재도입 / 실시간 푸시 채널.
+- 세션 rename UI.
+- 호스트 collapse 토글 영구 저장.
