@@ -75,7 +75,6 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       void get().refresh(wsId);
       return;
     }
-    console.log("[wmux] tmuxSessions attach", { wsId, wrapper });
     set((s) => ({
       _attach: { ...s._attach, [wsId]: { sshCommand, wrapperSession: wrapper } },
       byWs: {
@@ -105,7 +104,6 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       const sessions = await invoke<TmuxSession[]>("tmux_list_sessions", {
         sshCommand: ctx.sshCommand,
       });
-      console.log("[wmux] tmuxSessions refresh", { wsId, count: sessions.length, names: sessions.map((s) => s.name) });
       set((s) => ({
         byWs: {
           ...s.byWs,

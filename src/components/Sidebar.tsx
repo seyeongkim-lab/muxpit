@@ -3,7 +3,6 @@ import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
 import { useTmuxSessionsStore } from "../stores/tmuxSessions";
-import { sanitizeTmuxSessionName } from "../utils/tmuxSession";
 import { destroyAllTerminals } from "./terminalRegistry";
 import { SidebarMonitor } from "./SidebarMonitor";
 import { SidebarClaude } from "./SidebarClaude";
@@ -121,13 +120,9 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
             const isSelected = selectedHostIds.has(host.id);
             const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
             const dotColor = host.color ?? "#89b4fa";
-            const expectedWrapper = sanitizeTmuxSessionName(`wmux-${host.host}`);
-            const attachedWsId = Object.entries(tmuxAttach).find(
-              ([, info]) => info.wrapperSession === expectedWrapper,
-            )?.[0];
             return (
-              <div key={host.id}>
               <div
+                key={host.id}
                 className="wmux-host-row"
                 style={{
                   ...styles.hostRow,
@@ -168,10 +163,6 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                 >
                   ✎
                 </button>
-              </div>
-              {attachedWsId && (
-                <SidebarTmuxSessions wsId={attachedWsId} wrapperSession={expectedWrapper} />
-              )}
               </div>
             );
           })}
@@ -309,6 +300,13 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                       </span>
                     )}
                   </div>
+
+                  {tmuxAttach[ws.id] && (
+                    <SidebarTmuxSessions
+                      wsId={ws.id}
+                      wrapperSession={tmuxAttach[ws.id].wrapperSession}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -548,7 +546,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column" as const,
     paddingBottom: 6,
-    maxHeight: "45vh",
+    maxHeight: 180,
     overflowY: "auto" as const,
   },
   hostRow: {
