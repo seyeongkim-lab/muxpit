@@ -49,7 +49,13 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   };
 
   return (
-    <div style={styles.container}>
+    <div
+      style={styles.container}
+      // The parent .wmux-ws-item is draggable; without this, mousedown on a
+      // session row starts a workspace drag and the click never fires.
+      onDragStart={(e) => e.preventDefault()}
+      draggable={false}
+    >
       {entry.error && (
         <div style={styles.error} title={entry.error} onClick={() => void refresh(wsId)}>
           ! list failed (click to retry)
