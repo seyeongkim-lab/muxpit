@@ -141,7 +141,8 @@ const styles: Record<string, React.CSSProperties> = {
     // visually under the workspace name.
     paddingLeft: 36,
     paddingBottom: 6,
-    marginTop: -4,
+    position: "relative" as const,
+    zIndex: 1,
   },
   row: {
     display: "flex",
