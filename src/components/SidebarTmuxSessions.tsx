@@ -19,9 +19,13 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   const ordered = useMemo<TmuxSession[]>(() => {
     if (!entry) return [];
     const wrapper = entry.sessions.find((s) => s.name === wrapperSession);
+    // Stable order by tmux session id (`$N` creation order) so switching
+    // doesn't reshuffle the list — activity-desc made the just-clicked row
+    // jump to position 2 on every poll.
+    const idNum = (s: TmuxSession) => parseInt(s.id.replace(/^\$/, ""), 10) || 0;
     const rest = entry.sessions
       .filter((s) => s.name !== wrapperSession)
-      .sort((a, b) => b.activity - a.activity);
+      .sort((a, b) => idNum(a) - idNum(b));
     return wrapper ? [wrapper, ...rest] : rest;
   }, [entry, wrapperSession]);
 
@@ -76,7 +80,6 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
               ...(isActive ? styles.rowActive : {}),
             }}
             onClick={(e) => {
-              console.log("[wmux] session row click", { id: s.id, name: s.name, isActive });
               e.stopPropagation();
               if (!isActive) handleSwitch(s.id);
             }}
