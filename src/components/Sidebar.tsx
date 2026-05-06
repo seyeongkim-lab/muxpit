@@ -208,6 +208,12 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                 className={`wmux-ws-item${isActive ? " wmux-ws-active" : ""}`}
                 draggable={editingId !== ws.id}
                 onDragStart={(e) => {
+                  // Don't initiate workspace drag when the drag started inside
+                  // the tmux session sub-tree — children's clicks must survive.
+                  if ((e.target as HTMLElement).closest(".wmux-tmux-sessions")) {
+                    e.preventDefault();
+                    return;
+                  }
                   dragFromIdxRef.current = i;
                   setDragFromIdx(i);
                   e.dataTransfer.effectAllowed = "move";

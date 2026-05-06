@@ -50,17 +50,11 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
 
   return (
     <div
+      className="wmux-tmux-sessions"
       style={styles.container}
-      // The parent .wmux-ws-item is draggable. The HTML5 drag system uses the
-      // closest draggable ancestor, so unless this container also marks itself
-      // draggable, mousedown on a session row starts a workspace drag and the
-      // click never fires. We mark it draggable and immediately preventDefault
-      // the dragstart so neither this nor the parent actually drags.
-      draggable
-      onDragStart={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
+      // Parent ws-item handles workspace drag; if we let its onDragStart fire
+      // from inside this list, clicks get swallowed. Parent checks for this
+      // className and bails out (see Sidebar.tsx).
       onMouseDown={(e) => e.stopPropagation()}
     >
       {entry.error && (
@@ -81,7 +75,11 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
               ...styles.row,
               ...(isActive ? styles.rowActive : {}),
             }}
-            onClick={() => !isActive && handleSwitch(s.id)}
+            onClick={(e) => {
+              console.log("[wmux] session row click", { id: s.id, name: s.name, isActive });
+              e.stopPropagation();
+              if (!isActive) handleSwitch(s.id);
+            }}
             title={`${s.name} (${s.windows} window${s.windows === 1 ? "" : "s"})`}
           >
             <span style={{ ...styles.dot, opacity: isActive ? 1 : 0.35 }}>●</span>
