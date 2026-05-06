@@ -138,16 +138,18 @@ pub fn switch_client(
     let wrapper =
         safe_session_token(wrapper_session).ok_or_else(|| "invalid wrapper".to_string())?;
     let target = safe_session_token(target_session).ok_or_else(|| "invalid target".to_string())?;
-    // tmux session ids look like `$5`. Inside `sh -c '...'` the remote shell
-    // expands `$5` as the (empty) positional parameter, so the literal `$`
-    // must be backslash-escaped: `\$5` becomes the literal `$5` for tmux.
+    // ssh runs the remote command via the login shell, so no extra `sh -c`
+    // wrapper is needed (and adding one collides with the `'#{client_tty}'`
+    // quotes inside, prematurely closing the outer wrap and turning `#...`
+    // into a comment). Wrap the target in single quotes so the remote shell
+    // does not expand `$N`-style session ids as positional parameters.
     let remote = format!(
         "ttys=$(tmux list-clients -t {wrapper} -F '#{{client_tty}}' 2>/dev/null); \
-         if [ -z \"$ttys\" ]; then tmux switch-client -t \\{target}; \
-         else for t in $ttys; do tmux switch-client -c \"$t\" -t \\{target}; done; fi"
+         if [ -z \"$ttys\" ]; then tmux switch-client -t '{target}'; \
+         else for t in $ttys; do tmux switch-client -c \"$t\" -t '{target}'; done; fi"
     );
     let mut cmd = build_ssh(ssh_command).ok_or_else(|| "invalid ssh command".to_string())?;
-    cmd.arg(format!("sh -c '{remote}'"));
+    cmd.arg(remote);
     let out = cmd.output().map_err(|e| format!("ssh exec: {e}"))?;
     if !out.status.success() {
         return Err(format!("switch-client exited with {}", out.status));
@@ -181,8 +183,8 @@ pub fn new_session(ssh_command: &str, name: Option<&str>) -> Result<String, Stri
 pub fn kill_session(ssh_command: &str, session: &str) -> Result<(), String> {
     let s = safe_session_token(session).ok_or_else(|| "invalid session".to_string())?;
     let mut cmd = build_ssh(ssh_command).ok_or_else(|| "invalid ssh command".to_string())?;
-    // Escape `$` so the remote login shell does not expand `$N` session ids.
-    cmd.arg(format!("tmux kill-session -t \\{s}"));
+    // Single-quote the target so the remote shell does not expand `$N`.
+    cmd.arg(format!("tmux kill-session -t '{s}'"));
     let out = cmd.output().map_err(|e| format!("ssh exec: {e}"))?;
     if !out.status.success() {
         return Err(format!("kill-session exited with {}", out.status));
