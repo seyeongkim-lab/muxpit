@@ -6,6 +6,7 @@ import { NotificationPanel } from "./components/NotificationPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SshHostPanel } from "./components/SshHostPanel";
 import { PrefixIndicator } from "./components/PrefixIndicator";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
@@ -100,6 +101,8 @@ export const App = () => {
   const [sshPanelEditId, setSshPanelEditId] = useState<string | null>(null);
   const [gridView, setGridView] = useState(false);
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string } | null>(null);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const closingRef = useRef(false);
 
   const uiFontSize = useSettingsStore((s) => s.fontSize);
   const themeName = useSettingsStore((s) => s.themeName);
@@ -257,20 +260,10 @@ export const App = () => {
   // Confirm before closing, then save session (Tauri close-requested + beforeunload fallback)
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    let promptOpen = false;
-    let closing = false;
-    const unlistenPromise = appWindow.onCloseRequested(async (event) => {
+    const unlistenPromise = appWindow.onCloseRequested((event) => {
+      if (closingRef.current) return;
       event.preventDefault();
-      if (promptOpen || closing) return;
-
-      promptOpen = true;
-      const confirmed = window.confirm("wmux를 닫을까요?");
-      promptOpen = false;
-      if (!confirmed) return;
-
-      closing = true;
-      useWorkspaceStore.getState().saveSession();
-      await appWindow.destroy();
+      setCloseConfirmOpen(true);
     });
 
     const handleBeforeUnload = () => {
@@ -689,6 +682,18 @@ export const App = () => {
     getCurrentWindow().close().catch((err) => console.error("[wmux] close failed:", err));
   }, []);
 
+  const handleCloseConfirm = useCallback(async () => {
+    closingRef.current = true;
+    setCloseConfirmOpen(false);
+    useWorkspaceStore.getState().saveSession();
+    try {
+      await getCurrentWindow().destroy();
+    } catch (err) {
+      console.error("[wmux] destroy failed:", err);
+      closingRef.current = false;
+    }
+  }, []);
+
   return (
     <div style={styles.container}>
       <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
@@ -782,6 +787,15 @@ export const App = () => {
           editHostId={sshPanelEditId}
           onClose={() => { setSshPanelEditId(null); setSshPanelOpen(false); }}
           onConnect={(host) => { handleConnectHost(host); setSshPanelEditId(null); setSshPanelOpen(false); }}
+        />
+        <ConfirmDialog
+          open={closeConfirmOpen}
+          message="wmux를 닫을까요?"
+          confirmLabel="닫기"
+          cancelLabel="취소"
+          destructive
+          onConfirm={handleCloseConfirm}
+          onCancel={() => setCloseConfirmOpen(false)}
         />
       </div>
     </div>
