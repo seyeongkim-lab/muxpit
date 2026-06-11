@@ -183,10 +183,12 @@ pub fn new_session(ssh_command: &str, name: Option<&str>) -> Result<String, Stri
 pub fn kill_session(ssh_command: &str, session: &str) -> Result<(), String> {
     let s = safe_session_token(session).ok_or_else(|| "invalid session".to_string())?;
     let mut cmd = build_ssh(ssh_command).ok_or_else(|| "invalid ssh command".to_string())?;
-    // tmux defaults to `detach-on-destroy on`, so killing the session our
-    // wmux client is attached to would close the SSH connection and tear
-    // down the wmux pane (taking the AI split with it). Pre-migrate any
-    // client attached to this session to another live session, then kill.
+    // wmux sets `detach-on-destroy off` globally on attach (see pty.rs), so tmux
+    // normally switches the client to another session when this one is destroyed.
+    // Pre-migrate any client attached to this session to a live session anyway, as
+    // a safety net for servers where that option isn't in effect (e.g. a session
+    // we didn't start), so killing the attached session never drops the SSH
+    // connection and tears down the wmux pane.
     let remote = format!(
         "alt=$(tmux list-sessions -F '#{{session_id}}' 2>/dev/null \
                 | grep -F -v -x '{s}' | head -n1); \
