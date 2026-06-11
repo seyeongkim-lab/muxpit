@@ -34,12 +34,20 @@ interface SettingsState {
 const FONT_SIZE_MIN = 8;
 const FONT_SIZE_MAX = 32;
 
+// Korean/CJK fallback, appended after the Latin coding font. CSS/xterm fall back
+// per-glyph, so Hangul (absent from coding fonts) renders from these instead of
+// dropping to `monospace`, which has no Hangul on Windows. D2Coding leads: it's a
+// fixed-width Hangul coding font, so terminal cell alignment stays correct.
+// `Noto Sans CJK KR` covers Linux (noto-cjk); `Malgun Gothic` is the Windows fallback.
+export const CJK_FALLBACK =
+  "'D2Coding', 'Noto Sans KR', 'Noto Sans CJK KR', 'NanumGothic', 'Malgun Gothic'";
+
 // Default font stack — Nerd Font variants first so Powerline/starship glyphs (PUA code
 // points) render. Windows ships the Caskaydia NFM variant via the "Cascadia Code Nerd Font"
 // installer; the other names are common macOS/Linux installs. xterm requires a monospace
 // family, hence the NFM/Mono suffix where available.
 const DEFAULT_FONT_FAMILY =
-  "'CaskaydiaMono NFM', 'CaskaydiaCove NFM', 'JetBrainsMono NFM', 'MesloLGS NF', 'FiraCode Nerd Font Mono', 'Hack Nerd Font Mono', 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace";
+  `'CaskaydiaMono NFM', 'CaskaydiaCove NFM', 'JetBrainsMono NFM', 'MesloLGS NF', 'FiraCode Nerd Font Mono', 'Hack Nerd Font Mono', 'JetBrains Mono', 'Cascadia Code', 'Consolas', ${CJK_FALLBACK}, monospace`;
 
 // Load saved settings from localStorage
 const loadSaved = () => {
@@ -56,6 +64,16 @@ const saved = loadSaved();
 // (saved before any NF glyph was referenced), upgrade it so terminal prompts render.
 if (saved.fontFamily && !/\b(Nerd|NF|NFM|Powerline)\b/i.test(saved.fontFamily)) {
   saved.fontFamily = DEFAULT_FONT_FAMILY;
+}
+// Ensure a Korean/CJK fallback so Hangul renders. Stacks saved before this (and
+// single-font picks of the form `'X', monospace`) fall straight through to
+// `monospace`; splice the CJK stack in just before it.
+if (saved.fontFamily && !/D2Coding|Noto Sans (KR|CJK)|NanumGothic|Malgun Gothic/i.test(saved.fontFamily)) {
+  saved.fontFamily = /,\s*monospace\s*$/i.test(saved.fontFamily)
+    ? saved.fontFamily.replace(/,\s*monospace\s*$/i, `, ${CJK_FALLBACK}, monospace`)
+    : `${saved.fontFamily}, ${CJK_FALLBACK}, monospace`;
+}
+if (saved.fontFamily) {
   try {
     localStorage.setItem("wmux-settings", JSON.stringify(saved));
   } catch {}
