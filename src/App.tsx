@@ -257,6 +257,18 @@ export const App = () => {
     }, 500);
   }, [workspaces, activeId]);
 
+  // Mirror the workspace list to the backend so the CLI (`wmux ls`) can read it
+  // over the IPC pipe. The backend keeps no workspace state of its own.
+  useEffect(() => {
+    const summaries = workspaces.map((ws) => ({
+      id: ws.id,
+      name: ws.name,
+      paneCount: collectLeafIds(ws.layout).length,
+      active: ws.id === activeId,
+    }));
+    invoke("set_workspace_list", { workspaces: summaries }).catch(() => {});
+  }, [workspaces, activeId]);
+
   // Confirm before closing, then save session (Tauri close-requested + beforeunload fallback)
   useEffect(() => {
     const appWindow = getCurrentWindow();
