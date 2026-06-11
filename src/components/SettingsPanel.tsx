@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSettingsStore, PREFIX_KEY_CHOICES, CJK_FALLBACK, type PrefixKey } from "../stores/settings";
+import { useSettingsStore, PREFIX_KEY_CHOICES, type PrefixKey } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
@@ -65,8 +65,8 @@ const ColorSwatch = ({
 
 export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   const {
-    fontSize, fontFamily, themeName, customColors, prefixKey,
-    setFontSize, setFontFamily, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
+    fontSize, fontFamily, fontFamilies, themeName, customColors, prefixKey,
+    setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
   } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
   const [monoOnly, setMonoOnly] = useState(true);
@@ -100,7 +100,17 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     .filter((f) => !monoOnly || isLikelyMonospace(f))
     .filter((f) => !search || f.toLowerCase().includes(search.toLowerCase()));
 
-  const currentFontName = fontFamily.match(/^'([^']+)'/)?.[1] ?? fontFamily;
+  const addFont = (f: string) => {
+    if (!fontFamilies.includes(f)) setFontFamilies([...fontFamilies, f]);
+  };
+  const removeFont = (f: string) => setFontFamilies(fontFamilies.filter((x) => x !== f));
+  const moveFont = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= fontFamilies.length) return;
+    const next = [...fontFamilies];
+    [next[i], next[j]] = [next[j], next[i]];
+    setFontFamilies(next);
+  };
 
   return (
     <div style={styles.overlay} onClick={onClose}>
@@ -228,17 +238,54 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
             )}
           </div>
 
-          {/* Font Family */}
+          {/* Font Family — ordered fallback list (top = highest priority) */}
           <div style={styles.section}>
             <label style={styles.label}>
               Font Family
-              <span style={styles.currentFont}> — {currentFontName}</span>
+              <span style={styles.currentFont}> — fallback order, top first</span>
             </label>
+            <div style={styles.selectedList}>
+              {fontFamilies.length === 0 && (
+                <div style={styles.empty}>No fonts selected — add from the list below</div>
+              )}
+              {fontFamilies.map((f, i) => (
+                <div key={f} style={styles.selectedRow}>
+                  <span style={styles.orderNum}>{i + 1}</span>
+                  <span style={{ ...styles.selectedName, fontFamily: `'${f}', monospace` }}>{f}</span>
+                  <button
+                    className="wmux-btn"
+                    style={styles.iconBtn}
+                    disabled={i === 0}
+                    onClick={() => moveFont(i, -1)}
+                    title="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="wmux-btn"
+                    style={styles.iconBtn}
+                    disabled={i === fontFamilies.length - 1}
+                    onClick={() => moveFont(i, 1)}
+                    title="Move down"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="wmux-btn"
+                    style={styles.iconBtn}
+                    onClick={() => removeFont(f)}
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
             <div style={styles.filterRow}>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search fonts..."
+                placeholder="Add a font — search..."
                 style={styles.input}
               />
               <label style={styles.checkLabel}>
@@ -256,19 +303,23 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
                   {allFonts.length === 0 ? "Loading fonts..." : "No fonts found"}
                 </div>
               )}
-              {displayFonts.map((font) => (
-                <button
-                  key={font}
-                  onClick={() => setFontFamily(`'${font}', ${CJK_FALLBACK}, monospace`)}
-                  style={{
-                    ...styles.fontBtn,
-                    ...(currentFontName === font ? styles.fontBtnActive : {}),
-                    fontFamily: `'${font}', monospace`,
-                  }}
-                >
-                  {font}
-                </button>
-              ))}
+              {displayFonts.map((font) => {
+                const selected = fontFamilies.includes(font);
+                return (
+                  <button
+                    key={font}
+                    onClick={() => (selected ? removeFont(font) : addFont(font))}
+                    style={{
+                      ...styles.fontBtn,
+                      ...(selected ? styles.fontBtnActive : {}),
+                      fontFamily: `'${font}', monospace`,
+                    }}
+                  >
+                    <span style={styles.fontBtnMark}>{selected ? "✓" : "+"}</span>
+                    {font}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -353,8 +404,21 @@ const styles: Record<string, React.CSSProperties> = {
   fontBtn: {
     background: "#1e1e2e", border: "1px solid transparent", borderRadius: 4,
     color: "#a6adc8", fontSize: 13, padding: "6px 12px", cursor: "pointer", textAlign: "left" as const,
+    display: "flex", alignItems: "center", gap: 8,
   },
   fontBtnActive: { borderColor: "#89b4fa", color: "#cdd6f4", backgroundColor: "#313244" },
+  fontBtnMark: { color: "#89b4fa", fontSize: 12, width: 12, flexShrink: 0, textAlign: "center" as const },
+  selectedList: { display: "flex", flexDirection: "column" as const, gap: 3, marginBottom: 10 },
+  selectedRow: {
+    display: "flex", alignItems: "center", gap: 6,
+    background: "#181825", border: "1px solid #313244", borderRadius: 4, padding: "4px 6px",
+  },
+  orderNum: { color: "#585b70", fontSize: 11, width: 16, flexShrink: 0, textAlign: "center" as const, fontFamily: "monospace" },
+  selectedName: { flex: 1, color: "#cdd6f4", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
+  iconBtn: {
+    background: "none", border: "none", color: "#a6adc8", cursor: "pointer",
+    fontSize: 12, padding: "2px 5px", flexShrink: 0, lineHeight: 1, borderRadius: 3,
+  },
   themeGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 },
   themeBtn: {
     position: "relative" as const, overflow: "hidden",
