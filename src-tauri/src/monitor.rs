@@ -238,6 +238,7 @@ fn run_persistent_monitor(app: &AppHandle, ssh_target: &str, monitor_id: &str, s
         loop {
             if *stop_flag.lock().unwrap() {
                 let _ = child.kill();
+                let _ = child.wait();
                 return;
             }
 
@@ -342,6 +343,7 @@ fn run_persistent_monitor(app: &AppHandle, ssh_target: &str, monitor_id: &str, s
             for _ in 0..4 {
                 if *stop_flag.lock().unwrap() {
                     let _ = child.kill();
+                    let _ = child.wait();
                     return;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(250));
