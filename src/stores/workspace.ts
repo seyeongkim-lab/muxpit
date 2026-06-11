@@ -247,6 +247,15 @@ export const collectLeafIds = (node: LayoutNode): string[] => {
   ];
 };
 
+// True if any leaf in the layout carries a tmux persist session. Used to decide
+// when the workspace's tmux session poller can be detached.
+const hasTmuxLeaf = (node: LayoutNode): boolean => {
+  if (node.type === "leaf") return !!node.tmuxSession;
+  if (node.type === "split")
+    return hasTmuxLeaf(node.children[0]) || hasTmuxLeaf(node.children[1]);
+  return false;
+};
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   activeId: null,
@@ -288,6 +297,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           : w,
       ),
     }));
+    // The reset layout has no tmux pane; stop the session poller if one was running.
+    if (useTmuxSessionsStore.getState()._attach[id]) {
+      useTmuxSessionsStore.getState().detach(id);
+    }
   },
 
   openBrowser: (workspaceId: string, leafId: string, url: string) => {
@@ -503,6 +516,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         };
       }),
     }));
+    // If closing this leaf left no tmux pane behind, stop the session poller so
+    // it doesn't keep SSH-polling a workspace that no longer has a tmux session.
+    const tmux = useTmuxSessionsStore.getState();
+    if (tmux._attach[workspaceId]) {
+      const w = get().workspaces.find((x) => x.id === workspaceId);
+      if (w && !hasTmuxLeaf(w.layout)) tmux.detach(workspaceId);
+    }
   },
 
   setFocusedLeaf: (workspaceId: string, leafId: string) => {
