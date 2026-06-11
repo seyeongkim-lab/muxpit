@@ -327,6 +327,26 @@ async fn tmux_kill_session(ssh_command: String, session: String) -> Result<(), S
         .map_err(|e| format!("Task join error: {e}"))?
 }
 
+/// Lightweight snapshot of the frontend's workspaces, pushed from the UI so the
+/// CLI (`wmux ls`) can list them over the IPC pipe. The backend owns no workspace
+/// state otherwise; this is a read-through mirror updated on every UI change.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSummary {
+    pub id: String,
+    pub name: String,
+    pub pane_count: u32,
+    pub active: bool,
+}
+
+#[derive(Default)]
+pub struct WorkspaceRegistry(pub std::sync::Mutex<Vec<WorkspaceSummary>>);
+
+#[tauri::command]
+fn set_workspace_list(state: State<'_, WorkspaceRegistry>, workspaces: Vec<WorkspaceSummary>) {
+    *state.0.lock().unwrap() = workspaces;
+}
+
 #[tauri::command]
 fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
@@ -343,6 +363,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(PtyManager::new())
         .manage(MonitorManager::new())
+        .manage(WorkspaceRegistry::default())
         .invoke_handler(tauri::generate_handler![
             spawn_pty,
             spawn_pty_tmux_cc,
@@ -361,6 +382,7 @@ pub fn run() {
             tmux_new_session,
             tmux_kill_session,
             send_notification,
+            set_workspace_list,
             request_session_content,
             start_monitor,
             stop_monitor,

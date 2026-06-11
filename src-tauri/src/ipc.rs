@@ -202,6 +202,23 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
                 error: None,
             }
         }
+        "list-workspaces" => {
+            use tauri::Manager;
+            let registry = app.state::<crate::WorkspaceRegistry>();
+            let list = registry.0.lock().unwrap().clone();
+            match serde_json::to_value(&list) {
+                Ok(v) => IpcResponse {
+                    ok: true,
+                    data: Some(v),
+                    error: None,
+                },
+                Err(e) => IpcResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("serialize error: {e}")),
+                },
+            }
+        }
         _ => IpcResponse {
             ok: false,
             data: None,
