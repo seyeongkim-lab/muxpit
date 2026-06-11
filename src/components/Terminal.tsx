@@ -331,10 +331,13 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     });
 
     const onData = term.onData((data) => {
+      // ptyId stays 0 until spawn returns; don't forward input to PTY 0.
+      if (ptyId === 0) return;
       invoke("write_pty", { id: ptyId, data }).catch(console.error);
     });
 
     const onResize = term.onResize(({ rows, cols }) => {
+      if (ptyId === 0) return;
       invoke("resize_pty", { id: ptyId, rows, cols }).catch(console.error);
     });
 
