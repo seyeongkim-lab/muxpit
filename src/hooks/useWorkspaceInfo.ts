@@ -44,9 +44,12 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
     let active = true;
 
     const poll = async () => {
+      // Read the live list each tick so the effect doesn't need to re-subscribe
+      // on every workspace mutation (which would reset the interval).
+      const wsList = useWorkspaceStore.getState().workspaces;
       // Poll all workspaces in parallel
       await Promise.all(
-        workspaces.map(async (ws) => {
+        wsList.map(async (ws) => {
           if (!active) return;
 
           const findPtyId = (): number | null => {
@@ -66,7 +69,9 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
           if (ptyId === null) return;
 
           try {
-            const cwd = "/";
+            // Use the terminal's last-known cwd (set via OSC 7) so git info is
+            // computed in the actual working directory, not the filesystem root.
+            const cwd = useWorkspaceInfoStore.getState().info[ws.id]?.cwd || "/";
 
             // Run git info and port detection in parallel
             const [info, pid] = await Promise.all([
@@ -103,7 +108,7 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
       active = false;
       clearInterval(timer);
     };
-  }, [workspaces, setInfo, intervalMs]);
+  }, [workspaces.length, setInfo, intervalMs]);
 };
 
 // Separate slow poller for SSH context caching (for session restore)
