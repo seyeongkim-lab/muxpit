@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSettingsStore, PREFIX_KEY_CHOICES, type PrefixKey } from "../stores/settings";
+import { useSettingsStore, PREFIX_KEY_CHOICES, CJK_FALLBACK, type PrefixKey } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
@@ -259,7 +259,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               {displayFonts.map((font) => (
                 <button
                   key={font}
-                  onClick={() => setFontFamily(`'${font}', monospace`)}
+                  onClick={() => setFontFamily(`'${font}', ${CJK_FALLBACK}, monospace`)}
                   style={{
                     ...styles.fontBtn,
                     ...(currentFontName === font ? styles.fontBtnActive : {}),
