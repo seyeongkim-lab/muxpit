@@ -15,7 +15,8 @@ export const PREFIX_KEY_CHOICES: { value: PrefixKey; label: string }[] = [
 
 interface SettingsState {
   fontSize: number;
-  fontFamily: string;
+  fontFamilies: string[]; // ordered fallback list (source of truth)
+  fontFamily: string; // derived CSS/xterm stack string, kept in sync
   themeName: string;
   customColors: CustomColors;
   prefixKey: PrefixKey;
@@ -23,7 +24,7 @@ interface SettingsState {
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
   setFontSize: (size: number) => void;
-  setFontFamily: (family: string) => void;
+  setFontFamilies: (families: string[]) => void;
   setThemeName: (name: string) => void;
   setCustomColor: (themeName: string, key: ThemeColorKey, color: string) => void;
   resetCustomColors: (themeName: string) => void;
@@ -34,20 +35,22 @@ interface SettingsState {
 const FONT_SIZE_MIN = 8;
 const FONT_SIZE_MAX = 32;
 
-// Korean/CJK fallback, appended after the Latin coding font. CSS/xterm fall back
-// per-glyph, so Hangul (absent from coding fonts) renders from these instead of
-// dropping to `monospace`, which has no Hangul on Windows. D2Coding leads: it's a
-// fixed-width Hangul coding font, so terminal cell alignment stays correct.
-// `Noto Sans CJK KR` covers Linux (noto-cjk); `Malgun Gothic` is the Windows fallback.
-export const CJK_FALLBACK =
-  "'D2Coding', 'Noto Sans KR', 'Noto Sans CJK KR', 'NanumGothic', 'Malgun Gothic'";
+// Default font families, in fallback order. Latin coding fonts first (Nerd Font
+// variants so Powerline/starship PUA glyphs render), then Korean/CJK fonts so
+// Hangul — absent from the coding fonts — falls through per-glyph instead of
+// dropping to `monospace` (no Hangul on Windows). `Sarasa Mono K` is a fixed-width
+// CJK coding font, so terminal cell alignment stays correct; `Noto Sans CJK KR`
+// covers Linux (noto-cjk); `Malgun Gothic` is the Windows fallback.
+const DEFAULT_FONT_FAMILIES = [
+  "CaskaydiaMono NFM", "CaskaydiaCove NFM", "JetBrainsMono NFM", "MesloLGS NF",
+  "FiraCode Nerd Font Mono", "Hack Nerd Font Mono", "JetBrains Mono", "Cascadia Code", "Consolas",
+  "Sarasa Mono K", "D2Coding", "Noto Sans KR", "Noto Sans CJK KR", "Malgun Gothic",
+];
 
-// Default font stack — Nerd Font variants first so Powerline/starship glyphs (PUA code
-// points) render. Windows ships the Caskaydia NFM variant via the "Cascadia Code Nerd Font"
-// installer; the other names are common macOS/Linux installs. xterm requires a monospace
-// family, hence the NFM/Mono suffix where available.
-const DEFAULT_FONT_FAMILY =
-  `'CaskaydiaMono NFM', 'CaskaydiaCove NFM', 'JetBrainsMono NFM', 'MesloLGS NF', 'FiraCode Nerd Font Mono', 'Hack Nerd Font Mono', 'JetBrains Mono', 'Cascadia Code', 'Consolas', ${CJK_FALLBACK}, monospace`;
+// Build the CSS/xterm font-family string from an ordered family list. Always ends
+// with the generic `monospace` so xterm keeps a final fixed-width fallback.
+export const buildFontStack = (families: string[]): string =>
+  [...families.map((f) => `'${f}'`), "monospace"].join(", ");
 
 // Load saved settings from localStorage
 const loadSaved = () => {
@@ -60,28 +63,18 @@ const loadSaved = () => {
 
 const saved = loadSaved();
 
-// One-shot migration: if the user's persisted fontFamily predates the Nerd-Font default
-// (saved before any NF glyph was referenced), upgrade it so terminal prompts render.
-if (saved.fontFamily && !/\b(Nerd|NF|NFM|Powerline)\b/i.test(saved.fontFamily)) {
-  saved.fontFamily = DEFAULT_FONT_FAMILY;
-}
-// Ensure a Korean/CJK fallback so Hangul renders. Stacks saved before this (and
-// single-font picks of the form `'X', monospace`) fall straight through to
-// `monospace`; splice the CJK stack in just before it.
-if (saved.fontFamily && !/D2Coding|Noto Sans (KR|CJK)|NanumGothic|Malgun Gothic/i.test(saved.fontFamily)) {
-  saved.fontFamily = /,\s*monospace\s*$/i.test(saved.fontFamily)
-    ? saved.fontFamily.replace(/,\s*monospace\s*$/i, `, ${CJK_FALLBACK}, monospace`)
-    : `${saved.fontFamily}, ${CJK_FALLBACK}, monospace`;
-}
-if (saved.fontFamily) {
-  try {
-    localStorage.setItem("wmux-settings", JSON.stringify(saved));
-  } catch {}
-}
+// Resolve the ordered font family list. Prefer the new array model; otherwise
+// start from defaults (Sarasa-led CJK). Legacy `fontFamily` stack strings are not
+// migrated field-by-field — the ordered list supersedes them.
+const savedFamilies: string[] = Array.isArray(saved.fontFamilies)
+  ? saved.fontFamilies.filter((f: unknown): f is string => typeof f === "string" && f.length > 0)
+  : [];
+const initialFamilies = savedFamilies.length > 0 ? savedFamilies : DEFAULT_FONT_FAMILIES;
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontSize: saved.fontSize ?? 14,
-  fontFamily: saved.fontFamily ?? DEFAULT_FONT_FAMILY,
+  fontFamilies: initialFamilies,
+  fontFamily: buildFontStack(initialFamilies),
   themeName: saved.themeName ?? "Catppuccin Mocha",
   customColors: saved.customColors ?? {},
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
@@ -103,8 +96,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     saveSettings(get());
   },
 
-  setFontFamily: (family: string) => {
-    set({ fontFamily: family });
+  setFontFamilies: (families: string[]) => {
+    set({ fontFamilies: families, fontFamily: buildFontStack(families) });
     saveSettings(get());
   },
 
@@ -157,7 +150,7 @@ const saveSettings = (state: SettingsState) => {
       "wmux-settings",
       JSON.stringify({
         fontSize: state.fontSize,
-        fontFamily: state.fontFamily,
+        fontFamilies: state.fontFamilies,
         themeName: state.themeName,
         customColors: state.customColors,
         prefixKey: state.prefixKey,
