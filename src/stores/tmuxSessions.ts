@@ -39,22 +39,44 @@ interface TmuxSessionsState {
 }
 
 const POLL_INTERVAL_MS = 5000;
+const MAX_BACKOFF_MS = 30000;
 
 // Timers + paused state live outside the store — reactivity doesn't help here
 // and keeping them in zustand state would trigger spurious re-renders.
-const timers = new Map<string, ReturnType<typeof setInterval>>();
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+// Consecutive refresh failures per workspace. Drives polling backoff so a host
+// that's down isn't hammered every 5s with overlapping ssh execs.
+const failures = new Map<string, number>();
 let paused = false;
 
-const startTimer = (wsId: string, refresh: () => void) => {
+const nextDelay = (wsId: string): number => {
+  const f = failures.get(wsId) ?? 0;
+  if (f === 0) return POLL_INTERVAL_MS;
+  return Math.min(POLL_INTERVAL_MS * 2 ** f, MAX_BACKOFF_MS);
+};
+
+// Self-rescheduling poll: each refresh must finish before the next is armed (so
+// a slow/hung ssh exec can't stack up), and the delay backs off on failure.
+// `isActive` lets a tick that resolves after detach/pause skip re-arming.
+const startTimer = (
+  wsId: string,
+  refresh: () => Promise<void>,
+  isActive: () => boolean,
+) => {
   stopTimer(wsId);
   if (paused) return;
-  timers.set(wsId, setInterval(refresh, POLL_INTERVAL_MS));
+  const tick = async () => {
+    await refresh();
+    if (paused || !isActive()) return;
+    timers.set(wsId, setTimeout(tick, nextDelay(wsId)));
+  };
+  timers.set(wsId, setTimeout(tick, nextDelay(wsId)));
 };
 
 const stopTimer = (wsId: string) => {
   const t = timers.get(wsId);
   if (t) {
-    clearInterval(t);
+    clearTimeout(t);
     timers.delete(wsId);
   }
 };
@@ -83,13 +105,16 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       },
     }));
     void get().refresh(wsId);
-    startTimer(wsId, () => {
-      void get().refresh(wsId);
-    });
+    startTimer(
+      wsId,
+      () => get().refresh(wsId),
+      () => !!get()._attach[wsId],
+    );
   },
 
   detach: (wsId) => {
     stopTimer(wsId);
+    failures.delete(wsId);
     set((s) => {
       const { [wsId]: _a, ..._attach } = s._attach;
       const { [wsId]: _b, ...byWs } = s.byWs;
@@ -104,6 +129,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       const sessions = await invoke<TmuxSession[]>("tmux_list_sessions", {
         sshCommand: ctx.sshCommand,
       });
+      failures.delete(wsId);
       set((s) => ({
         byWs: {
           ...s.byWs,
@@ -116,6 +142,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
         },
       }));
     } catch (e) {
+      failures.set(wsId, (failures.get(wsId) ?? 0) + 1);
       set((s) => ({
         byWs: {
           ...s.byWs,
@@ -171,7 +198,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
 
   pauseAll: () => {
     paused = true;
-    for (const t of timers.values()) clearInterval(t);
+    for (const t of timers.values()) clearTimeout(t);
     timers.clear();
   },
 
@@ -180,9 +207,11 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     const state = get();
     for (const wsId of Object.keys(state._attach)) {
       void state.refresh(wsId);
-      startTimer(wsId, () => {
-        void state.refresh(wsId);
-      });
+      startTimer(
+        wsId,
+        () => get().refresh(wsId),
+        () => !!get()._attach[wsId],
+      );
     }
   },
 }));
