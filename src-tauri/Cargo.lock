@@ -5689,6 +5689,7 @@ dependencies = [
 name = "wmux"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "log",
  "portable-pty",
  "serde",

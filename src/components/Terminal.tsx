@@ -89,6 +89,18 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
 
 import { terminalInstances } from "./terminalRegistry";
 
+// Strip the "data:image/png;base64," prefix; the backend wants raw base64.
+const blobToBase64 = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
 interface TerminalLeafProps {
   workspaceId: string;
   leafId: string;
@@ -193,6 +205,47 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       if (e.ctrlKey) open(uri).catch(() => {});
     }));
 
+    // Declared here (assigned after the spawn-source resolution below) so the
+    // key handler and pty-exit listener can reference it without hitting the
+    // temporal dead zone on early keypresses.
+    let spawnCommand: string | null = null;
+
+    // Ctrl+V entry point. A clipboard image on an SSH pane is uploaded to the
+    // remote host and its path pasted instead — AI CLIs (claude etc.) running
+    // over SSH can only read files on their own machine, never the local
+    // clipboard. Everything else falls back to plain text paste.
+    const pasteClipboard = async () => {
+      let image: Blob | null = null;
+      if (spawnCommand) {
+        try {
+          for (const item of await navigator.clipboard.read()) {
+            const type = item.types.find((t) => t.startsWith("image/"));
+            if (type) {
+              image = await item.getType(type);
+              break;
+            }
+          }
+        } catch {
+          // clipboard.read() denied/unsupported → treat as text-only clipboard
+        }
+      }
+      if (image) {
+        try {
+          const remotePath = await invoke<string>("push_image_to_remote", {
+            sshCommand: spawnCommand,
+            imageBase64: await blobToBase64(image),
+          });
+          term.paste(remotePath + " ");
+        } catch (err) {
+          console.error("[wmux] image paste failed:", err);
+          term.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
+        }
+        return;
+      }
+      const text = await navigator.clipboard.readText().catch(() => "");
+      if (text) term.paste(text);
+    };
+
     // Clipboard & shortcut handling
     term.attachCustomKeyEventHandler((e) => {
       // Let Ctrl+Shift combos bubble to App shortcuts
@@ -225,9 +278,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       // Ctrl+V: always paste from clipboard
       if (e.ctrlKey && e.key === "v") {
         e.preventDefault();
-        navigator.clipboard.readText().then((text) => {
-          if (text) term.paste(text);
-        });
+        pasteClipboard();
         return false;
       }
 
@@ -343,8 +394,6 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
     // Determine command to run: explicit leaf command first (split inheritance / session restore),
     // then fall back to cloning parent PTY's SSH context.
-    let spawnCommand: string | null = null;
-
     const cloneFromPtyId = findCloneFromPtyId(workspaceId, leafId);
     const savedCmd = findSshCommand(workspaceId, leafId);
     if (savedCmd) {
