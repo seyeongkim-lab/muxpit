@@ -292,6 +292,92 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String
 }
 
 #[tauri::command]
+async fn push_image_to_remote(
+    ssh_command: String,
+    image_base64: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        push_image_to_remote_sync(&ssh_command, &image_base64)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+/// Upload a clipboard image to the pane's SSH host and return the remote path.
+/// `ssh_command` may be an AI-pane launcher (`ssh -t ... "bash -lc '...'"`):
+/// only `-p`/`-i` option pairs are kept, because `-t` allocates a pty that
+/// mangles the binary stdin stream and the trailing remote-command tokens are
+/// not ssh options.
+fn push_image_to_remote_sync(ssh_command: &str, image_base64: &str) -> Result<String, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_base64)
+        .map_err(|e| format!("invalid image data: {e}"))?;
+
+    let (program, options, target) =
+        tmux_remote::parse_ssh_args(ssh_command).ok_or_else(|| "not an ssh pane".to_string())?;
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let dir = "$HOME/.wmux/screenshots";
+    let file = format!("{dir}/wmux-{stamp}.png");
+
+    let mut cmd = Command::new(program);
+    let mut opts = options.iter();
+    while let Some(o) = opts.next() {
+        if o == "-p" || o == "-i" {
+            if let Some(v) = opts.next() {
+                cmd.arg(o).arg(v);
+            }
+        }
+    }
+    cmd.args([
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+    ]);
+    cmd.arg(target);
+    cmd.arg(format!("mkdir -p {dir} && cat > {file} && echo {file}"));
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| format!("ssh spawn failed: {e}"))?;
+    {
+        use std::io::Write as _;
+        let mut stdin = child.stdin.take().ok_or("ssh stdin unavailable")?;
+        stdin
+            .write_all(&bytes)
+            .map_err(|e| format!("upload failed: {e}"))?;
+        // stdin drops here → EOF → remote `cat` completes
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("ssh failed: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("upload failed: {}", err.trim()));
+    }
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if path.is_empty() {
+        return Err("upload failed: remote returned no path".into());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
 async fn tmux_list_sessions(ssh_command: String) -> Result<Vec<tmux_remote::TmuxSession>, String> {
     tauri::async_runtime::spawn_blocking(move || tmux_remote::list_sessions(&ssh_command))
         .await
@@ -377,6 +463,7 @@ pub fn run() {
             list_fonts,
             check_remote_clis,
             check_remote_tmux,
+            push_image_to_remote,
             tmux_list_sessions,
             tmux_switch_client,
             tmux_new_session,
