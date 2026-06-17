@@ -166,7 +166,7 @@ async fn check_remote_clis(
 ) -> Result<HashMap<String, bool>, String> {
     tauri::async_runtime::spawn_blocking(move || check_remote_clis_sync(&ssh_command, &names))
         .await
-        .map_err(|e| format!("Task join error: {e}"))
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 /// Returns the remote tmux version (e.g. `"3.4"`) when tmux is found on the
@@ -217,7 +217,7 @@ fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
     }
 }
 
-fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String, bool> {
+fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> Result<HashMap<String, bool>, String> {
     // Result map seeded with `false` for every requested name. Callers always get a
     // complete answer even if SSH fails or some names are filtered out below.
     let mut result: HashMap<String, bool> = names.iter().map(|n| (n.clone(), false)).collect();
@@ -235,12 +235,12 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String
         .map(|n| n.as_str())
         .collect();
     if safe_names.is_empty() {
-        return result;
+        return Ok(result);
     }
 
     // Parse the SSH command: "ssh [-p port] [-i key] user@host"
     let Some((program, options, target)) = tmux_remote::parse_ssh_args(ssh_command) else {
-        return result;
+        return Ok(result);
     };
 
     let mut cmd = Command::new(program);
@@ -274,10 +274,14 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String
 
     cmd.stderr(Stdio::null());
 
-    let Ok(output) = cmd.output() else {
-        return result;
-    };
-    // Even on non-zero exit (e.g. no candidates resolved), stdout is the source of truth.
+    let output = cmd.output().map_err(|e| format!("failed to spawn ssh: {e}"))?;
+    // ssh exits 255 for its own failures (connect/auth/timeout). Surface that as an
+    // error so the caller retries instead of caching a false "nothing installed".
+    // A successful connection whose remote `for` loop found nothing exits 0/1 and
+    // falls through — stdout stays the source of truth.
+    if output.status.code() == Some(255) {
+        return Err("ssh probe connection failed".into());
+    }
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         let n = line.trim();
@@ -288,7 +292,7 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> HashMap<String
             *v = true;
         }
     }
-    result
+    Ok(result)
 }
 
 #[tauri::command]
