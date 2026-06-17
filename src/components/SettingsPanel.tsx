@@ -331,7 +331,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               background: resolvedTheme.background as string,
               color: resolvedTheme.foreground as string,
             }}>
-              <span>PS C:\Users\one&gt; git status</span>
+              <span>PS C:\dev&gt; git status</span>
               <br />
               <span style={{ color: resolvedTheme.green as string }}>abcdefghijklmnopqrstuvwxyz</span>
               <br />

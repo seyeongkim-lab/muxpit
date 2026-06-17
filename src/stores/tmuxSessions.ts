@@ -87,8 +87,8 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
 
   attach: (wsId, sshCommand, wrapperSession) => {
     // Always normalise the wrapper to its server-side form so older saved
-    // workspaces (which stored the unsanitised `wmux-192.168.0.7`) match what
-    // tmux actually returns from list-sessions (`wmux-192_168_0_7`).
+    // workspaces (which stored the unsanitised `wmux-10.0.0.5`) match what
+    // tmux actually returns from list-sessions (`wmux-10_0_0_5`).
     const wrapper = sanitizeTmuxSessionName(wrapperSession);
     // Idempotent: re-attaching with the same context is a no-op beyond a
     // refresh. Different ssh/wrapper replaces and resets state.
