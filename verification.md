@@ -51,3 +51,30 @@
 - 미수행 (수동 검증 필요):
   - 0.7 호스트 manual smoke test: `tmux new -d -s foo; tmux new -d -s bar` 후 wmux 연결 → 사이드바에 wrapper + foo + bar 표시 / 각 클릭 전환 / kill 시 다음 세션 자동 attach.
   - SSH 프로세스 leak (5s polling) 확인.
+
+## 2026-05-06 Multi-Session Sidebar — Windows Deploy
+
+- Commit: `22d5f3f`, pushed to `origin/master` (xtrusia/wmux).
+- Pre-deploy: shortcut target = `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`. No running `wmux.exe`.
+- Build: `pnpm tauri build --no-bundle` 통과 (release, 40.54s).
+- 갱신 확인: `LastWriteTime` 2026-05-06 11:30:04, SHA256 `C24657AB8DF541920E996D2A530EA1F94D53171C3AFDB4B43CCD8F5C54015EDD`.
+
+## 2026-05-06 Close Confirm Modal — Linux Deploy on 0.7
+
+- Commit: `1698928` (pushed; HEAD == origin/master). 5c5a46c..1698928 fast-forward 적용.
+- 0.7 `pnpm install --frozen-lockfile`: lockfile up to date.
+- 0.7 `pnpm tauri build --bundles deb`: 통과. `cargo` release 23.22s. Vite chunk size warning만 잔존.
+- 패키지: `/home/seyeongkim/Projects/wmux/src-tauri/target/release/bundle/deb/wmux_0.1.0_amd64.deb`, 5,441 kB.
+- `apt-get install`: 성공, `wmux (0.1.0) over (0.1.0)` 업그레이드.
+- `dpkg -s wmux`: `Status: install ok installed`, `Version: 0.1.0`, `Architecture: amd64`.
+- Installed binary: `/usr/bin/wmux`, ELF x86-64 dynamic, BuildID `51d209882d2ee973d22957fec7a0b38611a374e9`.
+
+## 2026-06-12 Clipboard Image Paste — Windows Deploy
+
+- Commit: `ec8c7d3`, pushed to `origin/master` (xtrusia/wmux).
+- `pnpm exec tsc --noEmit`: 통과.
+- `cargo check` (src-tauri): 통과.
+- Smoke test: 백엔드와 동일 형태의 ssh stdin 전송으로 cnode(0.9)에 PNG 업로드 — 원격 SHA256 일치 (`ebf4f635…`), 경로 echo 정상, 테스트 파일 정리 완료.
+- Build: `pnpm tauri build --no-bundle` 통과 (release, 37.92s). Vite chunk size warning만 잔존.
+- 갱신 확인: `LastWriteTime` 2026-06-12 13:44:44, SHA256 `FC65D4A36801AADD14F815D0A9616D0F9CA52AF3C679BAE24B82710B028882CA`.
+- 미수행 (수동 검증 필요): 실제 앱에서 Win+Shift+S 후 SSH pane Ctrl+V — WebView2의 `navigator.clipboard.read()` 권한 자동 허용 여부 확인. 거부 시 텍스트 paste로 폴백.
