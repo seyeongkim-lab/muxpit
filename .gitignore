@@ -5,3 +5,8 @@ src-tauri/gen/
 wmux-cli/target/
 *.local
 .env
+
+# Local experiments and scratch notes
+spike/
+research-agent-tools.md
+.claude/scheduled_tasks.lock
