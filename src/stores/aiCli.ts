@@ -78,16 +78,29 @@ export const useAiCliStore = create<AiCliState>((set, get) => ({
       return { probing: next };
     });
     try {
-      const result = await invoke<Record<string, boolean>>("check_remote_clis", {
-        sshCommand,
-        names: AI_KINDS,
-      });
-      const found = new Set<AiKind>();
-      for (const k of AI_KINDS) if (result[k]) found.add(k);
-      set((s) => ({ availableByHost: { ...s.availableByHost, [sshTarget]: found } }));
-    } catch {
-      // Treat probe failure as "nothing available" so the toolbar simply hides.
-      set((s) => ({ availableByHost: { ...s.availableByHost, [sshTarget]: new Set() } }));
+      // One connection-failure retry: a fresh connect fires this probe alongside
+      // the tmux probe and the user's own ssh, so the first attempt occasionally
+      // loses the race. Only a *successful* probe is cached (an empty result =
+      // genuinely nothing installed). A probe that never succeeds stays uncached
+      // so the next connect re-probes — otherwise a single transient SSH hiccup
+      // would hide the AI pane for the whole session until an app restart.
+      let result: Record<string, boolean> | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          result = await invoke<Record<string, boolean>>("check_remote_clis", {
+            sshCommand,
+            names: AI_KINDS,
+          });
+          break;
+        } catch {
+          if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+        }
+      }
+      if (result) {
+        const found = new Set<AiKind>();
+        for (const k of AI_KINDS) if (result[k]) found.add(k);
+        set((s) => ({ availableByHost: { ...s.availableByHost, [sshTarget]: found } }));
+      }
     } finally {
       set((s) => {
         const next = new Set(s.probing);
