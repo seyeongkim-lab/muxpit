@@ -30,7 +30,7 @@ a host.
   memory, network throughput via uPlot charts) and lists/resumes Claude Code
   sessions on the connected host.
 - **Notifications** — in-app panel plus native OS toasts; can be triggered from
-  scripts via the `wmux` CLI (e.g. `wmux notify "Build done"`).
+  scripts via the `wmux-cli` companion CLI (e.g. `wmux-cli notify "Build done"`).
 - **Quality-of-life** — embedded browser pane, clipboard-image paste into SSH
   panes, scrollback/history panel, session auto-save & restore, customizable
   themes and fonts (with Korean/Hangul font fallback).
@@ -84,13 +84,13 @@ a host.
 │       ├── sysinfo.rs             # local workspace info (git, ports, shell ctx)
 │       └── ipc.rs                 # named-pipe / unix-socket server for the CLI
 ├── wmux-cli/                  # standalone CLI that talks to the app over IPC
-│   └── src/main.rs            # `wmux ping | notify | ls`
+│   └── src/main.rs            # `wmux-cli ping | notify | ls`
 └── docs/                      # design plans
 ```
 
-The app and the `wmux` CLI communicate over a local IPC channel (named pipe
+The app and the `wmux-cli` companion CLI communicate over a local IPC channel (named pipe
 `\\.\pipe\wmux` on Windows, `/tmp/wmux.sock` on Unix). The CLI is stateless; the
-frontend mirrors the workspace list to the backend so `wmux ls` can read it.
+frontend mirrors the workspace list to the backend so `wmux-cli ls` can read it.
 
 ## Getting started
 
@@ -114,12 +114,15 @@ pnpm tauri build --bundles deb  # Linux .deb
 Build the companion CLI:
 
 ```bash
-cargo build --release --manifest-path wmux-cli/Cargo.toml
+pnpm build:cli
 # then, with the app running:
-wmux ping
-wmux notify "Build done" "All tests passed"
-wmux ls
+wmux-cli ping
+wmux-cli notify "Build done" "All tests passed"
+wmux-cli ls
 ```
+
+Linux `.deb` bundles include both `/usr/bin/wmux` for the GUI app and
+`/usr/bin/wmux-cli` for the companion CLI.
 
 ## Keyboard shortcuts
 

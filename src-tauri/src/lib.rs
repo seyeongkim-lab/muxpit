@@ -6,7 +6,7 @@ mod tmux_cc;
 mod tmux_remote;
 
 use monitor::MonitorManager;
-use pty::PtyManager;
+use pty::{PtyManager, WmuxPtyContext};
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use sysinfo::{
@@ -21,8 +21,19 @@ fn spawn_pty(
     rows: u16,
     cols: u16,
     command: Option<String>,
+    workspace_id: Option<String>,
+    surface_id: Option<String>,
 ) -> Result<u32, String> {
-    state.spawn(app, rows, cols, command)
+    state.spawn(
+        app,
+        rows,
+        cols,
+        command,
+        WmuxPtyContext {
+            workspace_id,
+            surface_id,
+        },
+    )
 }
 
 #[tauri::command]
@@ -33,8 +44,20 @@ fn spawn_pty_tmux_cc(
     cols: u16,
     ssh_command: String,
     session_name: String,
+    workspace_id: Option<String>,
+    surface_id: Option<String>,
 ) -> Result<u32, String> {
-    state.spawn_tmux_cc(app, rows, cols, ssh_command, session_name)
+    state.spawn_tmux_cc(
+        app,
+        rows,
+        cols,
+        ssh_command,
+        session_name,
+        WmuxPtyContext {
+            workspace_id,
+            surface_id,
+        },
+    )
 }
 
 #[tauri::command]
@@ -418,7 +441,7 @@ async fn tmux_kill_session(ssh_command: String, session: String) -> Result<(), S
 }
 
 /// Lightweight snapshot of the frontend's workspaces, pushed from the UI so the
-/// CLI (`wmux ls`) can list them over the IPC pipe. The backend owns no workspace
+/// CLI (`wmux-cli ls`) can list them over the IPC pipe. The backend owns no workspace
 /// state otherwise; this is a read-through mirror updated on every UI change.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

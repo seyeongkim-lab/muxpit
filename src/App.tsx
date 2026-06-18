@@ -31,6 +31,8 @@ import {
   collectRects,
   type Direction,
 } from "./utils/layoutGeometry";
+import { shouldShowNotificationForTarget } from "./utils/notificationRouting";
+import { playNotificationSound } from "./utils/notificationSound";
 import { matchesPrefixKey } from "./utils/prefixKey";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 
@@ -338,12 +340,24 @@ export const App = () => {
 
   // Listen for notification events from Rust backend
   useEffect(() => {
-    const unlisten = listen<{ title: string; body: string; workspace_id?: string }>(
+    const unlisten = listen<{
+      title: string;
+      body: string;
+      workspace_id?: string;
+      surface_id?: string;
+      source?: string;
+      event?: string;
+    }>(
       "wmux-notify",
       (event) => {
         const { title, body } = event.payload;
+        if (!shouldShowNotificationForTarget(event.payload.workspace_id, event.payload.surface_id)) {
+          return;
+        }
+
         const wsId = event.payload.workspace_id ?? activeId ?? "";
         useNotificationStore.getState().addNotification(wsId, title, body);
+        playNotificationSound();
 
         // Send Windows toast notification
         invoke("send_notification", { title, body }).catch(() => {});

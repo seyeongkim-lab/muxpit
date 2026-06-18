@@ -21,6 +21,10 @@ interface SettingsState {
   customColors: CustomColors;
   prefixKey: PrefixKey;
   enableWebglRenderer: boolean;
+  enableNotifications: boolean;
+  enableNotificationSound: boolean;
+  notificationSoundDataUrl: string | null;
+  notificationSoundName: string | null;
 
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
@@ -32,6 +36,10 @@ interface SettingsState {
   resetSingleColor: (themeName: string, key: ThemeColorKey) => void;
   setPrefixKey: (key: PrefixKey) => void;
   setEnableWebglRenderer: (enabled: boolean) => void;
+  setEnableNotifications: (enabled: boolean) => void;
+  setEnableNotificationSound: (enabled: boolean) => void;
+  setNotificationSound: (name: string, dataUrl: string) => void;
+  resetNotificationSound: () => void;
 }
 
 const FONT_SIZE_MIN = 8;
@@ -83,6 +91,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   customColors: saved.customColors ?? {},
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
   enableWebglRenderer: saved.enableWebglRenderer ?? defaultEnableWebglRenderer,
+  enableNotifications: saved.enableNotifications ?? true,
+  enableNotificationSound: saved.enableNotificationSound ?? true,
+  notificationSoundDataUrl:
+    typeof saved.notificationSoundDataUrl === "string" ? saved.notificationSoundDataUrl : null,
+  notificationSoundName:
+    typeof saved.notificationSoundName === "string" ? saved.notificationSoundName : null,
 
   increaseFontSize: () => {
     const next = Math.min(get().fontSize + 1, FONT_SIZE_MAX);
@@ -152,6 +166,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ enableWebglRenderer: enabled });
     saveSettings(get());
   },
+
+  setEnableNotifications: (enabled: boolean) => {
+    set({ enableNotifications: enabled });
+    saveSettings(get());
+  },
+
+  setEnableNotificationSound: (enabled: boolean) => {
+    set({ enableNotificationSound: enabled });
+    saveSettings(get());
+  },
+
+  setNotificationSound: (name: string, dataUrl: string) => {
+    set({ notificationSoundName: name, notificationSoundDataUrl: dataUrl });
+    saveSettings(get());
+  },
+
+  resetNotificationSound: () => {
+    set({ notificationSoundName: null, notificationSoundDataUrl: null });
+    saveSettings(get());
+  },
 }));
 
 const saveSettings = (state: SettingsState) => {
@@ -165,6 +199,10 @@ const saveSettings = (state: SettingsState) => {
         customColors: state.customColors,
         prefixKey: state.prefixKey,
         enableWebglRenderer: state.enableWebglRenderer,
+        enableNotifications: state.enableNotifications,
+        enableNotificationSound: state.enableNotificationSound,
+        notificationSoundDataUrl: state.notificationSoundDataUrl,
+        notificationSoundName: state.notificationSoundName,
       }),
     );
   } catch {}
