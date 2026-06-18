@@ -65,8 +65,9 @@ const ColorSwatch = ({
 
 export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   const {
-    fontSize, fontFamily, fontFamilies, themeName, customColors, prefixKey,
+    fontSize, fontFamily, fontFamilies, themeName, customColors, prefixKey, enableWebglRenderer,
     setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
+    setEnableWebglRenderer,
   } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
   const [monoOnly, setMonoOnly] = useState(true);
@@ -131,6 +132,20 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               <button onClick={() => setFontSize(14)} style={styles.resetBtn}>Reset</button>
             </div>
             <div style={styles.hint}>Ctrl+= / Ctrl+- / Ctrl+0</div>
+          </div>
+
+          {/* Terminal Renderer */}
+          <div style={styles.section}>
+            <label style={styles.label}>Terminal Renderer</label>
+            <label style={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={enableWebglRenderer}
+                onChange={(e) => setEnableWebglRenderer(e.target.checked)}
+              />
+              Enable WebGL renderer
+            </label>
+            <div style={styles.hint}>Disable if terminal input appears delayed.</div>
           </div>
 
           {/* Prefix Key (tmux-style) */}

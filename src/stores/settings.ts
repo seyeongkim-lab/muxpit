@@ -20,6 +20,7 @@ interface SettingsState {
   themeName: string;
   customColors: CustomColors;
   prefixKey: PrefixKey;
+  enableWebglRenderer: boolean;
 
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
@@ -30,6 +31,7 @@ interface SettingsState {
   resetCustomColors: (themeName: string) => void;
   resetSingleColor: (themeName: string, key: ThemeColorKey) => void;
   setPrefixKey: (key: PrefixKey) => void;
+  setEnableWebglRenderer: (enabled: boolean) => void;
 }
 
 const FONT_SIZE_MIN = 8;
@@ -62,6 +64,8 @@ const loadSaved = () => {
 };
 
 const saved = loadSaved();
+const defaultEnableWebglRenderer =
+  typeof navigator === "undefined" ? true : !/linux/i.test(navigator.platform);
 
 // Resolve the ordered font family list. Prefer the new array model; otherwise
 // start from defaults (Sarasa-led CJK). Legacy `fontFamily` stack strings are not
@@ -78,6 +82,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   themeName: saved.themeName ?? "Catppuccin Mocha",
   customColors: saved.customColors ?? {},
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
+  enableWebglRenderer: saved.enableWebglRenderer ?? defaultEnableWebglRenderer,
 
   increaseFontSize: () => {
     const next = Math.min(get().fontSize + 1, FONT_SIZE_MAX);
@@ -142,6 +147,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ prefixKey: key });
     saveSettings(get());
   },
+
+  setEnableWebglRenderer: (enabled: boolean) => {
+    set({ enableWebglRenderer: enabled });
+    saveSettings(get());
+  },
 }));
 
 const saveSettings = (state: SettingsState) => {
@@ -154,6 +164,7 @@ const saveSettings = (state: SettingsState) => {
         themeName: state.themeName,
         customColors: state.customColors,
         prefixKey: state.prefixKey,
+        enableWebglRenderer: state.enableWebglRenderer,
       }),
     );
   } catch {}
