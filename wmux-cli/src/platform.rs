@@ -2,17 +2,23 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(not(windows))]
 pub(crate) fn home_dir() -> Option<PathBuf> {
-    env::var_os("HOME").map(PathBuf::from).or_else(|| {
-        #[cfg(windows)]
-        {
-            env::var_os("USERPROFILE").map(PathBuf::from)
-        }
-        #[cfg(not(windows))]
-        {
-            None
-        }
-    })
+    non_empty_var("HOME").map(PathBuf::from)
+}
+
+#[cfg(windows)]
+pub(crate) fn home_dir() -> Option<PathBuf> {
+    windows_home_dir_from_values(
+        non_empty_var("HOME"),
+        non_empty_var("USERPROFILE"),
+        non_empty_var("HOMEDRIVE"),
+        non_empty_var("HOMEPATH"),
+    )
+}
+
+fn non_empty_var(name: &str) -> Option<std::ffi::OsString> {
+    env::var_os(name).filter(|value| !value.is_empty())
 }
 
 pub(crate) fn binary_on_path(name: &str) -> bool {
@@ -54,11 +60,68 @@ fn path_lookup_names(name: &str) -> Vec<String> {
 pub(crate) fn replace_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
-        if path.exists() {
-            fs::remove_file(path)?;
+        return replace_file_windows(tmp, path);
+    }
+    #[cfg(not(windows))]
+    fs::rename(tmp, path)
+}
+
+#[cfg(windows)]
+fn replace_file_windows(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let tmp_w: Vec<u16> = tmp
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let path_w: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
+    let ok = unsafe { MoveFileExW(tmp_w.as_ptr(), path_w.as_ptr(), flags) };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn windows_home_dir_from_values(
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+    homedrive: Option<std::ffi::OsString>,
+    homepath: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    if let Some(path) = userprofile
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        return Some(path);
+    }
+    if let (Some(drive), Some(path)) = (homedrive, homepath) {
+        let joined = PathBuf::from(format!(
+            "{}{}",
+            drive.to_string_lossy(),
+            path.to_string_lossy()
+        ));
+        if joined.is_absolute() {
+            return Some(joined);
         }
     }
-    fs::rename(tmp, path)
+    home.map(PathBuf::from)
+        .filter(|path| is_native_windows_home(path))
+}
+
+#[cfg(windows)]
+fn is_native_windows_home(path: &Path) -> bool {
+    use std::path::Component;
+    matches!(path.components().next(), Some(Component::Prefix(_)))
 }
 
 pub(crate) fn hook_command(

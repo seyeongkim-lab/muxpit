@@ -43,7 +43,19 @@ pub fn get_process_cwd(pid: u32) -> Option<String> {
         .and_then(|p| p.to_str().map(|s| s.to_string()))
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(target_os = "macos")]
+pub fn get_process_cwd(pid: u32) -> Option<String> {
+    let output = silent_command("lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_macos_lsof_cwd(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 pub fn get_process_cwd(pid: u32) -> Option<String> {
     let _ = pid;
     None
@@ -114,7 +126,31 @@ pub fn get_listening_ports(pid: u32) -> Vec<u16> {
     parse_linux_ss_ports(&text, &pids)
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(target_os = "macos")]
+pub fn get_listening_ports(pid: u32) -> Vec<u16> {
+    let mut pids: Vec<u32> = std::iter::once(pid)
+        .chain(get_descendant_pids(pid))
+        .collect();
+    pids.sort();
+    pids.dedup();
+    let pid_csv = pids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let output = silent_command("lsof")
+        .args(["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", &pid_csv])
+        .output();
+
+    let Ok(output) = output else { return vec![] };
+    if !output.status.success() {
+        return vec![];
+    }
+
+    parse_macos_lsof_ports(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 pub fn get_listening_ports(pid: u32) -> Vec<u16> {
     let _ = pid;
     Vec::new()
@@ -214,7 +250,21 @@ fn get_descendant_pids(pid: u32) -> Vec<u32> {
     collect_descendants(pid, &children_by_parent)
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn get_descendant_pids(pid: u32) -> Vec<u32> {
+    let output = silent_command("ps").args(["-axo", "pid=,ppid="]).output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let children_by_parent = parse_macos_process_parent_rows(&text);
+    collect_descendants(pid, &children_by_parent)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 fn get_descendant_pids(pid: u32) -> Vec<u32> {
     let _ = pid;
     Vec::new()
@@ -250,6 +300,23 @@ fn parse_linux_child_pids(text: &str) -> Vec<u32> {
     text.split_whitespace()
         .filter_map(|s| s.parse().ok())
         .collect()
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[allow(dead_code)]
+fn parse_macos_process_parent_rows(text: &str) -> HashMap<u32, Vec<u32>> {
+    let mut children_by_parent: HashMap<u32, Vec<u32>> = HashMap::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(child) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Some(parent) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        children_by_parent.entry(parent).or_default().push(child);
+    }
+    children_by_parent
 }
 
 fn collect_descendants(pid: u32, children_by_parent: &HashMap<u32, Vec<u32>>) -> Vec<u32> {
@@ -613,11 +680,95 @@ fn parse_linux_cmdline(raw: &[u8]) -> String {
     raw.split(|&b| b == 0)
         .map(|part| String::from_utf8_lossy(part).to_string())
         .filter(|s| !s.is_empty())
+        .map(|s| shell_quote_arg(&s))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(any(target_os = "linux", test))]
+fn shell_quote_arg(value: &str) -> String {
+    if !value.is_empty()
+        && value.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '_' | '-' | '.' | '/' | ':' | '@' | '%' | '+' | '=')
+        })
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_macos_lsof_cwd(text: &str) -> Option<String> {
+    text.lines()
+        .find_map(|line| line.strip_prefix('n'))
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_macos_lsof_ports(text: &str) -> Vec<u16> {
+    let mut ports = Vec::new();
+    for line in text.lines() {
+        if !line.contains("(LISTEN)") {
+            continue;
+        }
+        let Some(tcp_part) = line.split("TCP ").nth(1) else {
+            continue;
+        };
+        let addr = tcp_part.split_whitespace().next().unwrap_or("");
+        if let Some(port) = parse_socket_port(addr) {
+            ports.push(port);
+        }
+    }
+    ports.sort();
+    ports.dedup();
+    ports
+}
+
+#[cfg(target_os = "macos")]
+pub fn get_shell_context(pid: u32) -> ShellContext {
+    let output = silent_command("ps")
+        .args(["-axo", "pid=,ppid=,command="])
+        .output();
+    let Ok(output) = output else {
+        return ShellContext::default();
+    };
+    if !output.status.success() {
+        return ShellContext::default();
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut ssh_command = None;
+    let mut cwd = None;
+    for (child_pid, command) in parse_macos_child_commands(&text, pid) {
+        if ssh_command.is_none() && command.contains("ssh") {
+            ssh_command = Some(command);
+        }
+        if cwd.is_none() {
+            cwd = get_process_cwd(child_pid);
+        }
+    }
+    if cwd.is_none() {
+        cwd = get_process_cwd(pid);
+    }
+    ShellContext { ssh_command, cwd }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_macos_child_commands(text: &str, parent_pid: u32) -> Vec<(u32, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let child = parts.next()?.parse::<u32>().ok()?;
+            let parent = parts.next()?.parse::<u32>().ok()?;
+            let command = parts.collect::<Vec<_>>().join(" ");
+            (parent == parent_pid && !command.is_empty()).then_some((child, command))
+        })
+        .collect()
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 pub fn get_shell_context(pid: u32) -> ShellContext {
     let _ = pid;
     ShellContext::default()
@@ -696,11 +847,45 @@ mod tests {
     }
 
     #[test]
-    fn parse_linux_cmdline_joins_nul_separated_args() {
+    fn parse_linux_cmdline_quotes_nul_separated_args() {
         let raw = [
             b's', b's', b'h', 0, b'-', b'p', 0, b'2', b'2', b'2', b'2', 0, b'm', b'e', b'@', b'h',
             b'o', b's', b't', 0,
         ];
         assert_eq!(parse_linux_cmdline(&raw), "ssh -p 2222 me@host");
+    }
+
+    #[test]
+    fn parse_linux_cmdline_preserves_args_with_spaces() {
+        let raw = b"ssh\0-i\0/home/me/work key\0me@host\0";
+        assert_eq!(
+            parse_linux_cmdline(raw),
+            "ssh -i '/home/me/work key' me@host"
+        );
+    }
+
+    #[test]
+    fn parse_macos_lsof_cwd_extracts_name_record() {
+        assert_eq!(
+            parse_macos_lsof_cwd("p123\nn/Users/me/project\n"),
+            Some("/Users/me/project".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_macos_lsof_ports_extracts_listeners() {
+        let text = "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n\
+                   node 123 me 10u IPv4 0 0t0 TCP 127.0.0.1:5173 (LISTEN)\n\
+                   node 123 me 11u IPv6 0 0t0 TCP *:8080 (LISTEN)\n";
+        assert_eq!(parse_macos_lsof_ports(text), vec![5173, 8080]);
+    }
+
+    #[test]
+    fn parse_macos_child_commands_keeps_command_tail() {
+        let rows = "101 1 /bin/zsh\n202 101 ssh -i /tmp/key me@host\n";
+        assert_eq!(
+            parse_macos_child_commands(rows, 101),
+            vec![(202, "ssh -i /tmp/key me@host".to_string())]
+        );
     }
 }

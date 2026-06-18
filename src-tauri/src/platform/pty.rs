@@ -17,6 +17,8 @@ pub fn apply_wmux_env(
 
     #[cfg(unix)]
     cmd.env("WMUX_SOCKET_PATH", super::paths::ipc_socket_path());
+    #[cfg(windows)]
+    cmd.env("WMUX_PIPE_NAME", super::paths::ipc_pipe_name());
 
     if let Ok(cli_path) = std::env::var("WMUX_BUNDLED_CLI_PATH") {
         if !cli_path.is_empty() {

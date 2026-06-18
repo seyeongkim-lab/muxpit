@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::time::Duration;
@@ -8,13 +8,11 @@ use tauri::AppHandle;
 const EXISTING_SOCKET_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub(super) fn server_loop(app: AppHandle) {
-    let socket_path = super::paths::ipc_socket_path();
-    if let Some(parent) = socket_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            log::error!("Failed to create IPC socket dir {}: {e}", parent.display());
-            return;
-        }
-        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+    let endpoint = super::paths::ipc_socket_endpoint();
+    let socket_path = endpoint.path;
+    if let Err(e) = prepare_socket_parent(&socket_path, endpoint.secure_parent) {
+        log::error!("{e}");
+        return;
     }
 
     match std::fs::symlink_metadata(&socket_path) {
@@ -24,6 +22,7 @@ pub(super) fn server_loop(app: AppHandle) {
                     "IPC socket already has a live server: {}",
                     socket_path.display()
                 );
+                app.exit(0);
                 return;
             }
             log::warn!("Removing stale IPC socket: {}", socket_path.display());
@@ -79,6 +78,43 @@ pub(super) fn server_loop(app: AppHandle) {
     }
 }
 
+fn prepare_socket_parent(path: &Path, secure_parent: bool) -> Result<(), String> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("Failed to create IPC socket dir {}: {e}", parent.display()))?;
+
+    if !secure_parent {
+        return Ok(());
+    }
+
+    let meta = std::fs::symlink_metadata(parent)
+        .map_err(|e| format!("Failed to inspect IPC socket dir {}: {e}", parent.display()))?;
+    if !meta.file_type().is_dir() || meta.file_type().is_symlink() {
+        return Err(format!(
+            "IPC socket parent is not a plain directory: {}",
+            parent.display()
+        ));
+    }
+    if meta.uid() != current_euid() {
+        return Err(format!(
+            "IPC socket parent {} is not owned by the current user",
+            parent.display()
+        ));
+    }
+
+    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+        .map_err(|e| format!("Failed to secure IPC socket dir {}: {e}", parent.display()))
+}
+
+fn current_euid() -> u32 {
+    extern "C" {
+        fn geteuid() -> u32;
+    }
+    unsafe { geteuid() }
+}
+
 fn existing_socket_is_live(path: &Path) -> bool {
     let Ok(mut stream) = UnixStream::connect(path) else {
         return false;
@@ -121,5 +157,33 @@ mod tests {
     fn ipc_ping_succeeded_rejects_error_or_invalid_response() {
         assert!(!ipc_ping_succeeded(r#"{"ok":false,"error":"busy"}"#));
         assert!(!ipc_ping_succeeded("not json"));
+    }
+
+    #[test]
+    fn prepare_socket_parent_does_not_chmod_override_parent() {
+        let parent =
+            std::env::temp_dir().join(format!("wmux-override-parent-test-{}", std::process::id()));
+        let socket = parent.join("wmux.sock");
+        std::fs::create_dir_all(&parent).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        prepare_socket_parent(&socket, false).unwrap();
+
+        let mode = std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn prepare_socket_parent_secures_managed_parent() {
+        let parent =
+            std::env::temp_dir().join(format!("wmux-managed-parent-test-{}", std::process::id()));
+        let socket = parent.join("wmux.sock");
+
+        prepare_socket_parent(&socket, true).unwrap();
+
+        let mode = std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        let _ = std::fs::remove_dir_all(&parent);
     }
 }
