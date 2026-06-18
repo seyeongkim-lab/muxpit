@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter};
 const PIPE_NAME: &str = r"\\.\pipe\wmux";
 
 #[cfg(unix)]
-const SOCKET_PATH: &str = "/tmp/wmux.sock";
+pub const SOCKET_PATH: &str = "/tmp/wmux.sock";
 
 #[derive(Debug, Deserialize)]
 struct IpcRequest {

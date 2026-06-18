@@ -31,9 +31,41 @@ struct PtyInstance {
     tmux_state: Option<Arc<Mutex<TmuxCcState>>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct WmuxPtyContext {
+    pub workspace_id: Option<String>,
+    pub surface_id: Option<String>,
+}
+
 pub struct PtyManager {
     instances: Mutex<HashMap<u32, PtyInstance>>,
     next_id: Mutex<u32>,
+}
+
+fn apply_wmux_env(cmd: &mut CommandBuilder, context: &WmuxPtyContext) {
+    if let Some(workspace_id) = context
+        .workspace_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        cmd.env("WMUX_WORKSPACE_ID", workspace_id);
+    }
+    if let Some(surface_id) = context
+        .surface_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        cmd.env("WMUX_SURFACE_ID", surface_id);
+    }
+
+    #[cfg(unix)]
+    cmd.env("WMUX_SOCKET_PATH", crate::ipc::SOCKET_PATH);
+
+    if let Ok(cli_path) = std::env::var("WMUX_BUNDLED_CLI_PATH") {
+        if !cli_path.is_empty() {
+            cmd.env("WMUX_BUNDLED_CLI_PATH", cli_path);
+        }
+    }
 }
 
 impl PtyManager {
@@ -50,8 +82,9 @@ impl PtyManager {
         rows: u16,
         cols: u16,
         command: Option<String>,
+        wmux_context: WmuxPtyContext,
     ) -> Result<u32, String> {
-        self.spawn_internal(app, rows, cols, command, false)
+        self.spawn_internal(app, rows, cols, command, false, wmux_context)
     }
 
     /// Spawn an SSH connection that wraps the remote shell in `tmux new-session -A -s SESSION`.
@@ -69,6 +102,7 @@ impl PtyManager {
         cols: u16,
         ssh_command: String,
         session_name: String,
+        wmux_context: WmuxPtyContext,
     ) -> Result<u32, String> {
         // Sanitise strictly to [a-zA-Z0-9_-]. tmux rejects `.` and `:`, and we *also* want the
         // result to be shell-safe so we don't have to quote it — any `'` in the inner string
@@ -112,7 +146,7 @@ impl PtyManager {
         let full = format!("{} -t {}", ssh_command, shell_single_quote(&tmux_inner));
         // tmux_cc=false: we no longer use control mode. Keep the parser module for a future
         // re-introduction of real pane mapping (see TODO Phase 10 Step 1: pane mapping policy).
-        self.spawn_internal(app, rows, cols, Some(full), false)
+        self.spawn_internal(app, rows, cols, Some(full), false, wmux_context)
     }
 
     fn spawn_internal(
@@ -122,6 +156,7 @@ impl PtyManager {
         cols: u16,
         command: Option<String>,
         tmux_cc: bool,
+        wmux_context: WmuxPtyContext,
     ) -> Result<u32, String> {
         let pty_system = native_pty_system();
 
@@ -152,6 +187,7 @@ impl PtyManager {
             CommandBuilder::new_default_prog()
         };
         cmd.env("TERM", "xterm-256color");
+        apply_wmux_env(&mut cmd, &wmux_context);
 
         let mut child = pair
             .slave
