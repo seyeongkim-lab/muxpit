@@ -1,8 +1,10 @@
-import { useWorkspaceStore, collectLeafIds } from "../stores/workspace";
+import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
 import { useTmuxSessionsStore } from "../stores/tmuxSessions";
+import { useSettingsStore } from "../stores/settings";
+import { useHistoryStore } from "../stores/history";
 import { destroyAllTerminals } from "./terminalRegistry";
 import { SidebarMonitor } from "./SidebarMonitor";
 import { SidebarClaude } from "./SidebarClaude";
@@ -28,6 +30,48 @@ interface SidebarProps {
   onToggleGridView?: () => void;
 }
 
+const collectTerminalLeaves = (node: LayoutNode): LeafNode[] => {
+  if (node.type === "leaf") return [node];
+  if (node.type === "split") return [...collectTerminalLeaves(node.children[0]), ...collectTerminalLeaves(node.children[1])];
+  return [];
+};
+
+const isSshLeaf = (leaf: LeafNode): boolean => {
+  if (leaf.tmuxSession || leaf.sshCommand) return true;
+  return /^\s*ssh\b/i.test(leaf.command ?? "");
+};
+
+const extractSshTarget = (command: string | undefined): string | null => {
+  if (!command) return null;
+  for (const part of command.split(/\s+/)) {
+    const cleaned = part.replace(/^["']|["']$/g, "");
+    if (cleaned.startsWith("-") || cleaned.toLowerCase() === "ssh") continue;
+    if (cleaned.includes("@")) return cleaned;
+  }
+  const match = command.match(/(\S+@\S+)/);
+  return match ? match[1].replace(/^["']|["']$/g, "") : null;
+};
+
+const getWorkspaceSshTarget = (workspace: Workspace): string | null => {
+  for (const leaf of collectTerminalLeaves(workspace.layout)) {
+    if (leaf.aiSshTarget) return leaf.aiSshTarget;
+    const target = extractSshTarget(leaf.command) ?? extractSshTarget(leaf.sshCommand);
+    if (target) return target;
+  }
+  return null;
+};
+
+const compactPath = (path: string): string =>
+  path
+    .replace(/^\/home\/[^/]+(?=\/|$)/, "~")
+    .replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+
+const formatMemory = (bytes: number): string => {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))}MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
+};
+
 export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
   const { workspaces, activeId, addWorkspace, removeWorkspace, setActive, renameWorkspace, reorderWorkspaces } =
     useWorkspaceStore();
@@ -37,6 +81,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
   const markRead = useNotificationStore((s) => s.markRead);
   const sshHosts = useSshHostsStore((s) => s.hosts);
   const tmuxAttach = useTmuxSessionsStore((s) => s._attach);
+  const sessionListMetadata = useSettingsStore((s) => s.sessionListMetadata);
+  const historyEntries = useHistoryStore((s) => s.entries);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
   const dragFromIdxRef = useRef<number | null>(null);
@@ -196,6 +242,49 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
             const info = infoMap[ws.id];
             const isActive = ws.id === activeId;
             const paneCount = collectLeafIds(ws.layout).length;
+            const terminalLeaves = collectTerminalLeaves(ws.layout);
+            const isSsh = terminalLeaves.some(isSshLeaf) || !!tmuxAttach[ws.id];
+            const sshTarget = getWorkspaceSshTarget(ws);
+            const lastCommand = (() => {
+              for (let idx = historyEntries.length - 1; idx >= 0; idx--) {
+                if (historyEntries[idx].workspaceId === ws.id) return historyEntries[idx].command;
+              }
+              return null;
+            })();
+            const metaItems: { label: string; style: React.CSSProperties; title?: string }[] = [];
+            const pushMeta = (label: string | null | undefined, style: React.CSSProperties, title?: string) => {
+              if (label) metaItems.push({ label, style, title });
+            };
+
+            if (sessionListMetadata.agent) {
+              pushMeta(isSsh ? "ssh" : info?.agent ?? "shell", styles.metaAgent);
+            }
+            if (isSsh) {
+              if (sessionListMetadata.sshTarget) pushMeta(sshTarget, styles.metaSsh, sshTarget ?? undefined);
+              if (sessionListMetadata.tmuxSession && tmuxAttach[ws.id]) {
+                pushMeta(`tmux:${tmuxAttach[ws.id].wrapperSession}`, styles.metaTmux);
+              }
+            } else {
+              if (sessionListMetadata.cwd && info?.cwd) pushMeta(compactPath(info.cwd), styles.metaItem, info.cwd);
+              if (sessionListMetadata.git && info?.gitBranch) {
+                pushMeta(`${info.gitBranch}${info.gitDirty ? " *" : ""}`, styles.branch);
+              }
+              if (sessionListMetadata.ports && info?.ports && info.ports.length > 0) {
+                pushMeta(`:${info.ports.join(", :")}`, styles.ports);
+              }
+              if (sessionListMetadata.process && info?.processName && !info.agent) {
+                pushMeta(info.processName, styles.metaProcess, info.command ?? undefined);
+              }
+              if (sessionListMetadata.memory && info?.memoryBytes) {
+                pushMeta(formatMemory(info.memoryBytes), styles.metaMemory);
+              }
+              if (sessionListMetadata.lastCommand && lastCommand) {
+                pushMeta(`last: ${lastCommand}`, styles.metaCommand, lastCommand);
+              }
+            }
+            if (sessionListMetadata.panes && paneCount > 1 && !tmuxAttach[ws.id]) {
+              pushMeta(`${paneCount} panes`, styles.panes);
+            }
             const wsUnread = notifications.filter(
               (n) => n.workspaceId === ws.id && !n.read,
             ).length;
@@ -286,20 +375,11 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
 
                   {/* Metadata */}
                   <div style={styles.meta}>
-                    {info?.gitBranch && (
-                      <span style={styles.branch}>
-                        {info.gitBranch}
-                        {info.gitDirty && <span style={styles.dirty}> *</span>}
+                    {metaItems.map((item, idx) => (
+                      <span key={`${item.label}-${idx}`} style={item.style} title={item.title}>
+                        {item.label}
                       </span>
-                    )}
-                    {paneCount > 1 && !tmuxAttach[ws.id] && (
-                      <span style={styles.panes}>{paneCount} panes</span>
-                    )}
-                    {info?.ports && info.ports.length > 0 && (
-                      <span style={styles.ports}>
-                        :{info.ports.join(", :")}
-                      </span>
-                    )}
+                    ))}
                   </div>
                 </div>
               </div>
@@ -466,6 +546,21 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 6,
     paddingLeft: 22,
     flexWrap: "wrap" as const,
+    minWidth: 0,
+  },
+  metaItem: {
+    color: "var(--wmux-subtext)",
+    fontSize: 12,
+    fontFamily: "monospace",
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  metaAgent: {
+    color: "#89b4fa",
+    fontSize: 12,
+    fontFamily: "monospace",
   },
   branch: {
     color: "#a6e3a1",
@@ -483,6 +578,39 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#94e2d5",
     fontSize: 12,
     fontFamily: "monospace",
+  },
+  metaProcess: {
+    color: "#cba6f7",
+    fontSize: 12,
+    fontFamily: "monospace",
+  },
+  metaMemory: {
+    color: "#fab387",
+    fontSize: 12,
+    fontFamily: "monospace",
+  },
+  metaSsh: {
+    color: "#89dceb",
+    fontSize: 12,
+    fontFamily: "monospace",
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  metaTmux: {
+    color: "#f9e2af",
+    fontSize: 12,
+    fontFamily: "monospace",
+  },
+  metaCommand: {
+    color: "var(--wmux-subtext)",
+    fontSize: 12,
+    fontFamily: "monospace",
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
   },
   badge: {
     backgroundColor: "var(--wmux-accent)",

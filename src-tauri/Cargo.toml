@@ -24,6 +24,8 @@ tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 portable-pty = "0.9"
+sysinfo_crate = { package = "sysinfo", version = "=0.35.2", default-features = false, features = ["system"] }
+listeners = "0.6.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

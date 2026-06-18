@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { useWorkspaceStore, collectLeafIds, type LayoutNode } from "../stores/workspace";
+import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
 
 const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
   if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") && node.id === id) return node;
@@ -9,12 +9,46 @@ const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
   return null;
 };
 
-interface WorkspaceInfo {
+export interface WorkspaceInfo {
   cwd: string;
   gitBranch: string | null;
   gitDirty: boolean;
   ports: number[];
+  processName: string | null;
+  command: string | null;
+  agent: string | null;
+  memoryBytes: number;
+  cpuPercent: number;
+  descendantCount: number;
+  terminalTitle: string | null;
 }
+
+interface SessionMetadata {
+  cwd: string;
+  git_branch: string | null;
+  git_dirty: boolean;
+  ports: number[];
+  process_name: string | null;
+  command: string | null;
+  agent: string | null;
+  memory_bytes: number;
+  cpu_percent: number;
+  descendant_count: number;
+}
+
+const emptyInfo = (prev?: WorkspaceInfo): WorkspaceInfo => ({
+  cwd: prev?.cwd ?? "",
+  gitBranch: null,
+  gitDirty: false,
+  ports: [],
+  processName: null,
+  command: null,
+  agent: null,
+  memoryBytes: 0,
+  cpuPercent: 0,
+  descendantCount: 0,
+  terminalTitle: prev?.terminalTitle ?? null,
+});
 
 interface WorkspaceInfoState {
   info: Record<string, WorkspaceInfo>; // keyed by workspace id
@@ -30,10 +64,50 @@ export const useWorkspaceInfoStore = create<WorkspaceInfoState>((set) => ({
     set((s) => ({
       info: {
         ...s.info,
-        [wsId]: { ...s.info[wsId], ...patch },
+        [wsId]: { ...emptyInfo(s.info[wsId]), ...s.info[wsId], ...patch },
       },
     })),
 }));
+
+const findFirstTerminalLeaf = (node: LayoutNode): LeafNode | null => {
+  if (node.type === "leaf") return node;
+  if (node.type === "split") return findFirstTerminalLeaf(node.children[0]) ?? findFirstTerminalLeaf(node.children[1]);
+  return null;
+};
+
+const findRepresentativeLeaf = (workspace: Workspace): LeafNode | null => {
+  const focused = findLeafInLayout(workspace.layout, workspace.focusedLeafId);
+  if (focused?.type === "leaf") return focused;
+  return findFirstTerminalLeaf(workspace.layout);
+};
+
+const isSshLeaf = (leaf: LeafNode): boolean => {
+  if (leaf.tmuxSession || leaf.sshCommand) return true;
+  return /^\s*ssh\b/i.test(leaf.command ?? "");
+};
+
+const compactPath = (path: string): string =>
+  path
+    .replace(/^\/home\/[^/]+(?=\/|$)/, "~")
+    .replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+
+const isUsefulTerminalTitle = (title: string | null): title is string => {
+  if (!title) return false;
+  const trimmed = title.trim();
+  if (trimmed.length < 3) return false;
+  const lower = trimmed.toLowerCase();
+  return !["claude", "claude code", "terminal", "shell", "bash", "zsh"].includes(lower);
+};
+
+const buildAutoWorkspaceName = (info: WorkspaceInfo): string | null => {
+  if (info.agent === "claude" && isUsefulTerminalTitle(info.terminalTitle)) {
+    return info.terminalTitle.trim();
+  }
+  if ((info.agent === "codex" || info.agent === "claude") && info.cwd) {
+    return compactPath(info.cwd);
+  }
+  return null;
+};
 
 // Polls workspace metadata every N seconds
 export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
@@ -52,49 +126,44 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
         wsList.map(async (ws) => {
           if (!active) return;
 
-          const findPtyId = (): number | null => {
-            const state = useWorkspaceStore.getState();
-            const w = state.workspaces.find((w) => w.id === ws.id);
-            if (!w) return null;
+          const state = useWorkspaceStore.getState();
+          const workspace = state.workspaces.find((w) => w.id === ws.id);
+          if (!workspace) return;
+          const leaf = findRepresentativeLeaf(workspace);
+          if (!leaf?.ptyId) return;
 
-            const findInNode = (node: typeof w.layout): number | null => {
-              if (node.type === "leaf") return node.ptyId;
-              if (node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") return null;
-              return findInNode(node.children[0]) ?? findInNode(node.children[1]);
-            };
-            return findInNode(w.layout);
-          };
-
-          const ptyId = findPtyId();
-          if (ptyId === null) return;
+          if (isSshLeaf(leaf)) {
+            const prev = useWorkspaceInfoStore.getState().info[ws.id];
+            setInfo(ws.id, { ...emptyInfo(prev), agent: "ssh" });
+            return;
+          }
 
           try {
-            // Use the terminal's last-known cwd (set via OSC 7) so git info is
-            // computed in the actual working directory, not the filesystem root.
-            const cwd = useWorkspaceInfoStore.getState().info[ws.id]?.cwd || "/";
-
-            // Run git info and port detection in parallel
-            const [info, pid] = await Promise.all([
-              invoke<{
-                cwd: string;
-                git_branch: string | null;
-                git_dirty: boolean;
-                ports: number[];
-              }>("get_workspace_info", { cwd }),
-              invoke<number | null>("get_pty_pid", { id: ptyId }),
-            ]);
-
-            let ports: number[] = [];
-            if (pid) {
-              ports = await invoke<number[]>("get_ports", { pid });
-            }
-
-            setInfo(ws.id, {
-              cwd: info.cwd,
-              gitBranch: info.git_branch,
-              gitDirty: info.git_dirty,
-              ports,
+            const prev = useWorkspaceInfoStore.getState().info[ws.id];
+            const metadata = await invoke<SessionMetadata>("get_session_metadata", {
+              id: leaf.ptyId,
+              cwd: prev?.cwd || null,
             });
+
+            const nextInfo: WorkspaceInfo = {
+              cwd: metadata.cwd,
+              gitBranch: metadata.git_branch,
+              gitDirty: metadata.git_dirty,
+              ports: metadata.ports,
+              processName: metadata.process_name,
+              command: metadata.command,
+              agent: leaf.aiKind ?? metadata.agent,
+              memoryBytes: metadata.memory_bytes,
+              cpuPercent: metadata.cpu_percent,
+              descendantCount: metadata.descendant_count,
+              terminalTitle: prev?.terminalTitle ?? null,
+            };
+            setInfo(ws.id, nextInfo);
+
+            const autoName = buildAutoWorkspaceName(nextInfo);
+            if (autoName) {
+              useWorkspaceStore.getState().setAutoWorkspaceName(ws.id, autoName);
+            }
           } catch {
             // Silently ignore polling errors
           }
