@@ -134,14 +134,16 @@ impl MonitorManager {
         request_id: String,
     ) -> Result<(), String> {
         let sessions = self.sessions.lock().unwrap();
-        // Try specified monitor first, then fall back to any active monitor
         let session = if let Some(mid) = monitor_id {
-            sessions.get(mid)
+            sessions
+                .get(mid)
+                .ok_or_else(|| format!("Monitor session not found: {mid}"))?
         } else {
-            None
-        }
-        .or_else(|| sessions.values().next());
-        let session = session.ok_or_else(|| "No active monitor session".to_string())?;
+            sessions
+                .values()
+                .next()
+                .ok_or_else(|| "No active monitor session".to_string())?
+        };
         session
             .pending_fetches
             .lock()
@@ -248,8 +250,9 @@ fn run_persistent_monitor(
         let mut cached_claude_sessions: Vec<ClaudeSession> = Vec::new();
 
         // Collection loop on this SSH connection
-        loop {
+        'collection: loop {
             if *stop_flag.lock().unwrap() {
+                emit_pending_fetch_errors(app, pending_fetches, "Monitor stopped");
                 let _ = child.kill();
                 let _ = child.wait();
                 return;
@@ -316,12 +319,14 @@ fn run_persistent_monitor(
             data.claude_sessions = cached_claude_sessions.clone();
             let _ = app.emit("monitor-data", &data);
 
-            // Check for pending session content fetches
-            let fetch_reqs: Vec<FetchRequest> = {
-                let mut queue = pending_fetches.lock().unwrap();
-                queue.drain(..).collect()
-            };
-            for req in fetch_reqs {
+            // Check for pending session content fetches. Pop one request at a
+            // time so a broken SSH write cannot silently discard the whole queue.
+            loop {
+                let req = {
+                    let mut queue = pending_fetches.lock().unwrap();
+                    queue.pop_front()
+                };
+                let Some(req) = req else { break };
                 let fetch_marker = format!("===WMUX_FETCH_END_{}===", req.request_id);
                 let cat_cmd = match build_claude_fetch_command(
                     &req.project,
@@ -339,46 +344,55 @@ fn run_persistent_monitor(
                         continue;
                     }
                 };
-                if writeln!(stdin, "{}", cat_cmd).is_ok() && stdin.flush().is_ok() {
-                    let mut fetch_output = String::new();
-                    let fetch_ok = {
-                        let mut rdr = reader.lock().unwrap();
-                        loop {
-                            let mut line = String::new();
-                            match rdr.read_line(&mut line) {
-                                Ok(0) => break false,
-                                Ok(_) => {
-                                    if line.trim() == fetch_marker {
-                                        break true;
-                                    }
-                                    fetch_output.push_str(&line);
+                if writeln!(stdin, "{}", cat_cmd).is_err() || stdin.flush().is_err() {
+                    emit_fetch_error(app, req, "Failed to write session fetch request");
+                    emit_pending_fetch_errors(app, pending_fetches, "SSH connection lost");
+                    break 'collection;
+                }
+
+                let mut fetch_output = String::new();
+                let fetch_ok = {
+                    let mut rdr = reader.lock().unwrap();
+                    loop {
+                        let mut line = String::new();
+                        match rdr.read_line(&mut line) {
+                            Ok(0) => break false,
+                            Ok(_) => {
+                                if line.trim() == fetch_marker {
+                                    break true;
                                 }
-                                Err(_) => break false,
+                                fetch_output.push_str(&line);
                             }
+                            Err(_) => break false,
                         }
-                    };
-                    let event = if fetch_ok {
-                        let lines: Vec<String> =
-                            fetch_output.lines().map(|l| l.to_string()).collect();
-                        SessionContentEvent {
-                            request_id: req.request_id,
-                            lines,
-                            error: None,
-                        }
-                    } else {
-                        SessionContentEvent {
-                            request_id: req.request_id,
-                            lines: vec![],
-                            error: Some("Failed to read session".into()),
-                        }
-                    };
-                    let _ = app.emit("claude-session-content", &event);
+                    }
+                };
+                let event = if fetch_ok {
+                    let lines: Vec<String> = fetch_output.lines().map(|l| l.to_string()).collect();
+                    SessionContentEvent {
+                        request_id: req.request_id,
+                        lines,
+                        error: None,
+                    }
+                } else {
+                    SessionContentEvent {
+                        request_id: req.request_id,
+                        lines: vec![],
+                        error: Some("Failed to read session".into()),
+                    }
+                };
+                let fetch_failed = !fetch_ok;
+                let _ = app.emit("claude-session-content", &event);
+                if fetch_failed {
+                    emit_pending_fetch_errors(app, pending_fetches, "SSH connection lost");
+                    break 'collection;
                 }
             }
 
             // Sleep 1 second, checking stop flag every 250ms
             for _ in 0..4 {
                 if *stop_flag.lock().unwrap() {
+                    emit_pending_fetch_errors(app, pending_fetches, "Monitor stopped");
                     let _ = child.kill();
                     let _ = child.wait();
                     return;
@@ -399,6 +413,29 @@ fn run_persistent_monitor(
         if !sleep_with_stop(3000, stop_flag) {
             return;
         }
+    }
+}
+
+fn emit_fetch_error(app: &AppHandle, req: FetchRequest, error: &str) {
+    let event = SessionContentEvent {
+        request_id: req.request_id,
+        lines: vec![],
+        error: Some(error.to_string()),
+    };
+    let _ = app.emit("claude-session-content", &event);
+}
+
+fn emit_pending_fetch_errors(
+    app: &AppHandle,
+    pending_fetches: &Arc<Mutex<VecDeque<FetchRequest>>>,
+    error: &str,
+) {
+    let fetch_reqs: Vec<FetchRequest> = {
+        let mut queue = pending_fetches.lock().unwrap();
+        queue.drain(..).collect()
+    };
+    for req in fetch_reqs {
+        emit_fetch_error(app, req, error);
     }
 }
 

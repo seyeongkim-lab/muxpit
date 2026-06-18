@@ -319,15 +319,8 @@ fn push_image_to_remote_sync(ssh: &SshCommand, image_base64: &str) -> Result<Str
         .decode(image_base64)
         .map_err(|e| format!("invalid image data: {e}"))?;
 
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let dir = "$HOME/.wmux/screenshots";
-    let file = format!("{dir}/wmux-{stamp}.png");
-
     let mut cmd = silent_command(&ssh.program);
-    cmd.args(ssh.filtered_options(&["-p", "-i", "-J", "-F", "-o"]));
+    cmd.args(ssh.filtered_options(&["-p", "-i", "-J", "-F", "-o", "-l"]));
     cmd.args([
         "-o",
         "ConnectTimeout=10",
@@ -337,7 +330,11 @@ fn push_image_to_remote_sync(ssh: &SshCommand, image_base64: &str) -> Result<Str
         "StrictHostKeyChecking=accept-new",
     ]);
     cmd.arg(&ssh.target);
-    cmd.arg(format!("mkdir -p {dir} && cat > {file} && echo {file}"));
+    cmd.arg(
+        "umask 077; dir=\"$HOME/.wmux/screenshots\"; \
+         mkdir -p \"$dir\" && path=$(mktemp \"$dir/wmux-XXXXXX.png\") && \
+         cat > \"$path\" && chmod 600 \"$path\" && printf '%s\\n' \"$path\"",
+    );
 
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
@@ -492,7 +489,7 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // Start Named Pipe IPC server
+            // Start local IPC server for wmux-cli and shell hooks.
             platform::ipc::start_ipc_server(app.handle().clone());
             Ok(())
         })
