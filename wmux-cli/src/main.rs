@@ -1,8 +1,15 @@
 use std::env;
+#[cfg(windows)]
 use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 
+#[cfg(windows)]
 const PIPE_NAME: &str = r"\\.\pipe\wmux";
+#[cfg(unix)]
+const DEFAULT_SOCKET_PATH: &str = "/tmp/wmux.sock";
+
+trait ReadWrite: Read + Write {}
+impl<T: Read + Write> ReadWrite for T {}
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -35,15 +42,11 @@ fn main() {
 }
 
 fn send_request(method: &str, params: serde_json::Value) {
-    let pipe = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(PIPE_NAME);
-
-    let mut stream = match pipe {
+    let mut stream = match connect_ipc() {
         Ok(s) => s,
-        Err(_) => {
-            eprintln!("Error: wmux is not running. Start the wmux application first.");
+        Err(e) => {
+            eprintln!("Error: wmux is not running or IPC is unavailable: {e}");
+            eprintln!("Start the wmux application first.");
             std::process::exit(1);
         }
     };
@@ -53,10 +56,10 @@ fn send_request(method: &str, params: serde_json::Value) {
         "params": params,
     });
 
-    writeln!(stream, "{}", request).expect("Failed to write to pipe");
+    writeln!(stream, "{}", request).expect("Failed to write to IPC stream");
     stream.flush().expect("Failed to flush");
 
-    let mut reader = BufReader::new(&stream);
+    let mut reader = BufReader::new(stream);
     let mut response = String::new();
     reader
         .read_line(&mut response)
@@ -87,7 +90,7 @@ fn send_request(method: &str, params: serde_json::Value) {
 
 fn print_help() {
     println!(
-        r#"wmux - Windows terminal multiplexer CLI
+        r#"wmux - terminal multiplexer CLI
 
 Usage: wmux <command> [args...]
 
@@ -102,4 +105,18 @@ Examples:
   wmux notify "Build done" "All tests passed"
   wmux ls"#
     );
+}
+
+#[cfg(windows)]
+fn connect_ipc() -> std::io::Result<Box<dyn ReadWrite>> {
+    let pipe = OpenOptions::new().read(true).write(true).open(PIPE_NAME)?;
+    Ok(Box::new(pipe))
+}
+
+#[cfg(unix)]
+fn connect_ipc() -> std::io::Result<Box<dyn ReadWrite>> {
+    let socket_path =
+        env::var("WMUX_SOCKET_PATH").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string());
+    let stream = std::os::unix::net::UnixStream::connect(socket_path)?;
+    Ok(Box::new(stream))
 }
