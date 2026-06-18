@@ -3,15 +3,15 @@ use std::io::{Read, Write};
 #[cfg(windows)]
 use std::fs::OpenOptions;
 
-#[cfg(windows)]
-const PIPE_NAME: &str = r"\\.\pipe\wmux";
-
 pub(crate) trait ReadWrite: Read + Write {}
 impl<T: Read + Write> ReadWrite for T {}
 
 #[cfg(windows)]
 pub(crate) fn connect() -> std::io::Result<Box<dyn ReadWrite>> {
-    let pipe = OpenOptions::new().read(true).write(true).open(PIPE_NAME)?;
+    let pipe = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(wmux_platform::paths::windows_pipe_name())?;
     Ok(Box::new(pipe))
 }
 
