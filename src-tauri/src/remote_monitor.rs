@@ -56,7 +56,7 @@ pub fn build_claude_script() -> String {
 
 pub fn build_collect_script() -> String {
     format!(
-        r#"OS=$(uname -s); echo "===OS===$OS"; if [ "$OS" = "Darwin" ]; then echo '===CPU===' && top -l 1 -n 0 -s 0 2>/dev/null | grep 'CPU usage' && echo '===MEM===' && vm_stat 2>/dev/null && echo "===MEMTOTAL===$(sysctl -n hw.memsize 2>/dev/null)" && echo '===LOAD===' && sysctl -n vm.loadavg 2>/dev/null && echo '===NET===' && netstat -ib 2>/dev/null | head -20 && echo '===NETSPEED===' && for svc in $(networksetup -listallnetworkservices 2>/dev/null | tail -n +2); do info=$(networksetup -getinfo "$svc" 2>/dev/null); ip=$(echo "$info" | grep '^IP address:' | head -1 | awk -F': ' '{{print $2}}'); if [ -n "$ip" ] && [ "$ip" != "none" ]; then media=$(networksetup -getMedia "$svc" 2>/dev/null | head -1); echo "$svc:$media"; fi; done && echo '===DISK===' && df -h 2>/dev/null | grep '^/dev/' && echo '===PS===' && ps aux -r 2>/dev/null | head -11 && echo '===HOST===' && hostname; else echo '===STAT===' && head -1 /proc/stat && echo '===MEM===' && head -5 /proc/meminfo && echo '===LOAD===' && cat /proc/loadavg && echo '===NET===' && cat /proc/net/dev && echo '===NETSPEED===' && for iface in /sys/class/net/*/; do n=$(basename "$iface"); [ "$n" != "lo" ] && s=$(cat "$iface/speed" 2>/dev/null) && [ -n "$s" ] && [ "$s" -gt 0 ] 2>/dev/null && echo "$n:$s"; done && echo '===DISK===' && df -h -x tmpfs -x squashfs -x devtmpfs -x overlay -x efivarfs 2>/dev/null | tail -n +2 && echo '===PS===' && ps aux --sort=-%cpu 2>/dev/null | head -11 && echo '===HOST===' && hostname -f 2>/dev/null || hostname; fi; echo '{END_MARKER}'"#,
+        r#"OS=$(uname -s); echo "===OS===$OS"; if [ "$OS" = "Darwin" ]; then echo '===CPU===' && top -l 1 -n 0 -s 0 2>/dev/null | grep 'CPU usage' && echo '===MEM===' && vm_stat 2>/dev/null && echo "===MEMTOTAL===$(sysctl -n hw.memsize 2>/dev/null)" && echo '===LOAD===' && sysctl -n vm.loadavg 2>/dev/null && echo '===NET===' && netstat -ib 2>/dev/null | head -20 && echo '===NETSPEED===' && {{ for svc in $(networksetup -listallnetworkservices 2>/dev/null | tail -n +2); do info=$(networksetup -getinfo "$svc" 2>/dev/null); ip=$(echo "$info" | grep '^IP address:' | head -1 | awk -F': ' '{{print $2}}'); if [ -n "$ip" ] && [ "$ip" != "none" ]; then media=$(networksetup -getMedia "$svc" 2>/dev/null | head -1); echo "$svc:$media"; fi; done; true; }} && echo '===DISK===' && df -h 2>/dev/null | grep '^/dev/' && echo '===PS===' && ps aux -r 2>/dev/null | head -11 && echo '===HOST===' && hostname; else echo '===STAT===' && head -1 /proc/stat && echo '===MEM===' && head -5 /proc/meminfo && echo '===LOAD===' && cat /proc/loadavg && echo '===NET===' && cat /proc/net/dev && echo '===NETSPEED===' && {{ for iface in /sys/class/net/*/; do n=$(basename "$iface"); [ "$n" != "lo" ] && s=$(cat "$iface/speed" 2>/dev/null) && [ -n "$s" ] && [ "$s" -gt 0 ] 2>/dev/null && echo "$n:$s"; done; true; }} && echo '===DISK===' && df -h -x tmpfs -x squashfs -x devtmpfs -x overlay -x efivarfs 2>/dev/null | tail -n +2 && echo '===PS===' && ps aux --sort=-%cpu 2>/dev/null | head -11 && echo '===HOST===' && hostname -f 2>/dev/null || hostname; fi; echo '{END_MARKER}'"#,
         END_MARKER = END_MARKER,
     )
 }
@@ -78,6 +78,8 @@ pub fn build_claude_fetch_command(
 
 fn safe_remote_path_component(value: &str) -> Option<&str> {
     if value.is_empty()
+        || value == "."
+        || value == ".."
         || value.contains('/')
         || value.contains('\\')
         || value.contains('\0')
@@ -658,6 +660,7 @@ mod tests {
         let script = build_collect_script();
         assert!(script.contains("Darwin"));
         assert!(script.contains("/proc/stat"));
+        assert!(script.contains("done; true; } && echo '===DISK==='"));
         assert!(script.contains(END_MARKER));
     }
 
@@ -665,6 +668,8 @@ mod tests {
     fn claude_fetch_rejects_path_components() {
         assert!(build_claude_fetch_command("good.project", "session-1", "MARK").is_ok());
         assert!(build_claude_fetch_command("../bad", "session-1", "MARK").is_err());
+        assert!(build_claude_fetch_command("..", "session-1", "MARK").is_err());
+        assert!(build_claude_fetch_command("project", ".", "MARK").is_err());
         assert!(build_claude_fetch_command("project", "bad/session", "MARK").is_err());
     }
 
