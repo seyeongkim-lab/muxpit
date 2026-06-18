@@ -100,6 +100,38 @@ const blobToBase64 = (blob: Blob): Promise<string> =>
     reader.readAsDataURL(blob);
   });
 
+const isPrintableInput = (data: string) => data.length > 0 && !/[\x00-\x1f\x7f]/.test(data);
+
+const isLinuxWebKitRuntime = () => {
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform ?? "";
+  const userAgent = navigator.userAgent ?? "";
+
+  return (
+    /linux/i.test(platform) &&
+    /(applewebkit|webkitgtk)/i.test(userAgent) &&
+    !/(chrome|chromium|crios|edg|firefox)/i.test(userAgent)
+  );
+};
+
+const SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT = isLinuxWebKitRuntime();
+
+const clearInputTextareaAfterCommit = (term: XTerm, data: string) => {
+  const textarea = term.textarea;
+  if (
+    !SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT ||
+    !textarea ||
+    !isPrintableInput(data) ||
+    textarea.value.length === 0
+  ) {
+    return;
+  }
+
+  // WebKitGTK Korean IMEs can leave committed jamo in xterm's helper textarea. If it remains
+  // there, the next standalone jamo is appended to it and xterm sends the whole accumulated value.
+  textarea.value = "";
+};
+
 interface TerminalLeafProps {
   workspaceId: string;
   leafId: string;
@@ -379,6 +411,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       // ptyId stays 0 until spawn returns; don't forward input to PTY 0.
       if (ptyId === 0) return;
       invoke("write_pty", { id: ptyId, data }).catch(console.error);
+      clearInputTextareaAfterCommit(term, data);
     });
 
     const onResize = term.onResize(({ rows, cols }) => {
