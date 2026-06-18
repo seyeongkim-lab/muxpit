@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:cli": "cargo build --manifest-path wmux-cli/Cargo.toml --release",
     "preview": "vite preview",
     "tauri": "tauri"
   },

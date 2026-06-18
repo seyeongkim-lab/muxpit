@@ -10,6 +10,8 @@ import { useSettingsStore } from "../stores/settings";
 import { usePrefixStore } from "../stores/prefix";
 import { useHistoryStore } from "../stores/history";
 import { matchesPrefixKey } from "../utils/prefixKey";
+import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
+import { playNotificationSound } from "../utils/notificationSound";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { getResolvedTheme } from "../themes";
@@ -65,7 +67,9 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
   while ((m = osc777NotifyRe.exec(data)) !== null) {
     const title = m[1];
     const body = m[2];
+    if (!shouldShowNotificationForTarget(workspaceId, leafId)) continue;
     useNotificationStore.getState().addNotification(workspaceId, title, body);
+    playNotificationSound();
     invoke("send_notification", { title, body }).catch(() => {});
   }
 
@@ -374,6 +378,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
               cols: Math.max(term.cols, 1),
               sshCommand,
               sessionName,
+              workspaceId,
+              surfaceId: leafId,
             });
             ptyId = newId;
             const inst = terminalInstances.get(leafId);
@@ -452,12 +458,16 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           cols: Math.max(term.cols, 1),
           sshCommand: spawnCommand,
           sessionName: tmuxSession,
+          workspaceId,
+          surfaceId: leafId,
         });
       } else {
         ptyId = await invoke<number>("spawn_pty", {
           rows: Math.max(term.rows, 1),
           cols: Math.max(term.cols, 1),
           command: spawnCommand,
+          workspaceId,
+          surfaceId: leafId,
         });
       }
     } catch (err) {
@@ -470,6 +480,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
             rows: Math.max(term.rows, 1),
             cols: Math.max(term.cols, 1),
             command: null,
+            workspaceId,
+            surfaceId: leafId,
           });
         } catch (err2) {
           const msg2 = err2 instanceof Error ? err2.message : String(err2);
