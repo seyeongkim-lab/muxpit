@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from "react";
-import { useAiCliStore, AI_KINDS, AI_LABEL, buildAiLaunchCommand } from "../stores/aiCli";
+import { useAiCliStore, AI_KINDS, AI_LABEL, buildAiLaunchSpec } from "../stores/aiCli";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace";
-import { useSshHostsStore, buildSshCommand } from "../stores/sshHosts";
+import { useSshHostsStore, buildSshCommand, buildSshConnection } from "../stores/sshHosts";
+import { parseSshCommandLine } from "../utils/sshConnection";
 
 interface AiPaneToolbarProps {
   workspaceId: string;
@@ -42,17 +43,26 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget }: A
     () => (host ? buildSshCommand(host) : `ssh ${sshTarget}`),
     [host, sshTarget],
   );
+  const baseSshConnection = useMemo(
+    () => (host ? buildSshConnection(host) : parseSshCommandLine(baseSshCommand)?.connection),
+    [host, baseSshCommand],
+  );
 
   // Re-probe lazily if availability is unknown for this target (e.g. session
   // restored before `App.autoAiSplit` got a chance to populate the cache).
   useEffect(() => {
     if (available !== undefined) return;
-    probe(sshTarget, baseSshCommand).catch(() => {});
-  }, [available, sshTarget, baseSshCommand, probe]);
+    probe(sshTarget, baseSshCommand, baseSshConnection).catch(() => {});
+  }, [available, sshTarget, baseSshCommand, baseSshConnection, probe]);
 
   const handleAdd = (kind: AiKind) => {
-    const cmd = buildAiLaunchCommand(kind, baseSshCommand, host);
-    splitLeafWithCommand(workspaceId, leafId, "vertical", cmd, { aiKind: kind, aiSshTarget: sshTarget });
+    const spec = buildAiLaunchSpec(kind, baseSshCommand, baseSshConnection);
+    splitLeafWithCommand(workspaceId, leafId, "vertical", spec.command, {
+      aiKind: kind,
+      aiSshTarget: sshTarget,
+      sshConnection: spec.sshConnection,
+      sshRemoteCommand: spec.sshRemoteCommand,
+    });
   };
 
   const candidates = AI_KINDS.filter((k) => k !== currentKind && available?.has(k));
