@@ -718,13 +718,13 @@ export const App = () => {
     autoAiSplit(wsId, cmd, sshConnection, host);
   }, [addWorkspace]);
 
-  const handleViewClaudeSession = useCallback((sshTarget: string, project: string, sessionId: string, sshConnection?: SshConnection) => {
+  const handleViewClaudeSession = useCallback((sshTarget: string, project: string, projectPath: string | undefined, sessionId: string, sshConnection?: SshConnection) => {
     if (!activeWs || !sidebarMonitor) return;
-    useWorkspaceStore.getState().openClaudeSession(activeWs.id, activeWs.focusedLeafId, sshTarget, project, sessionId, sidebarMonitor.monitorId, sshConnection);
+    useWorkspaceStore.getState().openClaudeSession(activeWs.id, activeWs.focusedLeafId, sshTarget, project, projectPath, sessionId, sidebarMonitor.monitorId, sshConnection);
   }, [activeWs, sidebarMonitor]);
 
   const handleResumeClaudeSession = useCallback((sshCommand: string, projectPath: string, sessionId: string, sshConnection?: SshConnection) => {
-    const remote = `claude --resume ${quotePosixShellArg(sessionId)}`;
+    const remote = `cd ${quotePosixShellArg(projectPath)} && claude --resume ${quotePosixShellArg(sessionId)}`;
     const connection = sshConnection ?? parseSshCommandLine(sshCommand)?.connection;
     const cmd = connection
       ? buildSshCommandWithRemoteCmdFromConnection(connection, remote, true)
