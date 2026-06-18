@@ -15,6 +15,7 @@ interface AttachInfo {
   sshCommand: string;
   sshConnection?: SshConnection;
   wrapperSession: string;
+  activeSession: string;
 }
 
 interface SessionEntry {
@@ -105,7 +106,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       return;
     }
     set((s) => ({
-      _attach: { ...s._attach, [wsId]: { sshCommand, sshConnection, wrapperSession: wrapper } },
+      _attach: { ...s._attach, [wsId]: { sshCommand, sshConnection, wrapperSession: wrapper, activeSession: wrapper } },
       byWs: {
         ...s.byWs,
         [wsId]: { sessions: [], loading: true, error: null, lastFetch: 0 },
@@ -171,9 +172,18 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     await invoke("tmux_switch_client", {
       sshCommand: ctx.sshCommand,
       sshConnection: ctx.sshConnection ?? null,
-      wrapperSession: ctx.wrapperSession,
+      wrapperSession: ctx.activeSession,
       targetSession: sessionId,
     });
+    set((s) => ({
+      _attach: {
+        ...s._attach,
+        [wsId]: {
+          ...ctx,
+          activeSession: sessionId,
+        },
+      },
+    }));
     await get().refresh(wsId);
   },
 
@@ -189,9 +199,18 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     await invoke("tmux_switch_client", {
       sshCommand: ctx.sshCommand,
       sshConnection: ctx.sshConnection ?? null,
-      wrapperSession: ctx.wrapperSession,
+      wrapperSession: ctx.activeSession,
       targetSession: newId,
     });
+    set((s) => ({
+      _attach: {
+        ...s._attach,
+        [wsId]: {
+          ...ctx,
+          activeSession: newId,
+        },
+      },
+    }));
     await get().refresh(wsId);
   },
 

@@ -63,6 +63,19 @@ fn safe_session_token(s: &str) -> Option<String> {
     }
 }
 
+fn safe_new_session_name(s: &str) -> Option<String> {
+    if s.is_empty() {
+        return None;
+    }
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+    {
+        Some(s.to_string())
+    } else {
+        None
+    }
+}
+
 /// `tmux list-sessions` on the remote. Returns `Ok(vec![])` when no server is
 /// running or tmux is missing — both are normal states, not errors.
 pub fn list_sessions(ssh: &SshCommand) -> Result<Vec<TmuxSession>, String> {
@@ -94,10 +107,9 @@ pub fn list_sessions(ssh: &SshCommand) -> Result<Vec<TmuxSession>, String> {
 
 /// Switch the wmux-attached client(s) to `target_session`.
 ///
-/// `wrapper_session` is the `wmux-<host>` session this wmux instance attached
-/// to; we use it to discover our `client_tty` via `list-clients -t`. If no
-/// matching client is found (e.g. user already detached), fall back to a plain
-/// `switch-client -t` which acts on whichever client tmux picks.
+/// `wrapper_session` is the session where this wmux client is currently attached.
+/// The frontend updates it after every successful switch so subsequent switches
+/// can still discover the client's tty after it has left the original wrapper.
 pub fn switch_client(
     ssh: &SshCommand,
     wrapper_session: &str,
@@ -113,8 +125,9 @@ pub fn switch_client(
     // does not expand `$N`-style session ids as positional parameters.
     let remote = format!(
         "ttys=$(tmux list-clients -t {wrapper} -F '#{{client_tty}}' 2>/dev/null); \
-        if [ -z \"$ttys\" ]; then tmux switch-client -t {target}; \
+        if [ -z \"$ttys\" ]; then exit 1; \
          else for t in $ttys; do tmux switch-client -c \"$t\" -t {target}; done; fi",
+        wrapper = quote_posix_shell_arg(&wrapper),
         target = quote_posix_shell_arg(&target)
     );
     let mut cmd = build_ssh(ssh);
@@ -132,8 +145,11 @@ pub fn new_session(ssh: &SshCommand, name: Option<&str>) -> Result<String, Strin
     let mut cmd = build_ssh(ssh);
     let remote = match name {
         Some(n) => {
-            let safe = safe_session_token(n).ok_or_else(|| "invalid name".to_string())?;
-            format!("tmux new-session -d -P -F '#{{session_id}}' -s {safe}")
+            let safe = safe_new_session_name(n).ok_or_else(|| "invalid name".to_string())?;
+            format!(
+                "tmux new-session -d -P -F '#{{session_id}}' -s {}",
+                quote_posix_shell_arg(&safe)
+            )
         }
         None => "tmux new-session -d -P -F '#{session_id}'".to_string(),
     };
@@ -229,5 +245,12 @@ mod tests {
         assert!(safe_session_token("foo;rm").is_none());
         assert!(safe_session_token("foo.bar").is_none());
         assert!(safe_session_token("").is_none());
+    }
+
+    #[test]
+    fn safe_new_session_name_rejects_tmux_id_expansion_tokens() {
+        assert!(safe_new_session_name("project-1").is_some());
+        assert!(safe_new_session_name("$HOME").is_none());
+        assert!(safe_new_session_name("$1").is_none());
     }
 }
