@@ -441,7 +441,7 @@ async fn tmux_kill_session(ssh_command: String, session: String) -> Result<(), S
 }
 
 /// Lightweight snapshot of the frontend's workspaces, pushed from the UI so the
-/// CLI (`wmux ls`) can list them over the IPC pipe. The backend owns no workspace
+/// CLI (`wmux-cli ls`) can list them over the IPC pipe. The backend owns no workspace
 /// state otherwise; this is a read-through mirror updated on every UI change.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

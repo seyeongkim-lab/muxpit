@@ -33,7 +33,7 @@ fn main() {
             Ok(params) => send_request("notify", params),
             Err(e) => {
                 eprintln!("Error: {e}");
-                eprintln!("Run 'wmux help' for usage.");
+                eprintln!("Run 'wmux-cli help' for usage.");
                 std::process::exit(2);
             }
         },
@@ -43,7 +43,7 @@ fn main() {
         "help" | "--help" | "-h" => print_help(),
         other => {
             eprintln!("Unknown command: {other}");
-            eprintln!("Run 'wmux help' for usage.");
+            eprintln!("Run 'wmux-cli help' for usage.");
             std::process::exit(1);
         }
     }
@@ -209,9 +209,9 @@ fn insert_optional(
 
 fn print_help() {
     println!(
-        r#"wmux - terminal multiplexer CLI
+        r#"wmux-cli - terminal multiplexer CLI
 
-Usage: wmux <command> [args...]
+Usage: wmux-cli <command> [args...]
 
 Commands:
   ping                    Check if wmux is running
@@ -231,12 +231,12 @@ Notify options:
   --event <name>           Event name, e.g. stop
 
 Examples:
-  wmux ping
-  wmux notify "Build done" "All tests passed"
-  wmux notify --workspace "$WMUX_WORKSPACE_ID" --surface "$WMUX_SURFACE_ID" --source codex --event stop --title Codex --body "Prompt completed"
-  wmux hooks setup codex --yes
-  wmux hooks setup claude --yes
-  wmux ls"#
+  wmux-cli ping
+  wmux-cli notify "Build done" "All tests passed"
+  wmux-cli notify --workspace "$WMUX_WORKSPACE_ID" --surface "$WMUX_SURFACE_ID" --source codex --event stop --title Codex --body "Prompt completed"
+  wmux-cli hooks setup codex --yes
+  wmux-cli hooks setup claude --yes
+  wmux-cli ls"#
     );
 }
 
