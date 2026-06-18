@@ -26,6 +26,7 @@ tauri-plugin-notification = "2"
 portable-pty = "0.9"
 sysinfo_crate = { package = "sysinfo", version = "=0.35.2", default-features = false, features = ["system"] }
 listeners = "0.6.0"
+wmux-platform = { path = "../crates/wmux-platform" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

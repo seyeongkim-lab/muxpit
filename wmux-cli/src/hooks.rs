@@ -1,3 +1,4 @@
+use crate::platform::{binary_on_path, home_dir, hook_command, replace_file};
 use serde_json::{json, Map, Value};
 use std::env;
 use std::fs;
@@ -49,11 +50,13 @@ impl Agent {
             Agent::Codex => env::var_os("CODEX_HOME")
                 .map(PathBuf::from)
                 .or_else(|| home_dir().map(|home| home.join(".codex")))
-                .ok_or_else(|| "Could not resolve CODEX_HOME or HOME".to_string()),
+                .ok_or_else(|| "Could not resolve CODEX_HOME or a home directory".to_string()),
             Agent::Claude => env::var_os("CLAUDE_CONFIG_DIR")
                 .map(PathBuf::from)
                 .or_else(|| home_dir().map(|home| home.join(".claude")))
-                .ok_or_else(|| "Could not resolve CLAUDE_CONFIG_DIR or HOME".to_string()),
+                .ok_or_else(|| {
+                    "Could not resolve CLAUDE_CONFIG_DIR or a home directory".to_string()
+                }),
         }
     }
 
@@ -283,6 +286,11 @@ fn uninstall_agent(agent: Agent, yes: bool) -> Result<(), String> {
 }
 
 fn run_agent_hook(agent: Agent, action: &str) -> Result<(), String> {
+    if env::var(agent.disabled_env()).ok().as_deref() == Some("1") {
+        println!("{{}}");
+        return Ok(());
+    }
+
     if env::var_os("WMUX_SURFACE_ID").is_some() {
         let mut params = Map::new();
         params.insert("title".to_string(), json!(agent.display_name()));
@@ -350,7 +358,15 @@ fn insert_hook_group(hooks: &mut Map<String, Value>, agent: Agent, insertion_ind
 fn hook_group(agent: Agent) -> Value {
     let mut hook = Map::new();
     hook.insert("type".to_string(), json!("command"));
-    hook.insert("command".to_string(), json!(hook_shell_command(agent)));
+    let current_exe = env::current_exe().ok();
+    hook.insert(
+        "command".to_string(),
+        json!(hook_command(
+            agent.name(),
+            agent.disabled_env(),
+            current_exe.as_deref()
+        )),
+    );
     if agent == Agent::Codex {
         hook.insert("timeout".to_string(), json!(5));
     }
@@ -361,30 +377,6 @@ fn hook_group(agent: Agent) -> Value {
     }
     group.insert("hooks".to_string(), Value::Array(vec![Value::Object(hook)]));
     Value::Object(group)
-}
-
-fn hook_shell_command(agent: Agent) -> String {
-    let current_exe = env::current_exe().ok();
-    let current_exe = current_exe
-        .as_ref()
-        .map(|path| shell_single_quote(&path.to_string_lossy()))
-        .unwrap_or_else(|| "\"\"".to_string());
-    let marker = shell_single_quote(&format!("wmux-cli hooks {}", agent.name()));
-
-    format!(
-        ": {marker}; wmux_cli=\"${{WMUX_BUNDLED_CLI_PATH:-}}\"; \
-         if [ -z \"$wmux_cli\" ] || [ ! -x \"$wmux_cli\" ]; then wmux_cli={current_exe}; fi; \
-         if [ -n \"${{WMUX_SURFACE_ID:-}}\" ] && [ \"${{{disabled}:-}}\" != \"1\" ] && [ -n \"$wmux_cli\" ] && [ -x \"$wmux_cli\" ]; then \
-         \"$wmux_cli\" hooks {agent} stop || echo '{{}}'; else echo '{{}}'; fi",
-        marker = marker,
-        current_exe = current_exe,
-        disabled = agent.disabled_env(),
-        agent = agent.name(),
-    )
-}
-
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn remove_owned_hooks(hooks: &mut Map<String, Value>, agent: Agent) -> Option<usize> {
@@ -508,7 +500,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
         std::process::id()
     ));
     fs::write(&tmp, content).map_err(|e| format!("Could not write {}: {e}", tmp.display()))?;
-    fs::rename(&tmp, path).map_err(|e| {
+    replace_file(&tmp, path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("Could not replace {}: {e}", path.display())
     })?;
@@ -608,12 +600,13 @@ fn insert_codex_feature_block(content: &str) -> String {
     lines.join("\n") + "\n"
 }
 
-fn home_dir() -> Option<PathBuf> {
-    env::var_os("HOME").map(PathBuf::from)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn binary_on_path(name: &str) -> bool {
-    env::var_os("PATH")
-        .map(|paths| env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
-        .unwrap_or(false)
+    #[test]
+    fn managed_block_round_trips() {
+        let content = "a\n# wmux-codex-hooks-feature begin\n[features]\nhooks = true\n# wmux-codex-hooks-feature end\nb\n";
+        assert_eq!(remove_managed_block(content), "a\nb\n");
+    }
 }
