@@ -187,14 +187,20 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
                 .get("body")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            let workspace_id = req.params.get("workspace_id").and_then(|v| v.as_str());
+            let surface_id = req.params.get("surface_id").and_then(|v| v.as_str());
+            let source = req.params.get("source").and_then(|v| v.as_str());
+            let event = req.params.get("event").and_then(|v| v.as_str());
 
-            let _ = app.emit(
-                "wmux-notify",
-                serde_json::json!({
-                    "title": title,
-                    "body": body,
-                }),
-            );
+            let mut payload = serde_json::Map::new();
+            payload.insert("title".to_string(), serde_json::json!(title));
+            payload.insert("body".to_string(), serde_json::json!(body));
+            insert_optional_string(&mut payload, "workspace_id", workspace_id);
+            insert_optional_string(&mut payload, "surface_id", surface_id);
+            insert_optional_string(&mut payload, "source", source);
+            insert_optional_string(&mut payload, "event", event);
+
+            let _ = app.emit("wmux-notify", serde_json::Value::Object(payload));
 
             IpcResponse {
                 ok: true,
@@ -224,5 +230,17 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             data: None,
             error: Some(format!("Unknown method: {}", req.method)),
         },
+    }
+}
+
+fn insert_optional_string(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value {
+        if !value.is_empty() {
+            map.insert(key.to_string(), serde_json::json!(value));
+        }
     }
 }

@@ -242,6 +242,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                 style={{
                   ...styles.item,
                   ...(isActive ? styles.itemActive : {}),
+                  ...(wsUnread > 0 ? styles.itemUnread : {}),
                   ...(isDragging ? styles.itemDragging : {}),
                   ...(isDropTarget ? styles.itemDropTarget : {}),
                 }}
@@ -404,6 +405,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   itemActive: {
     backgroundColor: "var(--wmux-accent-soft)",
+    color: "var(--wmux-text)",
+  },
+  itemUnread: {
+    backgroundColor: "rgba(249, 226, 175, 0.12)",
+    boxShadow: "inset 0 0 0 1px rgba(249, 226, 175, 0.35)",
     color: "var(--wmux-text)",
   },
   itemDragging: {

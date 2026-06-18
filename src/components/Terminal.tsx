@@ -10,6 +10,8 @@ import { useSettingsStore } from "../stores/settings";
 import { usePrefixStore } from "../stores/prefix";
 import { useHistoryStore } from "../stores/history";
 import { matchesPrefixKey } from "../utils/prefixKey";
+import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
+import { playNotificationSound } from "../utils/notificationSound";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { getResolvedTheme } from "../themes";
@@ -65,7 +67,9 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
   while ((m = osc777NotifyRe.exec(data)) !== null) {
     const title = m[1];
     const body = m[2];
+    if (!shouldShowNotificationForTarget(workspaceId, leafId)) continue;
     useNotificationStore.getState().addNotification(workspaceId, title, body);
+    playNotificationSound();
     invoke("send_notification", { title, body }).catch(() => {});
   }
 
