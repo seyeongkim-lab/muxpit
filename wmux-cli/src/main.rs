@@ -1,17 +1,9 @@
 use std::env;
-#[cfg(windows)]
-use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 
 mod hooks;
-
-#[cfg(windows)]
-const PIPE_NAME: &str = r"\\.\pipe\wmux";
-#[cfg(unix)]
-const DEFAULT_SOCKET_PATH: &str = "/tmp/wmux.sock";
-
-trait ReadWrite: Read + Write {}
-impl<T: Read + Write> ReadWrite for T {}
+mod ipc;
+mod platform;
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -69,7 +61,7 @@ pub(crate) fn send_request_value(
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let mut stream = match connect_ipc() {
+    let mut stream = match ipc::connect() {
         Ok(s) => s,
         Err(e) => return Err(format!("wmux is not running or IPC is unavailable: {e}")),
     };
@@ -238,18 +230,4 @@ Examples:
   wmux-cli hooks setup claude --yes
   wmux-cli ls"#
     );
-}
-
-#[cfg(windows)]
-fn connect_ipc() -> std::io::Result<Box<dyn ReadWrite>> {
-    let pipe = OpenOptions::new().read(true).write(true).open(PIPE_NAME)?;
-    Ok(Box::new(pipe))
-}
-
-#[cfg(unix)]
-fn connect_ipc() -> std::io::Result<Box<dyn ReadWrite>> {
-    let socket_path =
-        env::var("WMUX_SOCKET_PATH").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string());
-    let stream = std::os::unix::net::UnixStream::connect(socket_path)?;
-    Ok(Box::new(stream))
 }
