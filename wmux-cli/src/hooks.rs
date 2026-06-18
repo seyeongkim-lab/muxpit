@@ -116,14 +116,14 @@ pub(crate) fn handle_hooks_command(args: &[String]) -> Result<(), String> {
 
 fn print_hooks_help() {
     println!(
-        r#"wmux hooks - install and run agent notification hooks
+        r#"wmux-cli hooks - install and run agent notification hooks
 
 Usage:
-  wmux hooks setup [codex|claude] [--agent <agent>] [--yes|-y]
-  wmux hooks uninstall [codex|claude] [--agent <agent>] [--yes|-y]
-  wmux hooks <codex|claude> install [--yes|-y]
-  wmux hooks <codex|claude> uninstall [--yes|-y]
-  wmux hooks <codex|claude> stop
+  wmux-cli hooks setup [codex|claude] [--agent <agent>] [--yes|-y]
+  wmux-cli hooks uninstall [codex|claude] [--agent <agent>] [--yes|-y]
+  wmux-cli hooks <codex|claude> install [--yes|-y]
+  wmux-cli hooks <codex|claude> uninstall [--yes|-y]
+  wmux-cli hooks <codex|claude> stop
 
 Installed hooks no-op unless WMUX_SURFACE_ID is present."#
     );
@@ -369,7 +369,7 @@ fn hook_shell_command(agent: Agent) -> String {
         .as_ref()
         .map(|path| shell_single_quote(&path.to_string_lossy()))
         .unwrap_or_else(|| "\"\"".to_string());
-    let marker = shell_single_quote(&format!("wmux hooks {}", agent.name()));
+    let marker = shell_single_quote(&format!("wmux-cli hooks {}", agent.name()));
 
     format!(
         ": {marker}; wmux_cli=\"${{WMUX_BUNDLED_CLI_PATH:-}}\"; \
@@ -446,6 +446,7 @@ fn is_owned_hook_value(value: &Value, agent: Agent) -> bool {
         return false;
     };
     command.contains(&format!("wmux hooks {}", agent.name()))
+        || command.contains(&format!("wmux-cli hooks {}", agent.name()))
         || command.contains(&format!("hooks {} stop", agent.name()))
 }
 
