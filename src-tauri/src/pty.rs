@@ -9,15 +9,19 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PtyOutput {
     pub id: u32,
     pub data: String,
+    pub surface_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PtyExit {
     pub id: u32,
     pub code: Option<i32>,
+    pub surface_id: Option<String>,
 }
 
 struct TmuxCcState {
@@ -204,6 +208,7 @@ impl PtyManager {
         let app_clone = app.clone();
         let pty_id = id;
         let reader_tmux_state = tmux_state.clone();
+        let reader_surface_id = wmux_context.surface_id.clone();
         std::thread::spawn(move || {
             let mut parser = if reader_tmux_state.is_some() {
                 Some(TmuxCcParser::new())
@@ -219,6 +224,7 @@ impl PtyManager {
                             PtyExit {
                                 id: pty_id,
                                 code: None,
+                                surface_id: reader_surface_id.clone(),
                             },
                         );
                         break;
@@ -229,7 +235,13 @@ impl PtyManager {
                             (parser.as_mut(), reader_tmux_state.as_ref())
                         {
                             for event in p.feed(chunk) {
-                                handle_tmux_event(event, pty_id, state, &app_clone);
+                                handle_tmux_event(
+                                    event,
+                                    pty_id,
+                                    reader_surface_id.as_deref(),
+                                    state,
+                                    &app_clone,
+                                );
                             }
                         } else {
                             let text = String::from_utf8_lossy(chunk).to_string();
@@ -238,6 +250,7 @@ impl PtyManager {
                                 PtyOutput {
                                     id: pty_id,
                                     data: text,
+                                    surface_id: reader_surface_id.clone(),
                                 },
                             );
                         }
@@ -248,6 +261,7 @@ impl PtyManager {
                             PtyExit {
                                 id: pty_id,
                                 code: None,
+                                surface_id: reader_surface_id.clone(),
                             },
                         );
                         break;
@@ -259,10 +273,18 @@ impl PtyManager {
         // Child watcher thread: detect process exit
         let app_clone2 = app.clone();
         let pty_id2 = id;
+        let child_surface_id = wmux_context.surface_id.clone();
         std::thread::spawn(move || {
             let status = child.wait();
             let code = status.ok().map(|s| s.exit_code() as i32);
-            let _ = app_clone2.emit("pty-exit", PtyExit { id: pty_id2, code });
+            let _ = app_clone2.emit(
+                "pty-exit",
+                PtyExit {
+                    id: pty_id2,
+                    code,
+                    surface_id: child_surface_id,
+                },
+            );
         });
 
         let writer = pair
@@ -358,9 +380,11 @@ impl PtyManager {
 fn handle_tmux_event(
     event: TmuxEvent,
     pty_id: u32,
+    surface_id: Option<&str>,
     state: &Arc<Mutex<TmuxCcState>>,
     app: &AppHandle,
 ) {
+    let surface_id = surface_id.map(str::to_string);
     match event {
         TmuxEvent::Output { pane_id, data } => {
             // First pane we observe becomes the active send-keys target for this session.
@@ -376,6 +400,7 @@ fn handle_tmux_event(
                 PtyOutput {
                     id: pty_id,
                     data: text,
+                    surface_id: surface_id.clone(),
                 },
             );
         }
@@ -388,6 +413,7 @@ fn handle_tmux_event(
                 PtyExit {
                     id: pty_id,
                     code: None,
+                    surface_id,
                 },
             );
         }

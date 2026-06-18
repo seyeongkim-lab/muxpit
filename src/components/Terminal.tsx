@@ -26,11 +26,13 @@ import "@xterm/xterm/css/xterm.css";
 interface PtyOutput {
   id: number;
   data: string;
+  surfaceId?: string | null;
 }
 
 interface PtyExit {
   id: number;
   code: number | null;
+  surfaceId?: string | null;
 }
 
 // Exponential backoff between tmux-CC reconnection attempts.
@@ -156,14 +158,16 @@ interface SpawnSpec {
 
 const spawnSpecFromLeaf = (node: any): SpawnSpec => {
   const parsed = parseSshCommandLine(node.command ?? node.sshCommand);
-  const sshConnection = node.sshConnection ?? parsed?.connection;
+  const sshConnection = node.sshConnection && parsed?.connection?.ttyMode && !node.sshConnection.ttyMode
+    ? { ...node.sshConnection, ttyMode: parsed.connection.ttyMode }
+    : node.sshConnection ?? parsed?.connection;
   const sshRemoteCommand = node.sshRemoteCommand ?? parsed?.remoteCommand;
   const command = node.command ?? node.sshCommand;
   return {
     command,
     commandArgv: sshConnection
       ? sshConnectionToArgv(sshConnection, {
-          allocateTty: !!sshRemoteCommand,
+          preserveTtyMode: true,
           remoteCommand: sshRemoteCommand,
         })
       : undefined,
@@ -386,6 +390,9 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     let idAssigned = false;
     const bufferedOutput: PtyOutput[] = [];
     const bufferedExit: PtyExit[] = [];
+    const reconnectOutput: PtyOutput[] = [];
+    const reconnectExit: PtyExit[] = [];
+    const tmuxSession = findTmuxSession(workspaceId, leafId);
 
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
@@ -399,6 +406,9 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
         return;
       }
       if (event.payload.id === ptyId) handleOutput(event.payload);
+      else if (reconnecting && event.payload.surfaceId === leafId) {
+        reconnectOutput.push(event.payload);
+      }
     });
 
     // Guard against overlapping reconnect loops when pty-exit fires multiple times
@@ -419,6 +429,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           // If the terminal was destroyed while we were waiting, bail out.
           if (!terminalInstances.has(leafId)) return;
           try {
+            const oldId = ptyId;
             const newId = await invoke<number>("spawn_pty_tmux_cc", {
               rows: Math.max(term.rows, 1),
               cols: Math.max(term.cols, 1),
@@ -428,13 +439,28 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
               workspaceId,
               surfaceId: leafId,
             });
-            ptyId = newId;
             const inst = terminalInstances.get(leafId);
-            if (inst) inst.ptyId = newId;
+            if (!inst) {
+              invoke("kill_pty", { id: newId }).catch(() => {});
+              return;
+            }
+            ptyId = newId;
+            inst.ptyId = newId;
             setPtyId(workspaceId, leafId, newId);
+            if (oldId && oldId !== newId) {
+              invoke("kill_pty", { id: oldId }).catch(() => {});
+            }
+            for (const payload of reconnectOutput.splice(0)) {
+              if (payload.id === newId) handleOutput(payload);
+            }
+            for (const payload of reconnectExit.splice(0)) {
+              if (payload.id === newId) handleExit(payload);
+            }
             term.write(`\x1b[32m[reconnected]\x1b[0m\r\n`);
             return;
           } catch (err) {
+            reconnectOutput.length = 0;
+            reconnectExit.length = 0;
             const msg = err instanceof Error ? err.message : String(err);
             term.write(`\x1b[31m[reconnect attempt failed: ${msg}]\x1b[0m\r\n`);
           }
@@ -445,18 +471,24 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     };
 
-    const unlistenExit = await listen<PtyExit>("pty-exit", (event) => {
-      if (!idAssigned) {
-        bufferedExit.push(event.payload);
-        return;
-      }
-      if (event.payload.id !== ptyId) return;
-
+    const handleExit = (_payload: PtyExit) => {
       // Tmux-CC persist mode: attempt to re-attach the remote session.
       if (tmuxSession && spawnCommand) {
         tryReconnect(spawnCommand, tmuxSession);
       } else {
         term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
+      }
+    };
+
+    const unlistenExit = await listen<PtyExit>("pty-exit", (event) => {
+      if (!idAssigned) {
+        bufferedExit.push(event.payload);
+        return;
+      }
+      if (event.payload.id === ptyId) {
+        handleExit(event.payload);
+      } else if (reconnecting && event.payload.surfaceId === leafId) {
+        reconnectExit.push(event.payload);
       }
     });
 
@@ -505,7 +537,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           spawnCommand = ctx.ssh_command;
           spawnCommandArgv = parsed
             ? sshConnectionToArgv(parsed.connection, {
-                allocateTty: !!parsed.remoteCommand,
+                preserveTtyMode: true,
                 remoteCommand: parsed.remoteCommand,
               })
             : null;
@@ -520,7 +552,6 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // If spawning with an explicit command fails (e.g. ssh binary missing after a
     // session restore), fall back to the default shell so the pane is usable instead
     // of leaving a silent empty xterm.
-    const tmuxSession = findTmuxSession(workspaceId, leafId);
     try {
       if (tmuxSession && spawnCommand) {
         // Persist-mode SSH: wrap remote shell in `tmux -CC new -A -s ...`.
@@ -593,7 +624,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     bufferedOutput.length = 0;
     for (const payload of bufferedExit) {
       if (payload.id === ptyId) {
-        term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
+        handleExit(payload);
       }
     }
     bufferedExit.length = 0;
