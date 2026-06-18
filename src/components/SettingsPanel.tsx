@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSettingsStore, PREFIX_KEY_CHOICES, type PrefixKey } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
+import { playNotificationSound } from "../utils/notificationSound";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -65,14 +66,28 @@ const ColorSwatch = ({
 
 export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   const {
-    fontSize, fontFamily, fontFamilies, themeName, customColors, prefixKey, enableWebglRenderer,
+    fontSize,
+    fontFamily,
+    fontFamilies,
+    themeName,
+    customColors,
+    prefixKey,
+    enableWebglRenderer,
+    enableNotifications,
+    enableNotificationSound,
+    notificationSoundName,
     setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
     setEnableWebglRenderer,
+    setEnableNotifications,
+    setEnableNotificationSound,
+    setNotificationSound,
+    resetNotificationSound,
   } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
   const [monoOnly, setMonoOnly] = useState(true);
   const [search, setSearch] = useState("");
   const [colorOpen, setColorOpen] = useState(false);
+  const soundInputRef = useRef<HTMLInputElement | null>(null);
 
   const baseTheme = getThemeByName(themeName).theme;
   const resolvedTheme = getResolvedTheme(themeName, customColors);
@@ -113,6 +128,17 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     setFontFamilies(next);
   };
 
+  const chooseSoundFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setNotificationSound(file.name, reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
@@ -146,6 +172,63 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               Enable WebGL renderer
             </label>
             <div style={styles.hint}>Disable if terminal input appears delayed.</div>
+          </div>
+
+          {/* Notifications */}
+          <div style={styles.section}>
+            <label style={styles.label}>Notifications</label>
+            <label style={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={enableNotifications}
+                onChange={(e) => setEnableNotifications(e.target.checked)}
+              />
+              Enable notification badge and system notifications
+            </label>
+            <div style={styles.soundControls}>
+              <label style={{ ...styles.checkLabel, opacity: enableNotifications ? 1 : 0.5 }}>
+                <input
+                  type="checkbox"
+                  checked={enableNotificationSound}
+                  disabled={!enableNotifications}
+                  onChange={(e) => setEnableNotificationSound(e.target.checked)}
+                />
+                Play sound
+              </label>
+              <button
+                onClick={() => soundInputRef.current?.click()}
+                style={styles.smallBtn}
+              >
+                Choose File
+              </button>
+              <button
+                onClick={playNotificationSound}
+                style={styles.smallBtn}
+                disabled={!enableNotificationSound}
+              >
+                Test
+              </button>
+              {notificationSoundName && (
+                <button
+                  onClick={resetNotificationSound}
+                  style={styles.smallBtn}
+                >
+                  Default
+                </button>
+              )}
+            </div>
+            <input
+              ref={soundInputRef}
+              type="file"
+              accept="audio/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                chooseSoundFile(e.currentTarget.files?.[0]);
+                e.currentTarget.value = "";
+              }}
+            />
+            <div style={styles.soundName}>{notificationSoundName ?? "Default bell"}</div>
+            <div style={styles.hint}>Turn off Play sound to mute notification audio.</div>
           </div>
 
           {/* Prefix Key (tmux-style) */}
@@ -403,8 +486,17 @@ const styles: Record<string, React.CSSProperties> = {
     background: "none", border: "1px solid #45475a", borderRadius: 4,
     color: "#a6adc8", fontSize: 11, padding: "4px 8px", cursor: "pointer", marginLeft: 8,
   },
+  smallBtn: {
+    background: "#313244", border: "1px solid #45475a", borderRadius: 4,
+    color: "#cdd6f4", fontSize: 11, padding: "4px 8px", cursor: "pointer",
+  },
   value: { color: "#cdd6f4", fontSize: 16, fontWeight: 600, minWidth: 48, textAlign: "center" as const, fontFamily: "monospace" },
   hint: { color: "#585b70", fontSize: 11, marginTop: 4 },
+  soundControls: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" as const },
+  soundName: {
+    color: "#89b4fa", fontSize: 11, marginTop: 6,
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
+  },
   select: {
     width: "100%", background: "#313244", border: "1px solid #45475a", borderRadius: 4,
     color: "#cdd6f4", fontSize: 13, padding: "6px 10px", outline: "none", cursor: "pointer",
