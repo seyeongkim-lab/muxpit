@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { sanitizeTmuxSessionName } from "../utils/tmuxSession";
+import type { SshConnection } from "../utils/sshConnection";
 
 export interface TmuxSession {
   id: string;          // "$0"
@@ -12,6 +13,7 @@ export interface TmuxSession {
 
 interface AttachInfo {
   sshCommand: string;
+  sshConnection?: SshConnection;
   wrapperSession: string;
 }
 
@@ -28,7 +30,7 @@ interface TmuxSessionsState {
   /** SSH/wrapper context kept outside React tree to avoid re-render churn. */
   _attach: Record<string, AttachInfo>;
 
-  attach: (wsId: string, sshCommand: string, wrapperSession: string) => void;
+  attach: (wsId: string, sshCommand: string, wrapperSession: string, sshConnection?: SshConnection) => void;
   detach: (wsId: string) => void;
   refresh: (wsId: string) => Promise<void>;
   switchTo: (wsId: string, sessionId: string) => Promise<void>;
@@ -85,7 +87,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   byWs: {},
   _attach: {},
 
-  attach: (wsId, sshCommand, wrapperSession) => {
+  attach: (wsId, sshCommand, wrapperSession, sshConnection) => {
     // Always normalise the wrapper to its server-side form so older saved
     // workspaces (which stored the unsanitised `wmux-10.0.0.5`) match what
     // tmux actually returns from list-sessions (`wmux-10_0_0_5`).
@@ -93,12 +95,17 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     // Idempotent: re-attaching with the same context is a no-op beyond a
     // refresh. Different ssh/wrapper replaces and resets state.
     const prev = get()._attach[wsId];
-    if (prev && prev.sshCommand === sshCommand && prev.wrapperSession === wrapper) {
+    if (
+      prev &&
+      prev.sshCommand === sshCommand &&
+      JSON.stringify(prev.sshConnection ?? null) === JSON.stringify(sshConnection ?? null) &&
+      prev.wrapperSession === wrapper
+    ) {
       void get().refresh(wsId);
       return;
     }
     set((s) => ({
-      _attach: { ...s._attach, [wsId]: { sshCommand, wrapperSession: wrapper } },
+      _attach: { ...s._attach, [wsId]: { sshCommand, sshConnection, wrapperSession: wrapper } },
       byWs: {
         ...s.byWs,
         [wsId]: { sessions: [], loading: true, error: null, lastFetch: 0 },
@@ -128,6 +135,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     try {
       const sessions = await invoke<TmuxSession[]>("tmux_list_sessions", {
         sshCommand: ctx.sshCommand,
+        sshConnection: ctx.sshConnection ?? null,
       });
       failures.delete(wsId);
       set((s) => ({
@@ -162,6 +170,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     if (!ctx) return;
     await invoke("tmux_switch_client", {
       sshCommand: ctx.sshCommand,
+      sshConnection: ctx.sshConnection ?? null,
       wrapperSession: ctx.wrapperSession,
       targetSession: sessionId,
     });
@@ -173,11 +182,13 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     if (!ctx) return;
     const newId = await invoke<string>("tmux_new_session", {
       sshCommand: ctx.sshCommand,
+      sshConnection: ctx.sshConnection ?? null,
       name: name && name.trim() ? name.trim() : null,
     });
     // Switch to the freshly created session so the user lands in it.
     await invoke("tmux_switch_client", {
       sshCommand: ctx.sshCommand,
+      sshConnection: ctx.sshConnection ?? null,
       wrapperSession: ctx.wrapperSession,
       targetSession: newId,
     });
@@ -189,6 +200,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     if (!ctx) return;
     await invoke("tmux_kill_session", {
       sshCommand: ctx.sshCommand,
+      sshConnection: ctx.sshConnection ?? null,
       session: sessionId,
     });
     // tmux automatically migrates the attached client to a remaining session;

@@ -39,11 +39,11 @@ export const SplitPane = ({ node, workspaceId }: SplitPaneProps) => {
   }
 
   if (node.type === "monitor") {
-    return <MonitorPane key={node.id} id={node.id} sshTarget={node.sshTarget} monitorId={node.monitorId} />;
+    return <MonitorPane key={node.id} id={node.id} sshTarget={node.sshTarget} sshCommand={node.sshCommand} sshConnection={node.sshConnection} monitorId={node.monitorId} />;
   }
 
   if (node.type === "claudeSession") {
-    return <ClaudeSessionPane key={node.id} id={node.id} sshTarget={node.sshTarget} project={node.project} sessionId={node.sessionId} monitorId={node.monitorId} />;
+    return <ClaudeSessionPane key={node.id} id={node.id} sshTarget={node.sshTarget} sshConnection={node.sshConnection} project={node.project} sessionId={node.sessionId} monitorId={node.monitorId} />;
   }
 
   return (
