@@ -61,6 +61,13 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
     if (cwd) patchInfo(workspaceId, { cwd });
   }
 
+  // OSC 0/2: terminal title. Some full-screen CLIs use this for session context.
+  const titleRe = /\x1b\](?:0|2);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
+  while ((m = titleRe.exec(data)) !== null) {
+    const title = m[1].trim();
+    if (title) patchInfo(workspaceId, { terminalTitle: title });
+  }
+
   // OSC 777: custom notifications and metadata
   // Format: \e]777;notify;Title;Body\a
   const osc777NotifyRe = /\x1b\]777;notify;([^;]*);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
