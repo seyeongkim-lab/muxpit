@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTmuxSessionsStore, pickActiveSession, type TmuxSession } from "../stores/tmuxSessions";
-import { useWorkspaceStore } from "../stores/workspace";
+import { useWorkspaceStore, hasTmuxLeaf } from "../stores/workspace";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 interface Props {
@@ -14,7 +14,26 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   const createNew = useTmuxSessionsStore((s) => s.createNew);
   const killSession = useTmuxSessionsStore((s) => s.killSession);
   const refresh = useTmuxSessionsStore((s) => s.refresh);
+  const resumePolling = useTmuxSessionsStore((s) => s.resumePolling);
+  const attachInfo = useTmuxSessionsStore((s) => s._attach[wsId]);
   const setActiveWs = useWorkspaceStore((s) => s.setActive);
+  const addTmuxPane = useWorkspaceStore((s) => s.addTmuxPane);
+  // Whether this workspace still has a live tmux-attached pane. When false (the
+  // pane was closed), session rows open a fresh pane instead of switching the
+  // — now absent — attached client.
+  const hasLivePane = useWorkspaceStore((s) => {
+    const w = s.workspaces.find((x) => x.id === wsId);
+    return w ? hasTmuxLeaf(w.layout) : false;
+  });
+
+  // Open `sessionName` in a new pane attached via tmux-CC. The backend spawn
+  // creates the session if it doesn't exist, so this also serves "+ new session".
+  const openInNewPane = (sessionName: string) => {
+    if (!attachInfo) return;
+    setActiveWs(wsId);
+    addTmuxPane(wsId, "horizontal", attachInfo.sshCommand, sessionName);
+    resumePolling(wsId);
+  };
 
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -56,6 +75,14 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
   };
 
   const submitNew = () => {
+    // With no live pane there is no attached client to switch; open a pane
+    // directly (empty name reopens the wmux wrapper session).
+    if (!hasLivePane) {
+      openInNewPane(newName.trim() || wrapperSession);
+      setNewName("");
+      setAdding(false);
+      return;
+    }
     void createNew(wsId, newName.trim() || undefined)
       .catch((e) => console.error("[wmux] new session:", e))
       .finally(() => {
@@ -93,9 +120,17 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
             }}
             onClick={(e) => {
               e.stopPropagation();
-              if (!isActive) handleSwitch(s.id);
+              if (!hasLivePane) {
+                openInNewPane(s.name);
+              } else if (!isActive) {
+                handleSwitch(s.id);
+              }
             }}
-            title={`${s.name} (${s.windows} window${s.windows === 1 ? "" : "s"})`}
+            title={
+              hasLivePane
+                ? `${s.name} (${s.windows} window${s.windows === 1 ? "" : "s"})`
+                : `Open ${s.name} in a new pane`
+            }
           >
             <span style={{ ...styles.dot, opacity: isActive ? 1 : 0.35 }}>●</span>
             <span style={styles.name}>{s.name}</span>
