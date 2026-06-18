@@ -30,6 +30,15 @@ interface TmuxSessionsState {
 
   attach: (wsId: string, sshCommand: string, wrapperSession: string) => void;
   detach: (wsId: string) => void;
+  /**
+   * Stop polling but keep the ssh/wrapper context and last session snapshot.
+   * Used when the workspace's tmux pane is closed: the sidebar list stays
+   * visible so the user can reopen a session into a new pane, without leaving a
+   * paneless workspace ssh-polling on a 5s loop.
+   */
+  pausePolling: (wsId: string) => void;
+  /** Re-arm the poll loop and refresh once after a new tmux pane is opened. */
+  resumePolling: (wsId: string) => void;
   refresh: (wsId: string) => Promise<void>;
   switchTo: (wsId: string, sessionId: string) => Promise<void>;
   createNew: (wsId: string, name?: string) => Promise<void>;
@@ -120,6 +129,20 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       const { [wsId]: _b, ...byWs } = s.byWs;
       return { _attach, byWs };
     });
+  },
+
+  pausePolling: (wsId) => {
+    stopTimer(wsId);
+  },
+
+  resumePolling: (wsId) => {
+    if (!get()._attach[wsId]) return;
+    void get().refresh(wsId);
+    startTimer(
+      wsId,
+      () => get().refresh(wsId),
+      () => !!get()._attach[wsId],
+    );
   },
 
   refresh: async (wsId) => {
