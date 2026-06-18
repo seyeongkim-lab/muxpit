@@ -7,6 +7,16 @@ pub struct SshCommand {
     pub program: String,
     pub options: Vec<String>,
     pub target: String,
+    #[serde(default, rename = "ttyMode", skip_serializing_if = "Option::is_none")]
+    pub tty_mode: Option<SshTtyMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SshTtyMode {
+    Allocate,
+    Force,
+    Disable,
 }
 
 pub fn resolve_ssh_command(
@@ -17,6 +27,10 @@ pub fn resolve_ssh_command(
 }
 
 pub fn split_command_line(input: &str) -> Vec<String> {
+    split_command_line_for_platform(input, cfg!(windows))
+}
+
+pub fn split_command_line_for_platform(input: &str, windows: bool) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut in_single = false;
@@ -27,7 +41,7 @@ pub fn split_command_line(input: &str) -> Vec<String> {
         match ch {
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
-            '\\' if !in_single => {
+            '\\' if !in_single && !windows => {
                 if let Some(&next) = chars.peek() {
                     let escapable = if in_double {
                         matches!(next, '"' | '\\' | '$' | '`')
@@ -73,18 +87,23 @@ pub fn parse_ssh_command(ssh_command: &str) -> Option<SshCommand> {
     }
 
     let program = parts[0].clone();
+    if !is_ssh_program(&program) {
+        return None;
+    }
     let mut options = Vec::new();
     let mut target = None;
+    let mut tty_mode = None;
     let mut i = 1;
 
     while i < parts.len() {
         let part = &parts[i];
-        if part.contains('@') && !part.starts_with('-') {
+        if !part.starts_with('-') {
             target = Some(part.clone());
             break;
         }
 
-        if is_execution_mode_option(part) {
+        if let Some(mode) = execution_mode_option(part) {
+            tty_mode = Some(mode);
             i += 1;
             continue;
         }
@@ -100,11 +119,22 @@ pub fn parse_ssh_command(ssh_command: &str) -> Option<SshCommand> {
         program,
         options,
         target,
+        tty_mode,
     })
 }
 
-fn is_execution_mode_option(option: &str) -> bool {
-    matches!(option, "-t" | "-tt" | "-T")
+fn execution_mode_option(option: &str) -> Option<SshTtyMode> {
+    match option {
+        "-t" => Some(SshTtyMode::Allocate),
+        "-tt" => Some(SshTtyMode::Force),
+        "-T" => Some(SshTtyMode::Disable),
+        _ => None,
+    }
+}
+
+fn is_ssh_program(program: &str) -> bool {
+    let normalized = program.replace('\\', "/").to_ascii_lowercase();
+    normalized == "ssh" || normalized.ends_with("/ssh") || normalized.ends_with("/ssh.exe")
 }
 
 fn option_takes_value(option: &str) -> bool {
@@ -206,11 +236,38 @@ mod tests {
     }
 
     #[test]
+    fn split_preserves_windows_unc_backslashes() {
+        let parts =
+            split_command_line_for_platform(r"ssh -i \\server\share\id_ed25519 me@host", true);
+        assert_eq!(parts[2], r"\\server\share\id_ed25519");
+    }
+
+    #[test]
     fn parse_drops_remote_command_after_target() {
         let parsed = parse_ssh_command("ssh -t -p 2222 -i '/keys/a b' me@host 'echo hi'").unwrap();
         assert_eq!(parsed.program, "ssh");
         assert_eq!(parsed.options, vec!["-p", "2222", "-i", "/keys/a b"]);
         assert_eq!(parsed.target, "me@host");
+        assert_eq!(parsed.tty_mode, Some(SshTtyMode::Allocate));
+    }
+
+    #[test]
+    fn parse_accepts_host_alias_and_l_user() {
+        let parsed = parse_ssh_command("ssh -l me prod-alias").unwrap();
+        assert_eq!(parsed.options, vec!["-l", "me"]);
+        assert_eq!(parsed.target, "prod-alias");
+    }
+
+    #[test]
+    fn parse_preserves_disable_tty_mode() {
+        let parsed = parse_ssh_command("ssh -T prod-alias uptime").unwrap();
+        assert_eq!(parsed.target, "prod-alias");
+        assert_eq!(parsed.tty_mode, Some(SshTtyMode::Disable));
+    }
+
+    #[test]
+    fn parse_rejects_non_ssh_wrappers() {
+        assert!(parse_ssh_command("sshpass -p pw ssh me@host").is_none());
     }
 
     #[test]
@@ -229,6 +286,7 @@ mod tests {
                 "C:\\Users\\Jane Doe\\.ssh\\id_ed25519".to_string(),
             ],
             target: "me@host".to_string(),
+            tty_mode: None,
         };
         assert_eq!(
             ssh.argv_with_extra_options(&["-t"], Some("claude --resume 'a b'")),

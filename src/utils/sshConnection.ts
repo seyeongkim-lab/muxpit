@@ -1,7 +1,10 @@
+export type SshTtyMode = "allocate" | "force" | "disable";
+
 export interface SshConnection {
   program: string;
   options: string[];
   target: string;
+  ttyMode?: SshTtyMode;
 }
 
 export interface SshCommandLine {
@@ -54,13 +57,24 @@ const SSH_OPTIONS_WITH_VALUE = new Set([
   "-w",
 ]);
 
-const SSH_EXECUTION_MODE_OPTIONS = new Set(["-t", "-tt", "-T"]);
+const SSH_EXECUTION_MODE_OPTIONS: Record<string, SshTtyMode> = {
+  "-t": "allocate",
+  "-tt": "force",
+  "-T": "disable",
+};
 
-export const splitCommandLine = (input: string): string[] => {
+const isWindowsRuntime = (): boolean =>
+  typeof navigator !== "undefined" && /^win/i.test(navigator.platform ?? "");
+
+export const splitCommandLine = (
+  input: string,
+  options: { windows?: boolean } = {},
+): string[] => {
   const words: string[] = [];
   let current = "";
   let inSingle = false;
   let inDouble = false;
+  const windows = options.windows ?? isWindowsRuntime();
 
   for (let i = 0; i < input.length; i += 1) {
     const ch = input[i];
@@ -72,7 +86,7 @@ export const splitCommandLine = (input: string): string[] => {
       inDouble = !inDouble;
       continue;
     }
-    if (ch === "\\" && !inSingle && i + 1 < input.length) {
+    if (ch === "\\" && !inSingle && !windows && i + 1 < input.length) {
       const next = input[i + 1];
       const escapable = inDouble
         ? ['"', "\\", "$", "`"].includes(next)
@@ -104,13 +118,16 @@ export const parseSshCommandLine = (command: string | undefined): SshCommandLine
 
   const options: string[] = [];
   let targetIndex = -1;
+  let ttyMode: SshTtyMode | undefined;
   for (let index = 1; index < parts.length; index += 1) {
     const part = parts[index];
     if (!part.startsWith("-")) {
       targetIndex = index;
       break;
     }
-    if (SSH_EXECUTION_MODE_OPTIONS.has(part)) {
+    const executionMode = SSH_EXECUTION_MODE_OPTIONS[part];
+    if (executionMode) {
+      ttyMode = executionMode;
       continue;
     }
     options.push(part);
@@ -127,18 +144,36 @@ export const parseSshCommandLine = (command: string | undefined): SshCommandLine
       program: parts[0],
       options,
       target: parts[targetIndex],
+      ttyMode,
     },
     remoteCommand: remoteParts.length ? remoteParts.join(" ") : undefined,
   };
 };
 
+const ttyModeArgs = (mode: SshTtyMode | undefined): string[] => {
+  if (mode === "allocate") return ["-t"];
+  if (mode === "force") return ["-tt"];
+  if (mode === "disable") return ["-T"];
+  return [];
+};
+
 export const sshConnectionToArgv = (
   connection: SshConnection,
-  options: { allocateTty?: boolean; remoteCommand?: string; extraOptions?: string[] } = {},
+  options: {
+    allocateTty?: boolean;
+    preserveTtyMode?: boolean;
+    remoteCommand?: string;
+    extraOptions?: string[];
+  } = {},
 ): string[] => {
+  const ttyArgs = options.allocateTty
+    ? ["-t"]
+    : options.preserveTtyMode
+      ? ttyModeArgs(connection.ttyMode)
+      : [];
   const argv = [
     connection.program,
-    ...(options.allocateTty ? ["-t"] : []),
+    ...ttyArgs,
     ...connection.options,
     ...(options.extraOptions ?? []),
     connection.target,
@@ -149,7 +184,12 @@ export const sshConnectionToArgv = (
 
 export const sshConnectionToCommandLine = (
   connection: SshConnection,
-  options: { allocateTty?: boolean; remoteCommand?: string; extraOptions?: string[] } = {},
+  options: {
+    allocateTty?: boolean;
+    preserveTtyMode?: boolean;
+    remoteCommand?: string;
+    extraOptions?: string[];
+  } = {},
 ): string => buildCommandLine(sshConnectionToArgv(connection, options));
 
 export const buildSshCommandWithRemoteCmdFromConnection = (
@@ -169,11 +209,8 @@ export const buildSshCommandWithRemoteCmdFromBase = (
 ): string => {
   const parsed = parseSshCommandLine(sshCommand);
   if (!parsed) {
-    return buildCommandLine([
-      "ssh",
-      ...(allocateTty ? ["-t"] : []),
-      remoteCommand,
-    ]);
+    const trimmed = sshCommand.trim();
+    return trimmed ? `${trimmed} ${quoteCommandArg(remoteCommand)}` : "";
   }
   return buildSshCommandWithRemoteCmdFromConnection(
     parsed.connection,

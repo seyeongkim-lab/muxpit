@@ -37,4 +37,4 @@ export const shouldEnableWebglRendererByDefault = (): boolean =>
   typeof navigator === "undefined" ? true : !isLinuxPlatform();
 
 export const isPowerShellCommand = (command: string): boolean =>
-  /\b(pwsh|powershell|cmd\.exe)\b/i.test(command);
+  /\b(pwsh|powershell|cmd(?:\.exe)?)\b/i.test(command);

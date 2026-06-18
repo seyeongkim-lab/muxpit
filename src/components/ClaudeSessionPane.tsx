@@ -14,6 +14,7 @@ interface ClaudeSessionPaneProps {
   sshTarget: string;
   sshConnection?: SshConnection;
   project: string;
+  projectPath?: string;
   sessionId: string;
   monitorId: string;
 }
@@ -80,7 +81,13 @@ const parseJournalEntries = (raw: string | string[]): MessageEntry[] => {
   return messages;
 };
 
-export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, sessionId, monitorId }: ClaudeSessionPaneProps) => {
+const decodeClaudeProjectPath = (project: string): string => {
+  if (project.startsWith("/")) return project;
+  const decoded = project.replace(/-/g, "/");
+  return decoded ? `/${decoded}` : project;
+};
+
+export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, projectPath, sessionId, monitorId }: ClaudeSessionPaneProps) => {
   const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -147,12 +154,13 @@ export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, sessi
 
   const handleResume = useCallback(() => {
     const connection = sshConnection ?? parseSshCommandLine(`ssh ${sshTarget}`)?.connection;
-    const remote = `claude --resume ${quotePosixShellArg(sessionId)}`;
+    const cwd = projectPath ?? decodeClaudeProjectPath(project);
+    const remote = `cd ${quotePosixShellArg(cwd)} && claude --resume ${quotePosixShellArg(sessionId)}`;
     const cmd = connection
       ? buildSshCommandWithRemoteCmdFromConnection(connection, remote, true)
       : undefined;
     useWorkspaceStore.getState().addWorkspace(`Claude: ${project}`, cmd, undefined, connection, remote);
-  }, [sshTarget, sshConnection, project, sessionId]);
+  }, [sshTarget, sshConnection, project, projectPath, sessionId]);
 
   const projectLabel = project.replace(/-/g, "/");
 
