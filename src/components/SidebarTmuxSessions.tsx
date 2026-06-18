@@ -6,9 +6,13 @@ import { ConfirmDialog } from "./ConfirmDialog";
 interface Props {
   wsId: string;
   wrapperSession: string;
+  /** Whether the parent workspace is the active one. Inactive workspaces dim
+   * their active-session highlight so the sub-session list matches the dimmed
+   * workspace name above it. */
+  isWsActive: boolean;
 }
 
-export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
+export const SidebarTmuxSessions = ({ wsId, wrapperSession, isWsActive }: Props) => {
   const entry = useTmuxSessionsStore((s) => s.byWs[wsId]);
   const switchTo = useTmuxSessionsStore((s) => s.switchTo);
   const createNew = useTmuxSessionsStore((s) => s.createNew);
@@ -116,7 +120,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
             key={s.id}
             style={{
               ...styles.row,
-              ...(isActive ? styles.rowActive : {}),
+              ...(isActive ? (isWsActive ? styles.rowActive : styles.rowActiveDim) : {}),
             }}
             onClick={(e) => {
               e.stopPropagation();
@@ -132,7 +136,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession }: Props) => {
                 : `Open ${s.name} in a new pane`
             }
           >
-            <span style={{ ...styles.dot, opacity: isActive ? 1 : 0.35 }}>●</span>
+            <span style={{ ...styles.dot, opacity: isActive ? (isWsActive ? 1 : 0.5) : 0.35 }}>●</span>
             <span style={styles.name}>{s.name}</span>
             {isWrapper && <span style={styles.wrapperBadge}>wmux</span>}
             <span style={styles.windows}>{s.windows}w</span>
@@ -222,6 +226,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--wmux-text)",
     backgroundColor: "var(--wmux-accent-soft)",
     borderLeftColor: "var(--wmux-accent)",
+    cursor: "default",
+  },
+  // Active session of an inactive workspace: keep a faint marker but drop the
+  // bright text / accent fill so it reads as dimmed like the workspace above.
+  rowActiveDim: {
+    borderLeftColor: "var(--wmux-hairline)",
     cursor: "default",
   },
   dot: {

@@ -389,6 +389,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                 <SidebarTmuxSessions
                   wsId={ws.id}
                   wrapperSession={tmuxAttach[ws.id].wrapperSession}
+                  isWsActive={isActive}
                 />
               )}
               </div>
