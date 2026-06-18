@@ -342,6 +342,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
               cols: Math.max(term.cols, 1),
               sshCommand,
               sessionName,
+              workspaceId,
+              surfaceId: leafId,
             });
             ptyId = newId;
             const inst = terminalInstances.get(leafId);
@@ -419,12 +421,16 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           cols: Math.max(term.cols, 1),
           sshCommand: spawnCommand,
           sessionName: tmuxSession,
+          workspaceId,
+          surfaceId: leafId,
         });
       } else {
         ptyId = await invoke<number>("spawn_pty", {
           rows: Math.max(term.rows, 1),
           cols: Math.max(term.cols, 1),
           command: spawnCommand,
+          workspaceId,
+          surfaceId: leafId,
         });
       }
     } catch (err) {
@@ -437,6 +443,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
             rows: Math.max(term.rows, 1),
             cols: Math.max(term.cols, 1),
             command: null,
+            workspaceId,
+            surfaceId: leafId,
           });
         } catch (err2) {
           const msg2 = err2 instanceof Error ? err2.message : String(err2);
