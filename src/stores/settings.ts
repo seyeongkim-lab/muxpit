@@ -2,6 +2,19 @@ import { create } from "zustand";
 import type { CustomColors, ThemeColorKey } from "../themes";
 
 export type PrefixKey = "off" | "ctrl+b" | "ctrl+shift+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
+export type SessionListMetadataKey =
+  | "agent"
+  | "cwd"
+  | "git"
+  | "ports"
+  | "panes"
+  | "process"
+  | "memory"
+  | "sshTarget"
+  | "tmuxSession"
+  | "lastCommand";
+
+export type SessionListMetadataSettings = Record<SessionListMetadataKey, boolean>;
 
 export const PREFIX_KEY_CHOICES: { value: PrefixKey; label: string }[] = [
   { value: "ctrl+shift+b", label: "Ctrl+Shift+B" },
@@ -12,6 +25,32 @@ export const PREFIX_KEY_CHOICES: { value: PrefixKey; label: string }[] = [
   { value: "ctrl+\\", label: "Ctrl+\\" },
   { value: "off", label: "Off (disabled)" },
 ];
+
+export const SESSION_LIST_METADATA_OPTIONS: { key: SessionListMetadataKey; label: string }[] = [
+  { key: "agent", label: "Agent" },
+  { key: "cwd", label: "CWD" },
+  { key: "git", label: "Git branch" },
+  { key: "ports", label: "Ports" },
+  { key: "panes", label: "Pane count" },
+  { key: "process", label: "Process" },
+  { key: "memory", label: "Memory" },
+  { key: "sshTarget", label: "SSH target" },
+  { key: "tmuxSession", label: "Tmux session" },
+  { key: "lastCommand", label: "Last command" },
+];
+
+const DEFAULT_SESSION_LIST_METADATA: SessionListMetadataSettings = {
+  agent: true,
+  cwd: false,
+  git: true,
+  ports: true,
+  panes: true,
+  process: true,
+  memory: false,
+  sshTarget: true,
+  tmuxSession: true,
+  lastCommand: false,
+};
 
 interface SettingsState {
   fontSize: number;
@@ -25,6 +64,7 @@ interface SettingsState {
   enableNotificationSound: boolean;
   notificationSoundDataUrl: string | null;
   notificationSoundName: string | null;
+  sessionListMetadata: SessionListMetadataSettings;
 
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
@@ -40,6 +80,7 @@ interface SettingsState {
   setEnableNotificationSound: (enabled: boolean) => void;
   setNotificationSound: (name: string, dataUrl: string) => void;
   resetNotificationSound: () => void;
+  setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => void;
 }
 
 const FONT_SIZE_MIN = 8;
@@ -82,6 +123,21 @@ const savedFamilies: string[] = Array.isArray(saved.fontFamilies)
   ? saved.fontFamilies.filter((f: unknown): f is string => typeof f === "string" && f.length > 0)
   : [];
 const initialFamilies = savedFamilies.length > 0 ? savedFamilies : DEFAULT_FONT_FAMILIES;
+const savedSessionListMetadata: Partial<SessionListMetadataSettings> =
+  saved.sessionListMetadata && typeof saved.sessionListMetadata === "object"
+    ? saved.sessionListMetadata as Partial<SessionListMetadataSettings>
+    : {};
+const initialSessionListMetadata: SessionListMetadataSettings = {
+  ...DEFAULT_SESSION_LIST_METADATA,
+  ...Object.fromEntries(
+    (Object.keys(DEFAULT_SESSION_LIST_METADATA) as SessionListMetadataKey[]).map((key) => [
+      key,
+      typeof savedSessionListMetadata[key] === "boolean"
+        ? savedSessionListMetadata[key]
+        : DEFAULT_SESSION_LIST_METADATA[key],
+    ]),
+  ) as SessionListMetadataSettings,
+};
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontSize: saved.fontSize ?? 14,
@@ -97,6 +153,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     typeof saved.notificationSoundDataUrl === "string" ? saved.notificationSoundDataUrl : null,
   notificationSoundName:
     typeof saved.notificationSoundName === "string" ? saved.notificationSoundName : null,
+  sessionListMetadata: initialSessionListMetadata,
 
   increaseFontSize: () => {
     const next = Math.min(get().fontSize + 1, FONT_SIZE_MAX);
@@ -186,6 +243,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ notificationSoundName: null, notificationSoundDataUrl: null });
     saveSettings(get());
   },
+
+  setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => {
+    set((state) => ({
+      sessionListMetadata: { ...state.sessionListMetadata, [key]: enabled },
+    }));
+    saveSettings(get());
+  },
 }));
 
 const saveSettings = (state: SettingsState) => {
@@ -203,6 +267,7 @@ const saveSettings = (state: SettingsState) => {
         enableNotificationSound: state.enableNotificationSound,
         notificationSoundDataUrl: state.notificationSoundDataUrl,
         notificationSoundName: state.notificationSoundName,
+        sessionListMetadata: state.sessionListMetadata,
       }),
     );
   } catch {}

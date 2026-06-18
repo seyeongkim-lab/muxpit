@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSettingsStore, PREFIX_KEY_CHOICES, type PrefixKey } from "../stores/settings";
+import { useSettingsStore, PREFIX_KEY_CHOICES, SESSION_LIST_METADATA_OPTIONS, type PrefixKey } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
@@ -76,12 +76,14 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     enableNotifications,
     enableNotificationSound,
     notificationSoundName,
+    sessionListMetadata,
     setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
     setEnableWebglRenderer,
     setEnableNotifications,
     setEnableNotificationSound,
     setNotificationSound,
     resetNotificationSound,
+    setSessionListMetadata,
   } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
   const [monoOnly, setMonoOnly] = useState(true);
@@ -229,6 +231,24 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
             />
             <div style={styles.soundName}>{notificationSoundName ?? "Default bell"}</div>
             <div style={styles.hint}>Turn off Play sound to mute notification audio.</div>
+          </div>
+
+          {/* Session List */}
+          <div style={styles.section}>
+            <label style={styles.label}>Session List</label>
+            <div style={styles.metadataGrid}>
+              {SESSION_LIST_METADATA_OPTIONS.map((option) => (
+                <label key={option.key} style={styles.checkLabel}>
+                  <input
+                    type="checkbox"
+                    checked={sessionListMetadata[option.key]}
+                    onChange={(e) => setSessionListMetadata(option.key, e.target.checked)}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            <div style={styles.hint}>SSH sessions show only local routing metadata such as target, panes, and tmux session.</div>
           </div>
 
           {/* Prefix Key (tmux-style) */}
@@ -496,6 +516,11 @@ const styles: Record<string, React.CSSProperties> = {
   soundName: {
     color: "#89b4fa", fontSize: 11, marginTop: 6,
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
+  },
+  metadataGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "6px 12px",
   },
   select: {
     width: "100%", background: "#313244", border: "1px solid #45475a", borderRadius: 4,
