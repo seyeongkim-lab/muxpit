@@ -2,7 +2,6 @@ import { useEffect, useRef, useCallback } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
@@ -87,7 +86,7 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
   }
 };
 
-import { terminalInstances } from "./terminalRegistry";
+import { loadWebglAddon, terminalInstances } from "./terminalRegistry";
 
 // Strip the "data:image/png;base64," prefix; the backend wants raw base64.
 const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -287,12 +286,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
     term.open(containerRef.current);
 
-    // Enable WebGL renderer for GPU acceleration
-    try {
-      term.loadAddon(new WebglAddon());
-    } catch {
-      // WebGL not available, use default DOM renderer
-    }
+    const webglAddon = settings.enableWebglRenderer ? loadWebglAddon(term) : undefined;
 
     // Defer to next frame so document-level zoom (set by App.tsx via the settings store)
     // has taken effect on layout before xterm measures the container. Without this,
@@ -481,6 +475,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       term,
       fitAddon,
       ptyId,
+      webglAddon,
       cleanup: { unlistenOutput, unlistenExit, onData, onResize },
     });
 

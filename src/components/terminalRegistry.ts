@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { WebglAddon } from "@xterm/addon-webgl";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { useSettingsStore } from "../stores/settings";
@@ -8,6 +9,7 @@ export interface TerminalInstance {
   term: XTerm;
   fitAddon: FitAddon;
   ptyId: number;
+  webglAddon?: WebglAddon;
   cleanup: {
     unlistenOutput: () => void;
     unlistenExit: () => void;
@@ -21,10 +23,35 @@ export interface TerminalInstance {
 // module when component and non-component exports are mixed).
 export const terminalInstances = new Map<string, TerminalInstance>();
 
+export const loadWebglAddon = (term: XTerm): WebglAddon | undefined => {
+  try {
+    const addon = new WebglAddon();
+    term.loadAddon(addon);
+    return addon;
+  } catch {
+    return undefined;
+  }
+};
+
+export const setWebglRenderer = (instance: TerminalInstance, enabled: boolean) => {
+  if (enabled) {
+    if (!instance.webglAddon) instance.webglAddon = loadWebglAddon(instance.term);
+    return;
+  }
+
+  if (!instance.webglAddon) return;
+  try {
+    instance.webglAddon.dispose();
+  } catch {}
+  instance.webglAddon = undefined;
+  if (instance.term.rows > 0) instance.term.refresh(0, instance.term.rows - 1);
+};
+
 export const destroyTerminal = (leafId: string) => {
   const instance = terminalInstances.get(leafId);
   if (!instance) return;
   invoke("kill_pty", { id: instance.ptyId }).catch(() => {});
+  instance.webglAddon?.dispose();
   instance.cleanup.unlistenOutput();
   instance.cleanup.unlistenExit();
   instance.cleanup.onData.dispose();
@@ -44,5 +71,9 @@ useSettingsStore.subscribe((state, prev) => {
     terminalInstances.forEach(({ term }) => {
       term.options.theme = theme;
     });
+  }
+
+  if (state.enableWebglRenderer !== prev.enableWebglRenderer) {
+    terminalInstances.forEach((instance) => setWebglRenderer(instance, state.enableWebglRenderer));
   }
 });
