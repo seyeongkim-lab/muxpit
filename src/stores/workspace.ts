@@ -157,6 +157,18 @@ interface WorkspaceState {
     command: string,
     aiMeta?: { aiKind: AiKind; aiSshTarget?: string },
   ) => string;
+  /**
+   * Split the focused leaf and attach the new pane to a remote tmux session via
+   * `spawn_pty_tmux_cc`. Used to reopen a tmux pane after the original was closed
+   * (the backend `has-session || new-session; attach` auto-creates a missing
+   * session). `sshCommand`/`tmuxSession` come from the kept attach context.
+   */
+  addTmuxPane: (
+    workspaceId: string,
+    direction: SplitDirection,
+    sshCommand: string,
+    tmuxSession: string,
+  ) => string;
   closeLeaf: (workspaceId: string, leafId: string) => void;
   setFocusedLeaf: (workspaceId: string, leafId: string) => void;
   setSplitRatio: (workspaceId: string, splitId: string, ratio: number) => void;
@@ -254,8 +266,10 @@ export const collectLeafIds = (node: LayoutNode): string[] => {
 };
 
 // True if any leaf in the layout carries a tmux persist session. Used to decide
-// when the workspace's tmux session poller can be detached.
-const hasTmuxLeaf = (node: LayoutNode): boolean => {
+// when the workspace's tmux session poller can be detached, and by the sidebar
+// to decide whether a session row click should switch the live client or open a
+// fresh pane attached to that session.
+export const hasTmuxLeaf = (node: LayoutNode): boolean => {
   if (node.type === "leaf") return !!node.tmuxSession;
   if (node.type === "split")
     return hasTmuxLeaf(node.children[0]) || hasTmuxLeaf(node.children[1]);
@@ -517,6 +531,39 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return newLeafId;
   },
 
+  addTmuxPane: (workspaceId, direction, sshCommand, tmuxSession) => {
+    const newLeafId = genId();
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const splitNode: SplitNode = {
+          type: "split",
+          id: genId(),
+          direction,
+          ratio: 0.5,
+          children: [
+            preserveLeaf(w.layout, w.focusedLeafId),
+            {
+              type: "leaf",
+              id: newLeafId,
+              ptyId: null,
+              command: sshCommand,
+              tmuxSession,
+            },
+          ],
+        };
+        return {
+          ...w,
+          layout: replaceNode(w.layout, w.focusedLeafId, splitNode),
+          focusedLeafId: newLeafId,
+          zoomedLeafId: undefined,
+          layoutMode: "free",
+        };
+      }),
+    }));
+    return newLeafId;
+  },
+
   closeLeaf: (workspaceId: string, leafId: string) => {
     set((s) => ({
       workspaces: s.workspaces.map((w) => {
@@ -536,12 +583,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         };
       }),
     }));
-    // If closing this leaf left no tmux pane behind, stop the session poller so
-    // it doesn't keep SSH-polling a workspace that no longer has a tmux session.
+    // If closing this leaf left no tmux pane behind, pause the session poller so
+    // it doesn't keep SSH-polling a paneless workspace. The attach context is
+    // kept (not detached) so the sidebar session list stays visible and the user
+    // can reopen a session into a new pane via `addTmuxPane`.
     const tmux = useTmuxSessionsStore.getState();
     if (tmux._attach[workspaceId]) {
       const w = get().workspaces.find((x) => x.id === workspaceId);
-      if (w && !hasTmuxLeaf(w.layout)) tmux.detach(workspaceId);
+      if (w && !hasTmuxLeaf(w.layout)) tmux.pausePolling(workspaceId);
     }
   },
 

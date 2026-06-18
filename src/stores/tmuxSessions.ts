@@ -30,6 +30,15 @@ interface TmuxSessionsState {
 
   attach: (wsId: string, sshCommand: string, wrapperSession: string) => void;
   detach: (wsId: string) => void;
+  /**
+   * Stop polling but keep the ssh/wrapper context and last session snapshot.
+   * Used when the workspace's tmux pane is closed: the sidebar list stays
+   * visible so the user can reopen a session into a new pane, without leaving a
+   * paneless workspace ssh-polling on a 5s loop.
+   */
+  pausePolling: (wsId: string) => void;
+  /** Re-arm the poll loop and refresh once after a new tmux pane is opened. */
+  resumePolling: (wsId: string) => void;
   refresh: (wsId: string) => Promise<void>;
   switchTo: (wsId: string, sessionId: string) => Promise<void>;
   createNew: (wsId: string, name?: string) => Promise<void>;
@@ -47,6 +56,10 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 // Consecutive refresh failures per workspace. Drives polling backoff so a host
 // that's down isn't hammered every 5s with overlapping ssh execs.
 const failures = new Map<string, number>();
+// Workspaces intentionally paused by `pausePolling` (their tmux pane was closed
+// but the attach context is kept). `resumeAll` must skip these so a tab focus
+// cycle doesn't silently restart polling on a paneless workspace.
+const pausedWs = new Set<string>();
 let paused = false;
 
 const nextDelay = (wsId: string): number => {
@@ -92,6 +105,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     const wrapper = sanitizeTmuxSessionName(wrapperSession);
     // Idempotent: re-attaching with the same context is a no-op beyond a
     // refresh. Different ssh/wrapper replaces and resets state.
+    pausedWs.delete(wsId);
     const prev = get()._attach[wsId];
     if (prev && prev.sshCommand === sshCommand && prev.wrapperSession === wrapper) {
       void get().refresh(wsId);
@@ -115,11 +129,29 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   detach: (wsId) => {
     stopTimer(wsId);
     failures.delete(wsId);
+    pausedWs.delete(wsId);
     set((s) => {
       const { [wsId]: _a, ..._attach } = s._attach;
       const { [wsId]: _b, ...byWs } = s.byWs;
       return { _attach, byWs };
     });
+  },
+
+  pausePolling: (wsId) => {
+    stopTimer(wsId);
+    failures.delete(wsId);
+    pausedWs.add(wsId);
+  },
+
+  resumePolling: (wsId) => {
+    if (!get()._attach[wsId]) return;
+    pausedWs.delete(wsId);
+    void get().refresh(wsId);
+    startTimer(
+      wsId,
+      () => get().refresh(wsId),
+      () => !!get()._attach[wsId],
+    );
   },
 
   refresh: async (wsId) => {
@@ -206,6 +238,9 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     paused = false;
     const state = get();
     for (const wsId of Object.keys(state._attach)) {
+      // Skip workspaces intentionally paused (tmux pane closed) so a focus
+      // cycle doesn't restart polling on a paneless workspace.
+      if (pausedWs.has(wsId)) continue;
       void state.refresh(wsId);
       startTimer(
         wsId,
