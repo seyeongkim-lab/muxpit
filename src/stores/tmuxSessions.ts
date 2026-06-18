@@ -56,6 +56,10 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 // Consecutive refresh failures per workspace. Drives polling backoff so a host
 // that's down isn't hammered every 5s with overlapping ssh execs.
 const failures = new Map<string, number>();
+// Workspaces intentionally paused by `pausePolling` (their tmux pane was closed
+// but the attach context is kept). `resumeAll` must skip these so a tab focus
+// cycle doesn't silently restart polling on a paneless workspace.
+const pausedWs = new Set<string>();
 let paused = false;
 
 const nextDelay = (wsId: string): number => {
@@ -101,6 +105,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     const wrapper = sanitizeTmuxSessionName(wrapperSession);
     // Idempotent: re-attaching with the same context is a no-op beyond a
     // refresh. Different ssh/wrapper replaces and resets state.
+    pausedWs.delete(wsId);
     const prev = get()._attach[wsId];
     if (prev && prev.sshCommand === sshCommand && prev.wrapperSession === wrapper) {
       void get().refresh(wsId);
@@ -124,6 +129,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   detach: (wsId) => {
     stopTimer(wsId);
     failures.delete(wsId);
+    pausedWs.delete(wsId);
     set((s) => {
       const { [wsId]: _a, ..._attach } = s._attach;
       const { [wsId]: _b, ...byWs } = s.byWs;
@@ -133,10 +139,13 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
 
   pausePolling: (wsId) => {
     stopTimer(wsId);
+    failures.delete(wsId);
+    pausedWs.add(wsId);
   },
 
   resumePolling: (wsId) => {
     if (!get()._attach[wsId]) return;
+    pausedWs.delete(wsId);
     void get().refresh(wsId);
     startTimer(
       wsId,
@@ -229,6 +238,9 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     paused = false;
     const state = get();
     for (const wsId of Object.keys(state._attach)) {
+      // Skip workspaces intentionally paused (tmux pane closed) so a focus
+      // cycle doesn't restart polling on a paneless workspace.
+      if (pausedWs.has(wsId)) continue;
       void state.refresh(wsId);
       startTimer(
         wsId,
