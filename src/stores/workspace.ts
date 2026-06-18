@@ -71,6 +71,7 @@ export type LayoutMode =
 export interface Workspace {
   id: string;
   name: string;
+  nameSource: "auto" | "manual";
   layout: LayoutNode;
   focusedLeafId: string;
   zoomedLeafId?: string;
@@ -123,6 +124,7 @@ type SavedLayout = SavedLeaf | SavedBrowser | SavedSplit | SavedMonitor | SavedC
 interface SavedWorkspace {
   id: string;
   name: string;
+  nameSource?: "auto" | "manual";
   layout: SavedLayout;
   focusedLeafId: string;
 }
@@ -140,6 +142,7 @@ interface WorkspaceState {
   removeWorkspace: (id: string) => void;
   setActive: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
+  setAutoWorkspaceName: (id: string, name: string) => void;
   setPtyId: (workspaceId: string, leafId: string, ptyId: number) => void;
 
   resetWorkspace: (id: string) => void;
@@ -174,6 +177,9 @@ interface WorkspaceState {
 
 let counter = 0;
 const genId = () => `n-${Date.now()}-${counter++}`;
+
+const isDefaultWorkspaceName = (name: string | undefined): boolean =>
+  !name || /^Shell \d+$/.test(name);
 
 // Infer AI CLI metadata from a free-form ssh command stored in `leaf.command`.
 // Used by `restoreSession` so leaves saved by a pre-aiKind build still get a
@@ -273,6 +279,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const ws: Workspace = {
       id: wsId,
       name: name ?? `Shell ${get().workspaces.length + 1}`,
+      nameSource: isDefaultWorkspaceName(name) ? "auto" : "manual",
       layout: leaf,
       focusedLeafId: leafId,
     };
@@ -291,6 +298,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           ? {
               ...w,
               name: "Shell 1",
+              nameSource: "auto",
               layout: { type: "leaf" as const, id: newLeafId, ptyId: null },
               focusedLeafId: newLeafId,
             }
@@ -383,7 +391,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   renameWorkspace: (id: string, name: string) => {
     set((s) => ({
       workspaces: s.workspaces.map((w) =>
-        w.id === id ? { ...w, name } : w,
+        w.id === id ? { ...w, name, nameSource: "manual" } : w,
+      ),
+    }));
+  },
+
+  setAutoWorkspaceName: (id: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    set((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === id && w.nameSource !== "manual" && w.name !== trimmed
+          ? { ...w, name: trimmed, nameSource: "auto" }
+          : w,
       ),
     }));
   },
@@ -569,6 +589,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       workspaces: state.workspaces.map((w) => ({
         id: w.id,
         name: w.name,
+        nameSource: w.nameSource,
         layout: stripPty(w.layout),
         focusedLeafId: w.focusedLeafId,
       })),
@@ -622,6 +643,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const workspaces: Workspace[] = session.workspaces.map((w) => ({
         id: w.id,
         name: w.name,
+        nameSource: w.nameSource ?? (isDefaultWorkspaceName(w.name) ? "auto" : "manual"),
         layout: restoreLayout(w.layout),
         focusedLeafId: w.focusedLeafId,
       }));
@@ -727,6 +749,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const newWs: Workspace = {
         id: newWsId,
         name: `Shell ${s.workspaces.length + 1}`,
+        nameSource: "auto",
         layout: detached,
         focusedLeafId: leafId,
       };

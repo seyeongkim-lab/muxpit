@@ -10,7 +10,8 @@ use pty::{PtyManager, WmuxPtyContext};
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use sysinfo::{
-    gather_workspace_info, get_listening_ports, get_shell_context, ShellContext, WorkspaceInfo,
+    collect_session_metadata, gather_workspace_info, get_listening_ports, get_shell_context,
+    SessionMetadata, ShellContext, WorkspaceInfo,
 };
 use tauri::{AppHandle, State};
 
@@ -102,6 +103,21 @@ async fn get_shell_ctx(state: State<'_, PtyManager>, id: u32) -> Result<ShellCon
             .await
             .map_err(|e| format!("Task join error: {e}")),
         None => Ok(ShellContext::default()),
+    }
+}
+
+#[tauri::command]
+async fn get_session_metadata(
+    state: State<'_, PtyManager>,
+    id: u32,
+    cwd: Option<String>,
+) -> Result<SessionMetadata, String> {
+    let pid = state.get_child_pid(id)?;
+    match pid {
+        Some(p) => tauri::async_runtime::spawn_blocking(move || collect_session_metadata(p, cwd))
+            .await
+            .map_err(|e| format!("Task join error: {e}")),
+        None => Ok(SessionMetadata::default()),
     }
 }
 
@@ -240,7 +256,10 @@ fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
     }
 }
 
-fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> Result<HashMap<String, bool>, String> {
+fn check_remote_clis_sync(
+    ssh_command: &str,
+    names: &[String],
+) -> Result<HashMap<String, bool>, String> {
     // Result map seeded with `false` for every requested name. Callers always get a
     // complete answer even if SSH fails or some names are filtered out below.
     let mut result: HashMap<String, bool> = names.iter().map(|n| (n.clone(), false)).collect();
@@ -297,7 +316,9 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> Result<HashMap
 
     cmd.stderr(Stdio::null());
 
-    let output = cmd.output().map_err(|e| format!("failed to spawn ssh: {e}"))?;
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to spawn ssh: {e}"))?;
     // ssh exits 255 for its own failures (connect/auth/timeout). Surface that as an
     // error so the caller retries instead of caching a false "nothing installed".
     // A successful connection whose remote `for` loop found nothing exits 0/1 and
@@ -319,10 +340,7 @@ fn check_remote_clis_sync(ssh_command: &str, names: &[String]) -> Result<HashMap
 }
 
 #[tauri::command]
-async fn push_image_to_remote(
-    ssh_command: String,
-    image_base64: String,
-) -> Result<String, String> {
+async fn push_image_to_remote(ssh_command: String, image_base64: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         push_image_to_remote_sync(&ssh_command, &image_base64)
     })
@@ -487,6 +505,7 @@ pub fn run() {
             get_ports,
             get_pty_pid,
             get_shell_ctx,
+            get_session_metadata,
             list_fonts,
             check_remote_clis,
             check_remote_tmux,
