@@ -43,11 +43,11 @@ struct SingleInstanceGuard(windows_sys::Win32::Foundation::HANDLE);
 impl SingleInstanceGuard {
     fn acquire(pipe_name: &str) -> Result<Self, SingleInstanceError> {
         use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
-        use windows_sys::Win32::System::Threading::CreateMutexA;
+        use windows_sys::Win32::System::Threading::CreateMutexW;
 
         let mutex_name = wmux_platform::paths::windows_mutex_name_from_pipe(pipe_name);
-        let mutex_name: Vec<u8> = mutex_name.bytes().chain(std::iter::once(0)).collect();
-        let handle = unsafe { CreateMutexA(std::ptr::null(), 1, mutex_name.as_ptr()) };
+        let mutex_name = wide_null(&mutex_name);
+        let handle = unsafe { CreateMutexW(std::ptr::null(), 1, mutex_name.as_ptr()) };
         if handle.is_null() {
             return Err(SingleInstanceError::Other("CreateMutex failed".to_string()));
         }
@@ -76,17 +76,10 @@ fn accept_client(pipe_name: &str) -> Result<std::fs::File, String> {
     use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
     use windows_sys::Win32::System::Pipes::*;
 
-    extern "system" {
-        fn ConnectNamedPipe(
-            hNamedPipe: *mut std::ffi::c_void,
-            lpOverlapped: *mut std::ffi::c_void,
-        ) -> i32;
-    }
-
-    let pipe_name: Vec<u8> = pipe_name.bytes().chain(std::iter::once(0)).collect();
+    let pipe_name = wide_null(pipe_name);
 
     unsafe {
-        let handle = CreateNamedPipeA(
+        let handle = CreateNamedPipeW(
             pipe_name.as_ptr(),
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
@@ -114,4 +107,8 @@ fn accept_client(pipe_name: &str) -> Result<std::fs::File, String> {
             handle as *mut std::ffi::c_void,
         ))
     }
+}
+
+fn wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
