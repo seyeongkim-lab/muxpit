@@ -153,6 +153,7 @@ fn unix_hook_command(agent_name: &str, disabled_env: &str, current_exe: Option<&
     )
 }
 
+#[cfg(any(windows, test))]
 fn windows_hook_command(
     agent_name: &str,
     disabled_env: &str,
@@ -179,10 +180,12 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+#[cfg(any(windows, test))]
 fn powershell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+#[cfg(any(windows, test))]
 fn windows_command_argument(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\\\""))
 }

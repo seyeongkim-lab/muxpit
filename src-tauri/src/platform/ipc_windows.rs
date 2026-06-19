@@ -72,7 +72,7 @@ impl Drop for SingleInstanceGuard {
 
 fn accept_client(pipe_name: &str) -> Result<std::fs::File, String> {
     use std::os::windows::io::FromRawHandle;
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Foundation::{ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
     use windows_sys::Win32::System::Pipes::*;
 
@@ -89,7 +89,7 @@ fn accept_client(pipe_name: &str) -> Result<std::fs::File, String> {
         let handle = CreateNamedPipeA(
             pipe_name.as_ptr(),
             PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             4096,
             4096,
@@ -104,7 +104,7 @@ fn accept_client(pipe_name: &str) -> Result<std::fs::File, String> {
         let result = ConnectNamedPipe(handle, std::ptr::null_mut());
         if result == 0 {
             let err = windows_sys::Win32::Foundation::GetLastError();
-            if err != 535 {
+            if err != ERROR_PIPE_CONNECTED {
                 windows_sys::Win32::Foundation::CloseHandle(handle);
                 return Err(format!("ConnectNamedPipe failed: error {err}"));
             }
