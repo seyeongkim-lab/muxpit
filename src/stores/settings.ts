@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { CustomColors, ThemeColorKey } from "../themes";
+import { shouldEnableWebglRendererByDefault } from "../utils/runtimePlatform";
 
 export type PrefixKey = "off" | "ctrl+b" | "ctrl+shift+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
 export type SessionListMetadataKey =
@@ -113,8 +114,7 @@ const loadSaved = () => {
 };
 
 const saved = loadSaved();
-const defaultEnableWebglRenderer =
-  typeof navigator === "undefined" ? true : !/linux/i.test(navigator.platform);
+const defaultEnableWebglRenderer = shouldEnableWebglRendererByDefault();
 
 // Resolve the ordered font family list. Prefer the new array model; otherwise
 // start from defaults (Sarasa-led CJK). Legacy `fontFamily` stack strings are not

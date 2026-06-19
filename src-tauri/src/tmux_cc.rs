@@ -7,19 +7,55 @@
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TmuxEvent {
-    Begin { id: u64, time: u64, flags: u64 },
-    End { id: u64, time: u64, flags: u64 },
-    Error { id: u64, time: u64, flags: u64 },
-    Output { pane_id: String, data: Vec<u8> },
-    WindowAdd { window_id: String },
-    WindowClose { window_id: String },
-    WindowRenamed { window_id: String, name: String },
-    WindowPaneChanged { window_id: String, pane_id: String },
-    SessionChanged { session_id: String, name: String },
-    SessionRenamed { session_id: String, name: String },
+    Begin {
+        id: u64,
+        time: u64,
+        flags: u64,
+    },
+    End {
+        id: u64,
+        time: u64,
+        flags: u64,
+    },
+    Error {
+        id: u64,
+        time: u64,
+        flags: u64,
+    },
+    Output {
+        pane_id: String,
+        data: Vec<u8>,
+    },
+    WindowAdd {
+        window_id: String,
+    },
+    WindowClose {
+        window_id: String,
+    },
+    WindowRenamed {
+        window_id: String,
+        name: String,
+    },
+    WindowPaneChanged {
+        window_id: String,
+        pane_id: String,
+    },
+    SessionChanged {
+        session_id: String,
+        name: String,
+    },
+    SessionRenamed {
+        session_id: String,
+        name: String,
+    },
     SessionsChanged,
-    LayoutChange { window_id: String, layout: String },
-    Exit { reason: Option<String> },
+    LayoutChange {
+        window_id: String,
+        layout: String,
+    },
+    Exit {
+        reason: Option<String>,
+    },
     Unknown(String),
     /// Non-notification line (e.g., inside %begin..%end response block or startup banner).
     Data(String),
@@ -71,8 +107,9 @@ fn parse_line(line: &str) -> TmuxEvent {
     };
 
     match tag {
-        "begin" | "end" | "error" => parse_bracket(tag, args)
-            .unwrap_or_else(|| TmuxEvent::Unknown(line.to_string())),
+        "begin" | "end" | "error" => {
+            parse_bracket(tag, args).unwrap_or_else(|| TmuxEvent::Unknown(line.to_string()))
+        }
         "output" => parse_output(args).unwrap_or_else(|| TmuxEvent::Unknown(line.to_string())),
         "window-add" => TmuxEvent::WindowAdd {
             window_id: args.to_string(),
@@ -223,7 +260,14 @@ mod tests {
         let mut p = TmuxCcParser::new();
         let events = p.feed(b"%begin 1700000000 42 0\n%end 1700000000 42 0\n");
         assert_eq!(events.len(), 2);
-        assert!(matches!(events[0], TmuxEvent::Begin { id: 42, flags: 0, .. }));
+        assert!(matches!(
+            events[0],
+            TmuxEvent::Begin {
+                id: 42,
+                flags: 0,
+                ..
+            }
+        ));
         assert!(matches!(events[1], TmuxEvent::End { id: 42, .. }));
     }
 
@@ -283,9 +327,7 @@ mod tests {
         let events = p.feed(b"%exit\n%exit server exited\n");
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], TmuxEvent::Exit { reason: None }));
-        assert!(
-            matches!(&events[1], TmuxEvent::Exit { reason: Some(r) } if r == "server exited")
-        );
+        assert!(matches!(&events[1], TmuxEvent::Exit { reason: Some(r) } if r == "server exited"));
     }
 
     #[test]

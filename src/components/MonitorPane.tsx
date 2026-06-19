@@ -4,10 +4,13 @@ import { listen } from "@tauri-apps/api/event";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
+import type { SshConnection } from "../utils/sshConnection";
 
 interface MonitorPaneProps {
   id: string;
   sshTarget: string;
+  sshCommand?: string;
+  sshConnection?: SshConnection;
   monitorId: string;
 }
 
@@ -48,7 +51,7 @@ const COLORS = {
 
 const EMPTY_SERIES: MonitorSnapshot[] = [];
 
-export const MonitorPane = ({ id, sshTarget, monitorId }: MonitorPaneProps) => {
+export const MonitorPane = ({ id, sshTarget, sshCommand, sshConnection, monitorId }: MonitorPaneProps) => {
   const cpuChartRef = useRef<HTMLDivElement>(null);
   const memChartRef = useRef<HTMLDivElement>(null);
   const cpuPlotRef = useRef<uPlot | null>(null);
@@ -63,13 +66,17 @@ export const MonitorPane = ({ id, sshTarget, monitorId }: MonitorPaneProps) => {
     if (startedRef.current) return;
     startedRef.current = true;
 
-    invoke("start_monitor", { monitorId, sshTarget }).catch(console.error);
+    invoke("start_monitor", {
+      monitorId,
+      sshCommand: sshCommand ?? `ssh ${sshTarget}`,
+      sshConnection: sshConnection ?? null,
+    }).catch(console.error);
 
     return () => {
       invoke("stop_monitor", { monitorId }).catch(() => {});
       useMonitorStore.getState().clearMonitor(monitorId);
     };
-  }, [monitorId, sshTarget]);
+  }, [monitorId, sshCommand, sshConnection, sshTarget]);
 
   // Listen for monitor-data events
   useEffect(() => {

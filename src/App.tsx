@@ -10,8 +10,14 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
-import { buildSshCommand, type SshHost } from "./stores/sshHosts";
-import { useAiCliStore, buildAiLaunchCommand, parseSshTarget } from "./stores/aiCli";
+import {
+  buildSshConnection,
+  buildSshCommand,
+  buildSshCommandWithRemoteCmdFromBase,
+  quotePosixShellArg,
+  type SshHost,
+} from "./stores/sshHosts";
+import { useAiCliStore, buildAiLaunchSpec, parseSshTarget } from "./stores/aiCli";
 import { useNotificationStore } from "./stores/notifications";
 import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
@@ -35,6 +41,11 @@ import { shouldShowNotificationForTarget } from "./utils/notificationRouting";
 import { playNotificationSound } from "./utils/notificationSound";
 import { matchesPrefixKey } from "./utils/prefixKey";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
+import {
+  buildSshCommandWithRemoteCmdFromConnection,
+  parseSshCommandLine,
+  type SshConnection,
+} from "./utils/sshConnection";
 
 const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
   if (node.type === "leaf") return node.id === id ? node : null;
@@ -57,12 +68,13 @@ const isTmuxVersionSupported = (version: string): boolean => {
  * second pane into it. Probe results are cached on `useAiCliStore` so the
  * per-pane toolbar can render the same set without a second SSH call.
  */
-const autoAiSplit = async (wsId: string, sshCommand: string, host?: SshHost) => {
+const autoAiSplit = async (wsId: string, sshCommand: string, sshConnection?: SshConnection, host?: SshHost) => {
   try {
-    const target = host ? `${host.user}@${host.host}` : parseSshTarget(sshCommand);
+    const target = sshConnection?.target ?? (host ? `${host.user}@${host.host}` : parseSshTarget(sshCommand));
     if (!target) return;
+    const connection = sshConnection ?? (host ? buildSshConnection(host) : parseSshCommandLine(sshCommand)?.connection);
 
-    await useAiCliStore.getState().probe(target, sshCommand);
+    await useAiCliStore.getState().probe(target, sshCommand, connection);
     const available = useAiCliStore.getState().available(target);
     if (!available || !available.has("claude")) return;
 
@@ -83,11 +95,13 @@ const autoAiSplit = async (wsId: string, sshCommand: string, host?: SshHost) => 
     };
     if (hasAiPane(ws.layout)) return;
 
-    const claudeCmd = buildAiLaunchCommand("claude", sshCommand, host);
+    const claude = buildAiLaunchSpec("claude", sshCommand, connection);
     const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
-    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claudeCmd, {
+    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claude.command, {
       aiKind: "claude",
       aiSshTarget: target,
+      sshConnection: claude.sshConnection,
+      sshRemoteCommand: claude.sshRemoteCommand,
     });
   } catch {
     // Silently ignore — probe failures already cache an empty set.
@@ -102,7 +116,7 @@ export const App = () => {
   const [sshPanelOpen, setSshPanelOpen] = useState(false);
   const [sshPanelEditId, setSshPanelEditId] = useState<string | null>(null);
   const [gridView, setGridView] = useState(false);
-  const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string } | null>(null);
+  const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string; sshCommand: string; sshConnection?: SshConnection } | null>(null);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const closingRef = useRef(false);
 
@@ -134,12 +148,14 @@ export const App = () => {
 
   // Auto-detect SSH on focused pane and show sidebar monitor (poll every 5s)
   const monitorTargetRef = useRef<string | null>(null);
+  const monitorCommandRef = useRef<string | null>(null);
   const activeWsId = activeWs?.id;
 
   useEffect(() => {
     if (!activeWsId) {
       // No active workspace — stop monitor
       monitorTargetRef.current = null;
+      monitorCommandRef.current = null;
       setSidebarMonitor((prev) => {
         if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
         return null;
@@ -172,26 +188,45 @@ export const App = () => {
         if (!leaf.ptyId) continue;
 
         let target: string | null = null;
+        let sshCommand: string | null = null;
+        let sshConnection: SshConnection | undefined;
 
-        if (leaf.command && leaf.command.toLowerCase().includes("ssh")) {
-          target = parseSshTarget(leaf.command);
+        if (leaf.sshConnection) {
+          target = leaf.sshConnection.target;
+          sshCommand = leaf.command ?? buildSshCommandWithRemoteCmdFromConnection(
+            leaf.sshConnection,
+            leaf.sshRemoteCommand ?? "",
+            !!leaf.sshRemoteCommand,
+          );
+          sshConnection = leaf.sshConnection;
+        } else if (leaf.command && leaf.command.toLowerCase().includes("ssh")) {
+          const parsed = parseSshCommandLine(leaf.command);
+          target = parsed?.connection.target ?? parseSshTarget(leaf.command);
+          if (target) sshCommand = leaf.command;
+          sshConnection = parsed?.connection;
         }
 
         if (!target) {
           try {
             const ctx = await invoke<{ ssh_command: string | null }>("get_shell_ctx", { id: leaf.ptyId });
-            if (!cancelled && ctx.ssh_command) target = parseSshTarget(ctx.ssh_command);
+            if (!cancelled && ctx.ssh_command) {
+              const parsed = parseSshCommandLine(ctx.ssh_command);
+              target = parsed?.connection.target ?? parseSshTarget(ctx.ssh_command);
+              if (target) sshCommand = ctx.ssh_command;
+              sshConnection = parsed?.connection;
+            }
           } catch {}
         }
 
         if (cancelled) return;
 
-        if (target) {
-          if (target !== monitorTargetRef.current) {
+        if (target && sshCommand && sshConnection) {
+          if (target !== monitorTargetRef.current || sshCommand !== monitorCommandRef.current) {
             monitorTargetRef.current = target;
+            monitorCommandRef.current = sshCommand;
             setSidebarMonitor((prev) => {
               if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
-              return { monitorId: `mon-${Date.now()}`, sshTarget: target! };
+              return { monitorId: `mon-${Date.now()}`, sshTarget: target!, sshCommand: sshCommand!, sshConnection };
             });
           }
           return; // Found SSH — done
@@ -204,6 +239,7 @@ export const App = () => {
       if (hasAnyPty && monitorTargetRef.current !== null) {
         // All PTYs checked, none are SSH — clear monitor
         monitorTargetRef.current = null;
+        monitorCommandRef.current = null;
         setSidebarMonitor((prev) => {
           if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
           return null;
@@ -230,10 +266,11 @@ export const App = () => {
       const state = useWorkspaceStore.getState();
       for (const ws of state.workspaces) {
         // Find first SSH leaf with its tmuxSession (if any).
-        const findSshLeaf = (node: LayoutNode): { cmd: string; tmuxSession: string | undefined } | null => {
+        const findSshLeaf = (node: LayoutNode): { cmd: string; tmuxSession: string | undefined; sshConnection?: SshConnection } | null => {
           if (node.type === "leaf") {
-            return node.command?.toLowerCase().includes("ssh")
-              ? { cmd: node.command, tmuxSession: node.tmuxSession }
+            const parsed = parseSshCommandLine(node.command);
+            return node.sshConnection || parsed
+              ? { cmd: node.command ?? "", tmuxSession: node.tmuxSession, sshConnection: node.sshConnection ?? parsed?.connection }
               : null;
           }
           if (node.type === "split") return findSshLeaf(node.children[0]) ?? findSshLeaf(node.children[1]);
@@ -242,9 +279,9 @@ export const App = () => {
         const ssh = findSshLeaf(ws.layout);
         if (ssh) {
           if (ssh.tmuxSession) {
-            useTmuxSessionsStore.getState().attach(ws.id, ssh.cmd, ssh.tmuxSession);
+            useTmuxSessionsStore.getState().attach(ws.id, ssh.cmd, ssh.tmuxSession, ssh.sshConnection);
           }
-          autoAiSplit(ws.id, ssh.cmd);
+          autoAiSplit(ws.id, ssh.cmd, ssh.sshConnection);
         }
       }
     }
@@ -311,6 +348,7 @@ export const App = () => {
           const state = useWorkspaceStore.getState();
           const match = findLeafByPtyId(state.workspaces, ptyId);
           if (!match) return;
+          if (match.tmuxSession) return;
 
           const { workspaceId, leafId, leafCount } = match;
 
@@ -653,6 +691,7 @@ export const App = () => {
   }, [activeWs, workspaces, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser, gridView]);
 
   const handleConnectHost = useCallback(async (host: SshHost) => {
+    const sshConnection = buildSshConnection(host);
     const cmd = buildSshCommand(host);
     const target = `${host.user}@${host.host}`;
     const mode = host.persistMode ?? "auto";
@@ -662,7 +701,7 @@ export const App = () => {
     let useTmux = mode === "on";
     if (mode === "auto") {
       try {
-        const version = await invoke<string | null>("check_remote_tmux", { sshCommand: cmd });
+        const version = await invoke<string | null>("check_remote_tmux", { sshCommand: cmd, sshConnection });
         useTmux = !!version && isTmuxVersionSupported(version);
       } catch {
         useTmux = false;
@@ -670,28 +709,33 @@ export const App = () => {
     }
     const tmuxSession = useTmux ? sanitizeTmuxSessionName(`wmux-${host.host}`) : undefined;
 
-    const wsId = addWorkspace(host.name, cmd, tmuxSession);
+    const wsId = addWorkspace(host.name, cmd, tmuxSession, sshConnection);
     if (tmuxSession) {
-      useTmuxSessionsStore.getState().attach(wsId, cmd, tmuxSession);
+      useTmuxSessionsStore.getState().attach(wsId, cmd, tmuxSession, sshConnection);
     }
     const monitorId = `mon-${Date.now()}`;
     setSidebarMonitor((prev) => {
       if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
-      return { monitorId, sshTarget: target };
+      return { monitorId, sshTarget: target, sshCommand: cmd, sshConnection };
     });
     monitorTargetRef.current = target;
+    monitorCommandRef.current = cmd;
 
-    autoAiSplit(wsId, cmd, host);
+    autoAiSplit(wsId, cmd, sshConnection, host);
   }, [addWorkspace]);
 
-  const handleViewClaudeSession = useCallback((sshTarget: string, project: string, sessionId: string) => {
+  const handleViewClaudeSession = useCallback((sshTarget: string, project: string, projectPath: string | undefined, sessionId: string, sshConnection?: SshConnection) => {
     if (!activeWs || !sidebarMonitor) return;
-    useWorkspaceStore.getState().openClaudeSession(activeWs.id, activeWs.focusedLeafId, sshTarget, project, sessionId, sidebarMonitor.monitorId);
+    useWorkspaceStore.getState().openClaudeSession(activeWs.id, activeWs.focusedLeafId, sshTarget, project, projectPath, sessionId, sidebarMonitor.monitorId, sshConnection);
   }, [activeWs, sidebarMonitor]);
 
-  const handleResumeClaudeSession = useCallback((sshTarget: string, projectPath: string, sessionId: string) => {
-    const cmd = `ssh -t ${sshTarget} "cd ${projectPath} && claude --resume ${sessionId}"`;
-    addWorkspace(`Claude: ${projectPath.split("/").pop()}`, cmd);
+  const handleResumeClaudeSession = useCallback((sshCommand: string, projectPath: string, sessionId: string, sshConnection?: SshConnection) => {
+    const remote = `cd ${quotePosixShellArg(projectPath)} && claude --resume ${quotePosixShellArg(sessionId)}`;
+    const connection = sshConnection ?? parseSshCommandLine(sshCommand)?.connection;
+    const cmd = connection
+      ? buildSshCommandWithRemoteCmdFromConnection(connection, remote, true)
+      : buildSshCommandWithRemoteCmdFromBase(sshCommand, remote, true);
+    addWorkspace(`Claude: ${projectPath.split("/").pop()}`, cmd, undefined, connection, remote);
   }, [addWorkspace]);
 
   const handleCloseMonitor = useCallback(() => {

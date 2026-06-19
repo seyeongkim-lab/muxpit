@@ -1,18 +1,21 @@
-mod ipc;
 mod monitor;
+mod platform;
 mod pty;
-mod sysinfo;
+mod remote_monitor;
+mod ssh_command;
 mod tmux_cc;
 mod tmux_remote;
 
 use monitor::MonitorManager;
-use pty::{PtyManager, WmuxPtyContext};
-use std::collections::HashMap;
-use std::process::{Command, Stdio};
-use sysinfo::{
+use platform::command::silent_command;
+use platform::process::{
     collect_session_metadata, gather_workspace_info, get_listening_ports, get_shell_context,
     SessionMetadata, ShellContext, WorkspaceInfo,
 };
+use pty::{PtyManager, WmuxPtyContext};
+use ssh_command::{resolve_ssh_command, SshCommand};
+use std::collections::HashMap;
+use std::process::Stdio;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
@@ -22,6 +25,7 @@ fn spawn_pty(
     rows: u16,
     cols: u16,
     command: Option<String>,
+    command_argv: Option<Vec<String>>,
     workspace_id: Option<String>,
     surface_id: Option<String>,
 ) -> Result<u32, String> {
@@ -30,6 +34,7 @@ fn spawn_pty(
         rows,
         cols,
         command,
+        command_argv,
         WmuxPtyContext {
             workspace_id,
             surface_id,
@@ -43,7 +48,8 @@ fn spawn_pty_tmux_cc(
     state: State<'_, PtyManager>,
     rows: u16,
     cols: u16,
-    ssh_command: String,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
     session_name: String,
     workspace_id: Option<String>,
     surface_id: Option<String>,
@@ -53,6 +59,7 @@ fn spawn_pty_tmux_cc(
         rows,
         cols,
         ssh_command,
+        ssh_connection,
         session_name,
         WmuxPtyContext {
             workspace_id,
@@ -123,53 +130,9 @@ async fn get_session_metadata(
 
 #[tauri::command]
 async fn list_fonts() -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(|| list_fonts_sync())
+    tauri::async_runtime::spawn_blocking(platform::fonts::list_fonts_sync)
         .await
         .map_err(|e| format!("Task join error: {e}"))
-}
-
-#[cfg(windows)]
-fn list_fonts_sync() -> Vec<String> {
-    let mut cmd = std::process::Command::new("powershell");
-    use std::os::windows::process::CommandExt;
-    cmd.creation_flags(0x08000000);
-    let output = cmd.args([
-            "-NoProfile",
-            "-Command",
-            r#"[System.Reflection.Assembly]::LoadWithPartialName('System.Drawing') | Out-Null; (New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }"#,
-        ])
-        .output();
-
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect(),
-        _ => vec![],
-    }
-}
-
-#[cfg(unix)]
-fn list_fonts_sync() -> Vec<String> {
-    // fc-list :family outputs one family name per line
-    let output = std::process::Command::new("fc-list")
-        .args([":family"])
-        .output();
-
-    match output {
-        Ok(o) if o.status.success() => {
-            let mut fonts: Vec<String> = String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect();
-            fonts.sort();
-            fonts.dedup();
-            fonts
-        }
-        _ => vec![],
-    }
 }
 
 #[tauri::command]
@@ -177,9 +140,12 @@ fn start_monitor(
     app: AppHandle,
     state: State<'_, MonitorManager>,
     monitor_id: String,
-    ssh_target: String,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
 ) -> Result<(), String> {
-    state.start(app, monitor_id, ssh_target)
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    state.start(app, monitor_id, ssh)
 }
 
 #[tauri::command]
@@ -200,10 +166,13 @@ fn request_session_content(
 
 #[tauri::command]
 async fn check_remote_clis(
-    ssh_command: String,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
     names: Vec<String>,
 ) -> Result<HashMap<String, bool>, String> {
-    tauri::async_runtime::spawn_blocking(move || check_remote_clis_sync(&ssh_command, &names))
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || check_remote_clis_sync(&ssh, &names))
         .await
         .map_err(|e| format!("Task join error: {e}"))?
 }
@@ -211,16 +180,20 @@ async fn check_remote_clis(
 /// Returns the remote tmux version (e.g. `"3.4"`) when tmux is found on the
 /// target host and can execute `tmux -V`; otherwise `None`.
 #[tauri::command]
-async fn check_remote_tmux(ssh_command: String) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || check_remote_tmux_sync(&ssh_command))
+async fn check_remote_tmux(
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<Option<String>, String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || check_remote_tmux_sync(&ssh))
         .await
         .map_err(|e| format!("Task join error: {e}"))
 }
 
-fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
-    let (program, options, target) = tmux_remote::parse_ssh_args(ssh_command)?;
-    let mut cmd = Command::new(program);
-    for opt in &options {
+fn check_remote_tmux_sync(ssh: &SshCommand) -> Option<String> {
+    let mut cmd = silent_command(&ssh.program);
+    for opt in &ssh.options {
         cmd.arg(opt);
     }
     cmd.args([
@@ -231,14 +204,8 @@ fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
         "-o",
         "StrictHostKeyChecking=accept-new",
     ]);
-    cmd.arg(target);
+    cmd.arg(&ssh.target);
     cmd.arg("tmux -V 2>/dev/null");
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     cmd.stderr(Stdio::null());
 
@@ -257,7 +224,7 @@ fn check_remote_tmux_sync(ssh_command: &str) -> Option<String> {
 }
 
 fn check_remote_clis_sync(
-    ssh_command: &str,
+    ssh: &SshCommand,
     names: &[String],
 ) -> Result<HashMap<String, bool>, String> {
     // Result map seeded with `false` for every requested name. Callers always get a
@@ -280,13 +247,8 @@ fn check_remote_clis_sync(
         return Ok(result);
     }
 
-    // Parse the SSH command: "ssh [-p port] [-i key] user@host"
-    let Some((program, options, target)) = tmux_remote::parse_ssh_args(ssh_command) else {
-        return Ok(result);
-    };
-
-    let mut cmd = Command::new(program);
-    for opt in &options {
+    let mut cmd = silent_command(&ssh.program);
+    for opt in &ssh.options {
         cmd.arg(opt);
     }
     cmd.args([
@@ -297,7 +259,7 @@ fn check_remote_clis_sync(
         "-o",
         "StrictHostKeyChecking=accept-new",
     ]);
-    cmd.arg(target);
+    cmd.arg(&ssh.target);
 
     // One SSH invocation iterates all candidates and prints the names that resolve.
     // Outer single-quotes wrap the bash -lc payload; only ASCII-safe names land
@@ -307,12 +269,6 @@ fn check_remote_clis_sync(
         safe_names.join(" ")
     );
     cmd.arg(format!("bash -lc '{remote}'"));
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
 
     cmd.stderr(Stdio::null());
 
@@ -340,12 +296,16 @@ fn check_remote_clis_sync(
 }
 
 #[tauri::command]
-async fn push_image_to_remote(ssh_command: String, image_base64: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        push_image_to_remote_sync(&ssh_command, &image_base64)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {e}"))?
+async fn push_image_to_remote(
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    image_base64: String,
+) -> Result<String, String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "not an ssh pane".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || push_image_to_remote_sync(&ssh, &image_base64))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 /// Upload a clipboard image to the pane's SSH host and return the remote path.
@@ -353,31 +313,14 @@ async fn push_image_to_remote(ssh_command: String, image_base64: String) -> Resu
 /// only `-p`/`-i` option pairs are kept, because `-t` allocates a pty that
 /// mangles the binary stdin stream and the trailing remote-command tokens are
 /// not ssh options.
-fn push_image_to_remote_sync(ssh_command: &str, image_base64: &str) -> Result<String, String> {
+fn push_image_to_remote_sync(ssh: &SshCommand, image_base64: &str) -> Result<String, String> {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(image_base64)
         .map_err(|e| format!("invalid image data: {e}"))?;
 
-    let (program, options, target) =
-        tmux_remote::parse_ssh_args(ssh_command).ok_or_else(|| "not an ssh pane".to_string())?;
-
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let dir = "$HOME/.wmux/screenshots";
-    let file = format!("{dir}/wmux-{stamp}.png");
-
-    let mut cmd = Command::new(program);
-    let mut opts = options.iter();
-    while let Some(o) = opts.next() {
-        if o == "-p" || o == "-i" {
-            if let Some(v) = opts.next() {
-                cmd.arg(o).arg(v);
-            }
-        }
-    }
+    let mut cmd = silent_command(&ssh.program);
+    cmd.args(ssh.filtered_options(&["-p", "-i", "-J", "-F", "-o", "-l"]));
     cmd.args([
         "-o",
         "ConnectTimeout=10",
@@ -386,14 +329,12 @@ fn push_image_to_remote_sync(ssh_command: &str, image_base64: &str) -> Result<St
         "-o",
         "StrictHostKeyChecking=accept-new",
     ]);
-    cmd.arg(target);
-    cmd.arg(format!("mkdir -p {dir} && cat > {file} && echo {file}"));
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
+    cmd.arg(&ssh.target);
+    cmd.arg(
+        "umask 077; dir=\"$HOME/.wmux/screenshots\"; \
+         mkdir -p \"$dir\" && path=$(mktemp \"$dir/wmux-XXXXXX.png\") && \
+         cat > \"$path\" && chmod 600 \"$path\" && printf '%s\\n' \"$path\"",
+    );
 
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
@@ -423,37 +364,55 @@ fn push_image_to_remote_sync(ssh_command: &str, image_base64: &str) -> Result<St
 }
 
 #[tauri::command]
-async fn tmux_list_sessions(ssh_command: String) -> Result<Vec<tmux_remote::TmuxSession>, String> {
-    tauri::async_runtime::spawn_blocking(move || tmux_remote::list_sessions(&ssh_command))
+async fn tmux_list_sessions(
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<Vec<tmux_remote::TmuxSession>, String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tmux_remote::list_sessions(&ssh))
         .await
         .map_err(|e| format!("Task join error: {e}"))?
 }
 
 #[tauri::command]
 async fn tmux_switch_client(
-    ssh_command: String,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
     wrapper_session: String,
     target_session: String,
 ) -> Result<(), String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        tmux_remote::switch_client(&ssh_command, &wrapper_session, &target_session)
+        tmux_remote::switch_client(&ssh, &wrapper_session, &target_session)
     })
     .await
     .map_err(|e| format!("Task join error: {e}"))?
 }
 
 #[tauri::command]
-async fn tmux_new_session(ssh_command: String, name: Option<String>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        tmux_remote::new_session(&ssh_command, name.as_deref())
-    })
-    .await
-    .map_err(|e| format!("Task join error: {e}"))?
+async fn tmux_new_session(
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    name: Option<String>,
+) -> Result<String, String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tmux_remote::new_session(&ssh, name.as_deref()))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 #[tauri::command]
-async fn tmux_kill_session(ssh_command: String, session: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || tmux_remote::kill_session(&ssh_command, &session))
+async fn tmux_kill_session(
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    session: String,
+) -> Result<(), String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tmux_remote::kill_session(&ssh, &session))
         .await
         .map_err(|e| format!("Task join error: {e}"))?
 }
@@ -530,8 +489,8 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // Start Named Pipe IPC server
-            ipc::start_ipc_server(app.handle().clone());
+            // Start local IPC server for wmux-cli and shell hooks.
+            platform::ipc::start_ipc_server(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
