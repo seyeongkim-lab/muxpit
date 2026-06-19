@@ -567,7 +567,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   splitLeafWithCommand: (workspaceId, leafId, direction, command, aiMeta) => {
     // Intentionally does NOT inherit `tmuxSession` from the parent — callers pass a
     // full ssh command that already embeds a remote command (e.g. claude auto-split
-    // uses `ssh -t user@host "bash -lc 'claude ...'"`). The tmux wrapper in
+    // uses `ssh -t user@host "/bin/sh -lc '...'"`). The tmux wrapper in
     // `spawn_tmux_cc` appends `-t tmux new-session ...` to the ssh command, which
     // would collide with the embedded remote command. The new pane is therefore a
     // raw ssh invocation by design.

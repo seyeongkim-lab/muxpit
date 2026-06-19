@@ -13,7 +13,7 @@ import { playNotificationSound } from "../utils/notificationSound";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { type PtyExit, type PtyOutput, spawnTerminalPty } from "../utils/ptyBackend";
 import { consumePtyEventsForId, describePtyExit } from "../utils/ptyEvents";
-import { isLinuxWebKitRuntime } from "../utils/runtimePlatform";
+import { getRuntimePlatform, isLinuxWebKitRuntime } from "../utils/runtimePlatform";
 import {
   buildShellHistoryHookContext,
   shouldInjectShellHistoryHook,
@@ -25,7 +25,12 @@ import {
   type SshConnection,
 } from "../utils/sshConnection";
 import { tauriPtyBackend } from "../utils/tauriPtyBackend";
-import { decideTerminalInput } from "../utils/terminalInput";
+import { createTerminalClipboard } from "../utils/terminalClipboard";
+import { decideTerminalInput, shouldReadTerminalSelectionForInput } from "../utils/terminalInput";
+import {
+  pasteTerminalClipboard,
+  pasteTerminalPasteEvent,
+} from "../utils/terminalPaste";
 import {
   findTerminalAiKind,
   findTerminalCloneFromPtyId,
@@ -41,6 +46,7 @@ import { createTerminalSurface, type TerminalSurface } from "../components/termi
 const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
 
 const SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT = isLinuxWebKitRuntime();
+const TERMINAL_INPUT_PLATFORM = getRuntimePlatform();
 
 interface UseTerminalSessionOptions {
   workspaceId: string;
@@ -72,18 +78,6 @@ const handleTerminalOutputEvent = (event: TerminalOutputEvent, workspaceId: stri
       return;
   }
 };
-
-// Strip the "data:image/png;base64," prefix; the backend wants raw base64.
-const blobToBase64 = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      resolve(url.slice(url.indexOf(",") + 1));
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
 
 const createConfiguredSurface = (): TerminalSurface => {
   const settings = useSettingsStore.getState();
@@ -131,58 +125,39 @@ export const useTerminalSession = ({
     let spawnCommand: string | null = null;
     let spawnCommandArgv: string[] | null = null;
     let spawnSshConnection: SshConnection | null = null;
+    const clipboard = createTerminalClipboard();
 
-    // Ctrl+V entry point. A clipboard image on an SSH pane is uploaded to the
-    // remote host and its path pasted instead. Everything else falls back to
-    // plain text paste.
+    // Ctrl+V entry point. Text is preferred when the OS clipboard exposes both
+    // text and image flavors; image-only clipboards are saved locally or on the
+    // SSH host and paste the resulting path.
     const pasteClipboard = async () => {
-      let image: Blob | null = null;
-      if (spawnCommand) {
-        try {
-          for (const item of await navigator.clipboard.read()) {
-            const type = item.types.find((t) => t.startsWith("image/"));
-            if (type) {
-              image = await item.getType(type);
-              break;
-            }
-          }
-        } catch {
-          // clipboard.read() denied/unsupported -> treat as text-only clipboard
-        }
-      }
-      if (image && spawnCommand) {
-        try {
-          const remotePath = await tauriPtyBackend.pushImageToRemote({
-            sshCommand: spawnCommand,
-            sshConnection: spawnSshConnection,
-            imageBase64: await blobToBase64(image),
-          });
-          surface.paste(remotePath + " ");
-        } catch (err) {
-          console.error("[wmux] image paste failed:", err);
-          surface.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
-        }
-        return;
-      }
-      const text = await navigator.clipboard.readText().catch(() => "");
-      if (text) surface.paste(text);
+      await pasteTerminalClipboard({
+        clipboard,
+        imageStore: tauriPtyBackend,
+        surface,
+        spawnCommand,
+        spawnSshConnection,
+        platform: TERMINAL_INPUT_PLATFORM,
+      });
     };
 
     surface.attachCustomKeyEventHandler((event) => {
       const prefSt = usePrefixStore.getState();
-      const selection = event.ctrlKey && event.key === "c" ? surface.getSelection() : "";
+      const selection = shouldReadTerminalSelectionForInput(event) ? surface.getSelection() : "";
       const decision = decideTerminalInput(event, {
         prefixActive: prefSt.active,
         historyOpen: prefSt.historyOpen,
         prefixKeyMatches: matchesPrefixKey(event, useSettingsStore.getState().prefixKey),
         hasSelection: !!selection,
-      });
+      }, TERMINAL_INPUT_PLATFORM);
 
       switch (decision.kind) {
         case "allowTerminalInput":
           return true;
+        case "allowNativeClipboard":
+          return false;
         case "copySelection":
-          navigator.clipboard.writeText(selection);
+          clipboard.writeText(selection);
           surface.clearSelection();
           return false;
         case "pasteClipboard":
@@ -196,6 +171,18 @@ export const useTerminalSession = ({
 
     surface.open(containerRef.current);
     requestAnimationFrame(() => surface.fit());
+
+    const onPaste = surface.onPaste((event) => {
+      pasteTerminalPasteEvent({
+        event,
+        clipboard,
+        imageStore: tauriPtyBackend,
+        surface,
+        spawnCommand,
+        spawnSshConnection,
+        platform: TERMINAL_INPUT_PLATFORM,
+      });
+    });
 
     // Set up event listeners BEFORE spawning PTY to avoid missing output.
     // Race: the Rust reader thread starts emitting "pty-output" before the
@@ -325,6 +312,7 @@ export const useTerminalSession = ({
       unlistenExit();
       onData.dispose();
       onResize.dispose();
+      onPaste.dispose();
       surface.dispose();
     };
 
@@ -393,6 +381,7 @@ export const useTerminalSession = ({
           unlistenExit();
           onData.dispose();
           onResize.dispose();
+          onPaste.dispose();
           return;
         }
       } else {
@@ -400,6 +389,7 @@ export const useTerminalSession = ({
         unlistenExit();
         onData.dispose();
         onResize.dispose();
+        onPaste.dispose();
         return;
       }
     }
@@ -425,7 +415,7 @@ export const useTerminalSession = ({
     terminalInstances.set(leafId, {
       surface,
       ptyId,
-      cleanup: { unlistenOutput, unlistenExit, onData, onResize },
+      cleanup: { unlistenOutput, unlistenExit, onData, onResize, onPaste },
     });
 
     setPtyId(workspaceId, leafId, ptyId);
@@ -449,6 +439,7 @@ export const useTerminalSession = ({
           findTerminalAiKind(getWorkspaces(), workspaceId, leafId),
           spawnCommand,
           tmuxSession,
+          TERMINAL_INPUT_PLATFORM,
         ),
       )
     ) {

@@ -27,6 +27,7 @@ portable-pty = "0.9"
 sysinfo_crate = { package = "sysinfo", version = "=0.35.2", default-features = false, features = ["system"] }
 listeners = "0.6.0"
 wmux-platform = { path = "../crates/wmux-platform" }
+tauri-plugin-clipboard-manager = "2.3.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

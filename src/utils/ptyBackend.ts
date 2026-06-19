@@ -42,6 +42,10 @@ export interface PushImageToRemoteRequest {
   imageBase64: string;
 }
 
+export interface SaveImageLocallyRequest {
+  imageBase64: string;
+}
+
 export interface PtyBackend {
   onOutput(handler: (payload: PtyOutput) => void): Promise<() => void>;
   onExit(handler: (payload: PtyExit) => void): Promise<() => void>;
@@ -51,6 +55,7 @@ export interface PtyBackend {
   resize(id: number, rows: number, cols: number): Promise<void>;
   kill(id: number): Promise<void>;
   getShellContext(id: number): Promise<ShellContext>;
+  saveImageLocally(request: SaveImageLocallyRequest): Promise<string>;
   pushImageToRemote(request: PushImageToRemoteRequest): Promise<string>;
 }
 

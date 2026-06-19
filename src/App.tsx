@@ -40,13 +40,17 @@ import {
 import { shouldShowNotificationForTarget } from "./utils/notificationRouting";
 import { playNotificationSound } from "./utils/notificationSound";
 import { matchesPrefixKey } from "./utils/prefixKey";
+import { getRuntimePlatform } from "./utils/runtimePlatform";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
+import { decideAppShortcut } from "./utils/appShortcuts";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
   parseSshCommandLine,
   type SshConnection,
 } from "./utils/sshConnection";
+
+const APP_SHORTCUT_PLATFORM = getRuntimePlatform();
 
 const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
   if (node.type === "leaf") return node.id === id ? node : null;
@@ -617,75 +621,56 @@ export const App = () => {
 
       if (!activeWs) return;
 
-      // Ctrl+Shift+G: toggle grid / single view mode
-      if (e.ctrlKey && e.shiftKey && e.key === "G") {
+      const shortcut = decideAppShortcut(e, APP_SHORTCUT_PLATFORM);
+      if (shortcut.kind !== "none") {
         e.preventDefault();
-        setGridView((prev) => !prev);
-        return;
-      }
-
-      // Ctrl+Shift+D: split vertical
-      if (e.ctrlKey && e.shiftKey && e.key === "D") {
-        e.preventDefault();
-        splitLeaf(activeWs.id, activeWs.focusedLeafId, "horizontal");
-      }
-      // Ctrl+Shift+E: split horizontal
-      if (e.ctrlKey && e.shiftKey && e.key === "E") {
-        e.preventDefault();
-        splitLeaf(activeWs.id, activeWs.focusedLeafId, "vertical");
-      }
-      // Ctrl+Shift+B: open browser pane
-      if (e.ctrlKey && e.shiftKey && e.key === "B") {
-        e.preventDefault();
-        openBrowser(activeWs.id, activeWs.focusedLeafId, "http://localhost:3000");
-      }
-      // Ctrl+Shift+W: close focused pane
-      if (e.ctrlKey && e.shiftKey && e.key === "W") {
-        e.preventDefault();
-        const leaves = collectLeafIds(activeWs.layout);
-        if (leaves.length > 1) {
-          destroyTerminal(activeWs.focusedLeafId);
-          closeLeaf(activeWs.id, activeWs.focusedLeafId);
+        switch (shortcut.kind) {
+          case "toggleGrid":
+            setGridView((prev) => !prev);
+            return;
+          case "splitHorizontal":
+            splitLeaf(activeWs.id, activeWs.focusedLeafId, "horizontal");
+            return;
+          case "splitVertical":
+            splitLeaf(activeWs.id, activeWs.focusedLeafId, "vertical");
+            return;
+          case "openBrowser":
+            openBrowser(activeWs.id, activeWs.focusedLeafId, "http://localhost:3000");
+            return;
+          case "closePane": {
+            const leaves = collectLeafIds(activeWs.layout);
+            if (leaves.length > 1) {
+              destroyTerminal(activeWs.focusedLeafId);
+              closeLeaf(activeWs.id, activeWs.focusedLeafId);
+            }
+            return;
+          }
+          case "newWorkspace":
+            addWorkspace();
+            return;
+          case "closeWorkspace":
+            if (workspaces.length > 1) {
+              const leaves = collectLeafIds(activeWs.layout);
+              destroyAllTerminals(leaves);
+              removeWorkspace(activeWs.id);
+            }
+            return;
+          case "toggleNotifications":
+            useNotificationStore.getState().togglePanel();
+            return;
+          case "toggleSettings":
+            setSettingsOpen((prev) => !prev);
+            return;
+          case "increaseFontSize":
+            useSettingsStore.getState().increaseFontSize();
+            return;
+          case "decreaseFontSize":
+            useSettingsStore.getState().decreaseFontSize();
+            return;
+          case "resetFontSize":
+            useSettingsStore.getState().setFontSize(14);
+            return;
         }
-      }
-      // Ctrl+Shift+T: new workspace
-      if (e.ctrlKey && e.shiftKey && e.key === "T") {
-        e.preventDefault();
-        addWorkspace();
-      }
-      // Ctrl+Shift+X: close workspace
-      if (e.ctrlKey && e.shiftKey && e.key === "X") {
-        e.preventDefault();
-        if (workspaces.length > 1) {
-          const leaves = collectLeafIds(activeWs.layout);
-          destroyAllTerminals(leaves);
-          removeWorkspace(activeWs.id);
-        }
-      }
-      // Ctrl+Shift+I: toggle notification panel
-      if (e.ctrlKey && e.shiftKey && e.key === "I") {
-        e.preventDefault();
-        useNotificationStore.getState().togglePanel();
-      }
-      // Ctrl+,: toggle settings panel
-      if (e.ctrlKey && !e.shiftKey && e.key === ",") {
-        e.preventDefault();
-        setSettingsOpen((prev) => !prev);
-      }
-      // Ctrl+=: increase font size
-      if (e.ctrlKey && !e.shiftKey && (e.key === "=" || e.key === "+")) {
-        e.preventDefault();
-        useSettingsStore.getState().increaseFontSize();
-      }
-      // Ctrl+-: decrease font size
-      if (e.ctrlKey && !e.shiftKey && e.key === "-") {
-        e.preventDefault();
-        useSettingsStore.getState().decreaseFontSize();
-      }
-      // Ctrl+0: reset font size
-      if (e.ctrlKey && !e.shiftKey && e.key === "0") {
-        e.preventDefault();
-        useSettingsStore.getState().setFontSize(14);
       }
     };
 

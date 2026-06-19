@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   decideTerminalInput,
+  getTerminalClipboardAction,
   isTerminalCompositionKeyEvent,
   isTerminalTextInputData,
+  shouldReadTerminalSelectionForInput,
   shouldClearTerminalInputBuffer,
   shouldScheduleTerminalInputBufferCleanup,
   type TerminalInputState,
@@ -15,6 +17,7 @@ const baseEvent = {
   key: "a",
   ctrlKey: false,
   shiftKey: false,
+  altKey: false,
   metaKey: false,
 };
 
@@ -26,20 +29,20 @@ const baseState: TerminalInputState = {
 };
 
 test("terminal input policy allows ordinary keys", () => {
-  assert.deepEqual(decideTerminalInput(baseEvent, baseState), {
+  assert.deepEqual(decideTerminalInput(baseEvent, baseState, "linux"), {
     kind: "allowTerminalInput",
   });
 });
 
 test("terminal input policy blocks app-level shortcut keys", () => {
   assert.deepEqual(
-    decideTerminalInput({ ...baseEvent, ctrlKey: true, shiftKey: true }, baseState),
+    decideTerminalInput({ ...baseEvent, ctrlKey: true, shiftKey: true }, baseState, "linux"),
     { kind: "blockTerminalInput" },
   );
-  assert.deepEqual(decideTerminalInput(baseEvent, { ...baseState, prefixActive: true }), {
+  assert.deepEqual(decideTerminalInput(baseEvent, { ...baseState, prefixActive: true }, "linux"), {
     kind: "blockTerminalInput",
   });
-  assert.deepEqual(decideTerminalInput(baseEvent, { ...baseState, prefixKeyMatches: true }), {
+  assert.deepEqual(decideTerminalInput(baseEvent, { ...baseState, prefixKeyMatches: true }, "linux"), {
     kind: "blockTerminalInput",
   });
 });
@@ -56,7 +59,7 @@ test("terminal input policy lets IME composition reach xterm", () => {
         ...baseState,
         prefixActive: true,
         prefixKeyMatches: true,
-      }),
+      }, "linux"),
       { kind: "allowTerminalInput" },
     );
   }
@@ -138,17 +141,92 @@ test("terminal input buffer cleanup preserves active IME composition", () => {
   );
 });
 
-test("terminal input policy maps copy and paste overrides", () => {
+test("terminal input policy maps Linux terminal clipboard shortcuts", () => {
   assert.deepEqual(
-    decideTerminalInput({ ...baseEvent, key: "c", ctrlKey: true }, { ...baseState, hasSelection: true }),
-    { kind: "copySelection" },
-  );
-  assert.deepEqual(
-    decideTerminalInput({ ...baseEvent, key: "c", ctrlKey: true }, baseState),
+    decideTerminalInput({ ...baseEvent, key: "c", ctrlKey: true }, { ...baseState, hasSelection: true }, "linux"),
     { kind: "allowTerminalInput" },
   );
   assert.deepEqual(
-    decideTerminalInput({ ...baseEvent, key: "v", ctrlKey: true }, baseState),
+    decideTerminalInput(
+      { ...baseEvent, key: "C", ctrlKey: true, shiftKey: true },
+      { ...baseState, hasSelection: true },
+      "linux",
+    ),
+    { kind: "copySelection" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "C", ctrlKey: true, shiftKey: true }, baseState, "linux"),
+    { kind: "blockTerminalInput" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "v", ctrlKey: true }, baseState, "linux"),
+    { kind: "allowTerminalInput" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "V", ctrlKey: true, shiftKey: true }, baseState, "linux"),
+    { kind: "allowNativeClipboard" },
+  );
+});
+
+test("terminal input policy maps macOS command clipboard shortcuts", () => {
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "c", metaKey: true }, baseState, "macos"),
+    { kind: "allowNativeClipboard" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "v", metaKey: true }, baseState, "macos"),
+    { kind: "allowNativeClipboard" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "c", ctrlKey: true }, { ...baseState, hasSelection: true }, "macos"),
+    { kind: "allowTerminalInput" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "v", ctrlKey: true }, baseState, "macos"),
+    { kind: "allowTerminalInput" },
+  );
+});
+
+test("terminal input policy maps Windows clipboard shortcuts", () => {
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "c", ctrlKey: true }, { ...baseState, hasSelection: true }, "windows"),
+    { kind: "copySelection" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "c", ctrlKey: true }, baseState, "windows"),
+    { kind: "allowTerminalInput" },
+  );
+  assert.deepEqual(
+    decideTerminalInput(
+      { ...baseEvent, key: "C", ctrlKey: true, shiftKey: true },
+      { ...baseState, hasSelection: true },
+      "windows",
+    ),
+    { kind: "copySelection" },
+  );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "v", ctrlKey: true }, baseState, "windows"),
     { kind: "pasteClipboard" },
   );
+  assert.deepEqual(
+    decideTerminalInput({ ...baseEvent, key: "V", ctrlKey: true, shiftKey: true }, baseState, "windows"),
+    { kind: "allowNativeClipboard" },
+  );
+});
+
+test("terminal clipboard helpers expose platform actions", () => {
+  assert.equal(
+    getTerminalClipboardAction(
+      { ...baseEvent, key: "C", ctrlKey: true, shiftKey: true },
+      { hasSelection: true },
+      "linux",
+    ),
+    "copySelection",
+  );
+  assert.equal(
+    getTerminalClipboardAction({ ...baseEvent, key: "v", metaKey: true }, { hasSelection: false }, "macos"),
+    "allowNativeClipboard",
+  );
+  assert.equal(shouldReadTerminalSelectionForInput({ ...baseEvent, key: "C", ctrlKey: true, shiftKey: true }), true);
+  assert.equal(shouldReadTerminalSelectionForInput({ ...baseEvent, key: "v", ctrlKey: true }), false);
 });

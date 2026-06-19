@@ -5,6 +5,7 @@ import type {
   PtyExit,
   PtyOutput,
   PushImageToRemoteRequest,
+  SaveImageLocallyRequest,
   ShellContext,
   SpawnPtyRequest,
   SpawnTmuxCcRequest,
@@ -36,6 +37,10 @@ export const tauriPtyBackend: PtyBackend = {
   resize: (id, rows, cols) => invoke("resize_pty", { id, rows, cols }),
   kill: (id) => invoke("kill_pty", { id }),
   getShellContext: (id) => invoke<ShellContext>("get_shell_ctx", { id }),
+  saveImageLocally: (request: SaveImageLocallyRequest) =>
+    invoke<string>("save_image_locally", {
+      imageBase64: request.imageBase64,
+    }),
   pushImageToRemote: (request: PushImageToRemoteRequest) =>
     invoke<string>("push_image_to_remote", {
       sshCommand: request.sshCommand,
