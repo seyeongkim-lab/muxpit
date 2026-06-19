@@ -13,7 +13,7 @@ import { playNotificationSound } from "../utils/notificationSound";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { type PtyExit, type PtyOutput, spawnTerminalPty } from "../utils/ptyBackend";
 import { consumePtyEventsForId, describePtyExit } from "../utils/ptyEvents";
-import { isLinuxWebKitRuntime } from "../utils/runtimePlatform";
+import { getRuntimePlatform, isLinuxWebKitRuntime } from "../utils/runtimePlatform";
 import {
   buildShellHistoryHookContext,
   shouldInjectShellHistoryHook,
@@ -25,7 +25,7 @@ import {
   type SshConnection,
 } from "../utils/sshConnection";
 import { tauriPtyBackend } from "../utils/tauriPtyBackend";
-import { decideTerminalInput } from "../utils/terminalInput";
+import { decideTerminalInput, shouldReadTerminalSelectionForInput } from "../utils/terminalInput";
 import {
   findTerminalAiKind,
   findTerminalCloneFromPtyId,
@@ -41,6 +41,7 @@ import { createTerminalSurface, type TerminalSurface } from "../components/termi
 const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
 
 const SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT = isLinuxWebKitRuntime();
+const TERMINAL_INPUT_PLATFORM = getRuntimePlatform();
 
 interface UseTerminalSessionOptions {
   workspaceId: string;
@@ -170,17 +171,19 @@ export const useTerminalSession = ({
 
     surface.attachCustomKeyEventHandler((event) => {
       const prefSt = usePrefixStore.getState();
-      const selection = event.ctrlKey && event.key === "c" ? surface.getSelection() : "";
+      const selection = shouldReadTerminalSelectionForInput(event) ? surface.getSelection() : "";
       const decision = decideTerminalInput(event, {
         prefixActive: prefSt.active,
         historyOpen: prefSt.historyOpen,
         prefixKeyMatches: matchesPrefixKey(event, useSettingsStore.getState().prefixKey),
         hasSelection: !!selection,
-      });
+      }, TERMINAL_INPUT_PLATFORM);
 
       switch (decision.kind) {
         case "allowTerminalInput":
           return true;
+        case "allowNativeClipboard":
+          return false;
         case "copySelection":
           navigator.clipboard.writeText(selection);
           surface.clearSelection();
