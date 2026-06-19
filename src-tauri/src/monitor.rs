@@ -134,16 +134,7 @@ impl MonitorManager {
         request_id: String,
     ) -> Result<(), String> {
         let sessions = self.sessions.lock().unwrap();
-        let session = if let Some(mid) = monitor_id {
-            sessions
-                .get(mid)
-                .ok_or_else(|| format!("Monitor session not found: {mid}"))?
-        } else {
-            sessions
-                .values()
-                .next()
-                .ok_or_else(|| "No active monitor session".to_string())?
-        };
+        let session = select_fetch_session(&sessions, monitor_id)?;
         session
             .pending_fetches
             .lock()
@@ -168,6 +159,28 @@ impl MonitorManager {
 
 unsafe impl Send for MonitorManager {}
 unsafe impl Sync for MonitorManager {}
+
+fn select_fetch_session<'a>(
+    sessions: &'a HashMap<String, MonitorSession>,
+    monitor_id: Option<&str>,
+) -> Result<&'a MonitorSession, String> {
+    if let Some(mid) = monitor_id {
+        if let Some(session) = sessions.get(mid) {
+            return Ok(session);
+        }
+        if sessions.len() == 1 {
+            return sessions
+                .values()
+                .next()
+                .ok_or_else(|| "No active monitor session".to_string());
+        }
+        return Err(format!("Monitor session not found: {mid}"));
+    }
+    sessions
+        .values()
+        .next()
+        .ok_or_else(|| "No active monitor session".to_string())
+}
 
 /// Run a persistent SSH session, sending collection commands every 1 second
 fn run_persistent_monitor(
@@ -469,5 +482,34 @@ fn error_data(monitor_id: &str, msg: &str) -> MonitorData {
         net: None,
         disks: vec![],
         claude_sessions: vec![],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_session() -> MonitorSession {
+        MonitorSession {
+            stop_flag: Arc::new(Mutex::new(false)),
+            pending_fetches: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+
+    #[test]
+    fn stale_monitor_id_falls_back_when_only_one_session_is_active() {
+        let sessions = HashMap::from([("fresh".to_string(), test_session())]);
+
+        assert!(select_fetch_session(&sessions, Some("stale")).is_ok());
+    }
+
+    #[test]
+    fn stale_monitor_id_is_rejected_when_fallback_would_be_ambiguous() {
+        let sessions = HashMap::from([
+            ("one".to_string(), test_session()),
+            ("two".to_string(), test_session()),
+        ]);
+
+        assert!(select_fetch_session(&sessions, Some("stale")).is_err());
     }
 }

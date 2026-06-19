@@ -2,10 +2,10 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "../stores/workspace";
+import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
   parseSshCommandLine,
-  quotePosixShellArg,
   type SshConnection,
 } from "../utils/sshConnection";
 
@@ -81,12 +81,6 @@ const parseJournalEntries = (raw: string | string[]): MessageEntry[] => {
   return messages;
 };
 
-const decodeClaudeProjectPath = (project: string): string => {
-  if (project.startsWith("/")) return project;
-  const decoded = project.replace(/-/g, "/");
-  return decoded ? `/${decoded}` : project;
-};
-
 export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, projectPath, sessionId, monitorId }: ClaudeSessionPaneProps) => {
   const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,8 +148,7 @@ export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, proje
 
   const handleResume = useCallback(() => {
     const connection = sshConnection ?? parseSshCommandLine(`ssh ${sshTarget}`)?.connection;
-    const cwd = projectPath ?? decodeClaudeProjectPath(project);
-    const remote = `cd ${quotePosixShellArg(cwd)} && claude --resume ${quotePosixShellArg(sessionId)}`;
+    const remote = buildClaudeResumeRemoteCommand(projectPath, sessionId);
     const cmd = connection
       ? buildSshCommandWithRemoteCmdFromConnection(connection, remote, true)
       : undefined;

@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import { useTmuxSessionsStore } from "./tmuxSessions";
 import { getRuntimePlatform, type RuntimePlatform } from "../utils/runtimePlatform";
+import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
   parseSshCommandLine,
-  quotePosixShellArg,
   sshConnectionToCommandLine,
   type SshConnection,
 } from "../utils/sshConnection";
@@ -245,12 +245,6 @@ const inferAiMetaFromCommand = (
   const km = (parsed.remoteCommand ?? command).match(AI_KIND_PATTERN);
   if (!km) return undefined;
   return { aiKind: km[1] as AiKind, aiSshTarget: parsed.connection.target };
-};
-
-const decodeClaudeProjectPath = (project: string): string => {
-  if (project.startsWith("/")) return project;
-  const decoded = project.replace(/-/g, "/");
-  return decoded ? `/${decoded}` : project;
 };
 
 // Helper: find and replace a node in the tree
@@ -733,8 +727,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         if (node.type === "claudeSession") {
           const fallback = parseSshCommandLine(`ssh ${node.sshTarget}`);
           const sshConnection = restorePlatformBoundCommands ? node.sshConnection ?? fallback?.connection : undefined;
-          const projectPath = node.projectPath ?? decodeClaudeProjectPath(node.project);
-          const remote = `cd ${quotePosixShellArg(projectPath)} && claude --resume ${quotePosixShellArg(node.sessionId)}`;
+          const remote = buildClaudeResumeRemoteCommand(node.projectPath, node.sessionId);
           return {
             type: "leaf",
             id: node.id,

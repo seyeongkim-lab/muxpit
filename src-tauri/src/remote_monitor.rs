@@ -49,7 +49,7 @@ impl CpuSnapshot {
 
 pub fn build_claude_script() -> String {
     format!(
-        r#"if [ -d "$HOME/.claude/projects" ]; then for dir in "$HOME/.claude/projects"/*/; do pdir=$(basename "$dir"); echo "===CPROJ===$pdir"; ls -t "$dir"*.jsonl 2>/dev/null | head -3 | while read f; do sid=$(basename "$f" .jsonl); lines=$(wc -l < "$f" 2>/dev/null | tr -d ' '); first=$(head -1 "$f" 2>/dev/null); last=$(tail -1 "$f" 2>/dev/null); echo "CSESS:$sid:$lines:$first:$last"; done; done; fi; echo '{END}'"#,
+        r#"if [ -d "$HOME/.claude/projects" ]; then for dir in "$HOME/.claude/projects"/*/; do pdir=$(basename "$dir"); echo "===CPROJ===$pdir"; ls -t "$dir"*.jsonl 2>/dev/null | head -3 | while read f; do sid=$(basename "$f" .jsonl); lines=$(wc -l < "$f" 2>/dev/null | tr -d ' '); first=$(head -1 "$f" 2>/dev/null); last=$(tail -1 "$f" 2>/dev/null); cwd=$(printf '%s\n%s\n' "$last" "$first" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1); printf 'CSESS\t%s\t%s\t%s\t%s\t%s\n' "$sid" "$lines" "$cwd" "$first" "$last"; done; done; fi; echo '{END}'"#,
         END = CLAUDE_END_MARKER,
     )
 }
@@ -596,6 +596,10 @@ pub fn parse_claude_sessions(text: &str) -> Vec<ClaudeSession> {
         let line = line.trim();
         if line.starts_with("===CPROJ===") {
             current_project = line.trim_start_matches("===CPROJ===").to_string();
+        } else if line.starts_with("CSESS\t") {
+            if let Some(session) = parse_claude_tab_session(line, &current_project) {
+                sessions.push(session);
+            }
         } else if line.starts_with("CSESS:") {
             let parts: Vec<&str> = line.splitn(5, ':').collect();
             if parts.len() >= 3 {
@@ -627,6 +631,50 @@ pub fn parse_claude_sessions(text: &str) -> Vec<ClaudeSession> {
         }
     }
     sessions
+}
+
+fn parse_claude_tab_session(line: &str, current_project: &str) -> Option<ClaudeSession> {
+    let row = line.strip_prefix("CSESS\t")?;
+    let parts: Vec<&str> = row.splitn(5, '\t').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let session_id = parts[0].to_string();
+    let message_count: u32 = parts[1].parse().unwrap_or(0);
+    let cwd = parts
+        .get(2)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            parts
+                .get(3)
+                .and_then(|json| extract_json_string_field(json, "cwd"))
+        })
+        .or_else(|| {
+            parts
+                .get(4)
+                .and_then(|json| extract_json_string_field(json, "cwd"))
+        });
+    let first_json = parts.get(3).copied().unwrap_or("");
+    let last_json = parts.get(4).copied().unwrap_or("");
+
+    Some(ClaudeSession {
+        project: current_project.to_string(),
+        project_path: cwd.unwrap_or_else(|| decode_project_path(current_project)),
+        session_id,
+        started_at: extract_json_string_field(first_json, "timestamp")
+            .or_else(|| extract_timestamp(first_json)),
+        last_activity: extract_json_string_field(last_json, "timestamp")
+            .or_else(|| extract_timestamp(last_json)),
+        message_count,
+    })
+}
+
+fn extract_json_string_field(json_str: &str, field: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    value.get(field)?.as_str().map(|value| value.to_string())
 }
 
 fn extract_timestamp(json_str: &str) -> Option<String> {
@@ -712,5 +760,21 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].project_path, "/home/me/app");
         assert_eq!(sessions[0].message_count, 7);
+    }
+
+    #[test]
+    fn parse_tab_claude_session_rows_prefers_reported_cwd() {
+        let rows = "===CPROJ===home-me-my-app\nCSESS\ts1\t7\t/home/me/my-app\t{\"timestamp\":\"2026-01-01T00:00:00Z\",\"cwd\":\"/ignored\"}\t{\"timestamp\":\"2026-01-01T00:01:00Z\"}\n";
+        let sessions = parse_claude_sessions(rows);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].project_path, "/home/me/my-app");
+        assert_eq!(
+            sessions[0].started_at.as_deref(),
+            Some("2026-01-01T00:00:00Z")
+        );
+        assert_eq!(
+            sessions[0].last_activity.as_deref(),
+            Some("2026-01-01T00:01:00Z")
+        );
     }
 }
