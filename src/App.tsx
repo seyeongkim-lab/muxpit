@@ -220,7 +220,7 @@ export const App = () => {
 
         if (cancelled) return;
 
-        if (target && sshCommand) {
+        if (target && sshCommand && sshConnection) {
           if (target !== monitorTargetRef.current || sshCommand !== monitorCommandRef.current) {
             monitorTargetRef.current = target;
             monitorCommandRef.current = sshCommand;

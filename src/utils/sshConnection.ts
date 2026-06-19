@@ -35,6 +35,7 @@ export const buildCommandLine = (parts: string[]): string =>
   parts.map(quoteCommandArg).join(" ");
 
 const SSH_OPTIONS_WITH_VALUE = new Set([
+  "-B",
   "-b",
   "-c",
   "-D",
@@ -66,6 +67,18 @@ const SSH_EXECUTION_MODE_OPTIONS: Record<string, SshTtyMode> = {
 const isWindowsRuntime = (): boolean =>
   typeof navigator !== "undefined" && /^win/i.test(navigator.platform ?? "");
 
+const isSshProgram = (program: string): boolean => {
+  const normalized = program.replace(/\\/g, "/").toLowerCase();
+  return normalized === "ssh" || normalized.endsWith("/ssh") || normalized.endsWith("/ssh.exe");
+};
+
+const splitAttachedOptionValue = (option: string): [string, string] | null => {
+  if (option.length <= 2 || !option.startsWith("-") || option.startsWith("--")) return null;
+  const shortOption = option.slice(0, 2);
+  if (!SSH_OPTIONS_WITH_VALUE.has(shortOption)) return null;
+  return [shortOption, option.slice(2)];
+};
+
 export const splitCommandLine = (
   input: string,
   options: { windows?: boolean } = {},
@@ -79,6 +92,11 @@ export const splitCommandLine = (
   for (let i = 0; i < input.length; i += 1) {
     const ch = input[i];
     if (ch === "'" && !inDouble) {
+      if (windows && inSingle && input[i + 1] === "'") {
+        current += "'";
+        i += 1;
+        continue;
+      }
       inSingle = !inSingle;
       continue;
     }
@@ -114,7 +132,7 @@ export const splitCommandLine = (
 export const parseSshCommandLine = (command: string | undefined): SshCommandLine | null => {
   if (!command) return null;
   const parts = splitCommandLine(command);
-  if (parts.length < 2 || !/ssh(?:\.exe)?$/i.test(parts[0])) return null;
+  if (parts.length < 2 || !isSshProgram(parts[0])) return null;
 
   const options: string[] = [];
   let targetIndex = -1;
@@ -128,6 +146,11 @@ export const parseSshCommandLine = (command: string | undefined): SshCommandLine
     const executionMode = SSH_EXECUTION_MODE_OPTIONS[part];
     if (executionMode) {
       ttyMode = executionMode;
+      continue;
+    }
+    const attached = splitAttachedOptionValue(part);
+    if (attached) {
+      options.push(attached[0], attached[1]);
       continue;
     }
     options.push(part);

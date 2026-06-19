@@ -39,7 +39,14 @@ pub fn split_command_line_for_platform(input: &str, windows: bool) -> Vec<String
 
     while let Some(ch) = chars.next() {
         match ch {
-            '\'' if !in_double => in_single = !in_single,
+            '\'' if !in_double => {
+                if windows && in_single && chars.peek() == Some(&'\'') {
+                    current.push('\'');
+                    chars.next();
+                } else {
+                    in_single = !in_single;
+                }
+            }
             '"' if !in_single => in_double = !in_double,
             '\\' if !in_single && !windows => {
                 if let Some(&next) = chars.peek() {
@@ -107,6 +114,12 @@ pub fn parse_ssh_command(ssh_command: &str) -> Option<SshCommand> {
             i += 1;
             continue;
         }
+        if let Some((option, value)) = split_attached_option_value(part) {
+            options.push(option.to_string());
+            options.push(value.to_string());
+            i += 1;
+            continue;
+        }
         options.push(part.clone());
         if option_takes_value(part) && i + 1 < parts.len() {
             i += 1;
@@ -132,6 +145,14 @@ fn execution_mode_option(option: &str) -> Option<SshTtyMode> {
     }
 }
 
+fn split_attached_option_value(option: &str) -> Option<(&str, &str)> {
+    if option.len() <= 2 || !option.starts_with('-') || option.starts_with("--") {
+        return None;
+    }
+    let short = &option[..2];
+    option_takes_value(short).then_some((short, &option[2..]))
+}
+
 fn is_ssh_program(program: &str) -> bool {
     let normalized = program.replace('\\', "/").to_ascii_lowercase();
     normalized == "ssh" || normalized.ends_with("/ssh") || normalized.ends_with("/ssh.exe")
@@ -140,7 +161,8 @@ fn is_ssh_program(program: &str) -> bool {
 fn option_takes_value(option: &str) -> bool {
     matches!(
         option,
-        "-b" | "-c"
+        "-B" | "-b"
+            | "-c"
             | "-D"
             | "-E"
             | "-e"
@@ -243,6 +265,16 @@ mod tests {
     }
 
     #[test]
+    fn split_preserves_windows_doubled_single_quote() {
+        let parts = split_command_line_for_platform(
+            r"ssh -i 'C:\Users\O''Neil\.ssh\id_ed25519' me@host",
+            true,
+        );
+        assert_eq!(parts[2], r"C:\Users\O'Neil\.ssh\id_ed25519");
+        assert_eq!(parts[3], "me@host");
+    }
+
+    #[test]
     fn parse_drops_remote_command_after_target() {
         let parsed = parse_ssh_command("ssh -t -p 2222 -i '/keys/a b' me@host 'echo hi'").unwrap();
         assert_eq!(parsed.program, "ssh");
@@ -255,6 +287,16 @@ mod tests {
     fn parse_accepts_host_alias_and_l_user() {
         let parsed = parse_ssh_command("ssh -l me prod-alias").unwrap();
         assert_eq!(parsed.options, vec!["-l", "me"]);
+        assert_eq!(parsed.target, "prod-alias");
+    }
+
+    #[test]
+    fn parse_value_options_before_host_aliases() {
+        let parsed = parse_ssh_command("ssh -B en0 -p2222 -Jjump prod-alias uptime").unwrap();
+        assert_eq!(
+            parsed.options,
+            vec!["-B", "en0", "-p", "2222", "-J", "jump"]
+        );
         assert_eq!(parsed.target, "prod-alias");
     }
 

@@ -98,6 +98,9 @@ export const useAiCliStore = create<AiCliState>((set, get) => ({
   probe: async (sshTarget, sshCommand, sshConnection) => {
     const state = get();
     if (state.availableByHost[sshTarget] || state.probing.has(sshTarget)) return;
+    if (!sshConnection && !parseSshCommandLine(sshCommand)) {
+      return;
+    }
     set((s) => {
       const next = new Set(s.probing);
       next.add(sshTarget);
