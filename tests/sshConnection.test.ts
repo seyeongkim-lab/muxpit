@@ -16,6 +16,21 @@ test("windows command splitting preserves UNC identity paths", () => {
   assert.equal(parts[2], String.raw`\\server\share\id_ed25519`);
 });
 
+test("command splitting can be driven by runtime platform", () => {
+  assert.equal(
+    splitCommandLine(String.raw`ssh -i C:\Users\one\.ssh\id_ed25519 me@host`, {
+      platform: "windows",
+    })[2],
+    String.raw`C:\Users\one\.ssh\id_ed25519`,
+  );
+  assert.equal(
+    splitCommandLine(String.raw`ssh me@host echo\ hello`, {
+      platform: "linux",
+    })[2],
+    "echo hello",
+  );
+});
+
 test("windows command splitting preserves doubled PowerShell single quotes", () => {
   const parts = splitCommandLine(String.raw`ssh -i 'C:\Users\O''Neil\.ssh\id_ed25519' me@host`, {
     windows: true,
@@ -28,6 +43,15 @@ test("SSH parser only accepts the ssh executable name", () => {
   assert.equal(parseSshCommandLine("notssh me@host"), null);
   assert.equal(parseSshCommandLine("sshpass -p secret ssh me@host"), null);
   assert.equal(parseSshCommandLine(String.raw`C:\Windows\System32\OpenSSH\ssh.exe me@host`)?.connection.target, "me@host");
+});
+
+test("SSH parser uses injected platform when splitting command lines", () => {
+  const parsed = parseSshCommandLine(String.raw`ssh -i C:\Users\one\.ssh\id_ed25519 me@host`, {
+    platform: "windows",
+  });
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.connection.options, ["-i", String.raw`C:\Users\one\.ssh\id_ed25519`]);
 });
 
 test("SSH parser handles value options before host aliases", () => {
