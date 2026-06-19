@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use super::command::silent_command;
 
@@ -338,7 +340,7 @@ fn collect_descendants(pid: u32, children_by_parent: &HashMap<u32, Vec<u32>>) ->
 }
 
 pub fn collect_session_metadata(pid: u32, fallback_cwd: Option<String>) -> SessionMetadata {
-    let system = new_process_system();
+    let system = shared_process_system();
     let descendant_pids = collect_sysinfo_descendant_pids(&system, pid);
     let representative_pid = pick_representative_pid(&system, &descendant_pids, pid);
     let representative = representative_pid.and_then(|p| system.process(p));
@@ -394,26 +396,47 @@ fn new_process_system() -> sysinfo_crate::System {
     system
 }
 
-fn collect_sysinfo_descendant_pids(system: &sysinfo_crate::System, root: u32) -> HashSet<u32> {
-    let mut pids = HashSet::from([root]);
-    loop {
-        let mut changed = false;
-        for (pid, process) in system.processes() {
-            let child = pid.as_u32();
-            if pids.contains(&child) {
-                continue;
-            }
-            if process
-                .parent()
-                .map(|parent| pids.contains(&parent.as_u32()))
-                .unwrap_or(false)
-            {
-                pids.insert(child);
-                changed = true;
-            }
+/// Returns a process snapshot reused across calls within a short TTL. The
+/// metadata poller fires one `get_session_metadata` per workspace in parallel
+/// every few seconds; without this each call did its own full process refresh.
+/// Concurrent callers in the same tick now share a single refresh.
+fn shared_process_system() -> Arc<sysinfo_crate::System> {
+    const TTL: Duration = Duration::from_millis(200);
+    static CACHE: Mutex<Option<(Instant, Arc<sysinfo_crate::System>)>> = Mutex::new(None);
+
+    let mut guard = CACHE.lock().unwrap();
+    if let Some((at, sys)) = guard.as_ref() {
+        if at.elapsed() < TTL {
+            return Arc::clone(sys);
         }
-        if !changed {
-            break;
+    }
+    let sys = Arc::new(new_process_system());
+    *guard = Some((Instant::now(), Arc::clone(&sys)));
+    sys
+}
+
+fn collect_sysinfo_descendant_pids(system: &sysinfo_crate::System, root: u32) -> HashSet<u32> {
+    // Build a parent -> children index once, then walk it from the root. The
+    // previous fixed-point loop re-scanned every process on each pass (O(n²)).
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (pid, process) in system.processes() {
+        if let Some(parent) = process.parent() {
+            children
+                .entry(parent.as_u32())
+                .or_default()
+                .push(pid.as_u32());
+        }
+    }
+
+    let mut pids = HashSet::from([root]);
+    let mut queue = VecDeque::from([root]);
+    while let Some(current) = queue.pop_front() {
+        if let Some(kids) = children.get(&current) {
+            for &child in kids {
+                if pids.insert(child) {
+                    queue.push_back(child);
+                }
+            }
         }
     }
     pids
