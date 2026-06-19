@@ -8,7 +8,7 @@ import {
   shouldClearTerminalInputBuffer,
   shouldScheduleTerminalInputBufferCleanup,
 } from "../utils/terminalInput";
-import { getPastedImage } from "../utils/terminalPaste";
+import { getPastedImage, getPastedText } from "../utils/terminalPaste";
 
 export interface TerminalDisposable {
   dispose: () => void;
@@ -21,6 +21,7 @@ export interface TerminalSize {
 
 export interface TerminalPasteEvent {
   getImage(): Blob | null;
+  getText(): string;
   preventDefault(): void;
   stopPropagation(): void;
 }
@@ -160,6 +161,7 @@ class XtermTerminalSurface implements TerminalSurface {
     const listener = (event: ClipboardEvent) => {
       callback({
         getImage: () => getPastedImage(event.clipboardData),
+        getText: () => getPastedText(event.clipboardData),
         preventDefault: () => event.preventDefault(),
         stopPropagation: () => {
           event.stopPropagation();

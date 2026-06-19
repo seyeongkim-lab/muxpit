@@ -7,13 +7,20 @@ use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 const IMAGE_UPLOAD_OPTION_ALLOWLIST: &[&str] = &["-p", "-i", "-J", "-F", "-o", "-l"];
 
 pub const REMOTE_IMAGE_UPLOAD_SCRIPT: &str = "umask 077; dir=\"$HOME/.wmux/screenshots\"; \
      mkdir -p \"$dir\" && wmux_image_path=$(mktemp \"$dir/wmux-XXXXXX.png\") && \
      cat > \"$wmux_image_path\" && chmod 600 \"$wmux_image_path\" && printf '%s\\n' \"$wmux_image_path\"";
+
+#[derive(Clone, Copy)]
+#[cfg_attr(not(test), allow(dead_code))]
+enum HomeDirPlatform {
+    Unix,
+    Windows,
+}
 
 fn decode_image_base64(image_base64: &str) -> Result<Vec<u8>, String> {
     use base64::Engine as _;
@@ -33,16 +40,30 @@ fn home_dir() -> Option<PathBuf> {
 
 fn home_dir_from_env(
     home: Option<std::ffi::OsString>,
-    _userprofile: Option<std::ffi::OsString>,
-    _homedrive: Option<std::ffi::OsString>,
-    _homepath: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+    homedrive: Option<std::ffi::OsString>,
+    homepath: Option<std::ffi::OsString>,
 ) -> Option<PathBuf> {
     #[cfg(windows)]
-    {
-        if let Some(path) = non_empty_path(_userprofile) {
+    const PLATFORM: HomeDirPlatform = HomeDirPlatform::Windows;
+    #[cfg(not(windows))]
+    const PLATFORM: HomeDirPlatform = HomeDirPlatform::Unix;
+
+    home_dir_from_env_for_platform(PLATFORM, home, userprofile, homedrive, homepath)
+}
+
+fn home_dir_from_env_for_platform(
+    platform: HomeDirPlatform,
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+    homedrive: Option<std::ffi::OsString>,
+    homepath: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    if matches!(platform, HomeDirPlatform::Windows) {
+        if let Some(path) = non_empty_path(userprofile) {
             return Some(path);
         }
-        match (_homedrive, _homepath) {
+        match (homedrive, homepath) {
             (Some(drive), Some(path)) if !drive.is_empty() && !path.is_empty() => {
                 return Some(PathBuf::from(format!(
                     "{}{}",
@@ -65,6 +86,25 @@ fn local_screenshot_dir() -> Result<PathBuf, String> {
     home_dir()
         .map(|home| home.join(".wmux").join("screenshots"))
         .ok_or_else(|| "could not resolve home directory".to_string())
+}
+
+fn ensure_private_image_dir(dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("image directory create failed: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        if let Some(parent) = dir
+            .parent()
+            .filter(|parent| parent.file_name().and_then(|name| name.to_str()) == Some(".wmux"))
+        {
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("image directory permission update failed: {e}"))?;
+        }
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("image directory permission update failed: {e}"))?;
+    }
+
+    Ok(())
 }
 
 fn unique_image_file(dir: &Path) -> Result<(PathBuf, File), String> {
@@ -91,7 +131,7 @@ fn unique_image_file(dir: &Path) -> Result<(PathBuf, File), String> {
 }
 
 fn save_image_bytes_to_dir(dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
-    fs::create_dir_all(dir).map_err(|e| format!("image directory create failed: {e}"))?;
+    ensure_private_image_dir(dir)?;
     let (path, mut file) = unique_image_file(dir)?;
     file.write_all(bytes)
         .map_err(|e| format!("image write failed: {e}"))?;
@@ -174,7 +214,8 @@ mod tests {
 
     #[test]
     fn local_image_save_writes_file_under_requested_dir() {
-        let dir = unique_test_dir("local-image-save");
+        let root = unique_test_dir("local-image-save");
+        let dir = root.join(".wmux").join("screenshots");
         let path = save_image_bytes_to_dir(&dir, b"image").unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), b"image");
@@ -191,9 +232,21 @@ mod tests {
                 fs::metadata(&path).unwrap().permissions().mode() & 0o777,
                 0o600
             );
+            assert_eq!(
+                fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(root.join(".wmux"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
         }
 
-        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -208,6 +261,34 @@ mod tests {
 
         #[cfg(not(windows))]
         assert_eq!(home, PathBuf::from("/home/me"));
+    }
+
+    #[test]
+    fn home_dir_prefers_userprofile_for_windows_model() {
+        let home = home_dir_from_env_for_platform(
+            HomeDirPlatform::Windows,
+            Some("/home/me".into()),
+            Some(r"C:\Users\me".into()),
+            Some("D:".into()),
+            Some(r"\Users\fallback".into()),
+        )
+        .unwrap();
+
+        assert_eq!(home, PathBuf::from(r"C:\Users\me"));
+    }
+
+    #[test]
+    fn home_dir_uses_drive_and_path_for_windows_model() {
+        let home = home_dir_from_env_for_platform(
+            HomeDirPlatform::Windows,
+            Some("/home/me".into()),
+            None,
+            Some("D:".into()),
+            Some(r"\Users\me".into()),
+        )
+        .unwrap();
+
+        assert_eq!(home, PathBuf::from(r"D:\Users\me"));
     }
 
     #[test]

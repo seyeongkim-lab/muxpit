@@ -298,7 +298,9 @@ fn check_remote_clis_sync(
 
 fn login_shell_remote_command(command: &str) -> String {
     let outer = format!(
-        "shell=${{SHELL:-/bin/sh}}; exec \"$shell\" -lc {}",
+        "shell=${{SHELL:-/bin/sh}}; \
+         case \"$shell\" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) wmux_shell=\"$shell\" ;; *) wmux_shell=/bin/sh ;; esac; \
+         exec \"$wmux_shell\" -lc {}",
         quote_posix_shell_arg(command)
     );
     format!("/bin/sh -lc {}", quote_posix_shell_arg(&outer))
@@ -314,6 +316,8 @@ mod remote_cli_tests {
 
         assert!(command.starts_with("/bin/sh -lc "));
         assert!(command.contains("${SHELL:-/bin/sh}"));
+        assert!(command.contains("case \"$shell\" in"));
+        assert!(command.contains("*) wmux_shell=/bin/sh"));
         assert!(command.contains("command -v claude"));
         assert!(!command.contains("bash -lc"));
     }

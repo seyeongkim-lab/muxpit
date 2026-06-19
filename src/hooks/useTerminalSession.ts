@@ -127,9 +127,9 @@ export const useTerminalSession = ({
     let spawnSshConnection: SshConnection | null = null;
     const clipboard = createTerminalClipboard();
 
-    // Ctrl+V entry point. A clipboard image on an SSH pane is uploaded to the
-    // remote host and its path pasted instead. Everything else falls back to
-    // plain text paste.
+    // Ctrl+V entry point. Text is preferred when the OS clipboard exposes both
+    // text and image flavors; image-only clipboards are saved locally or on the
+    // SSH host and paste the resulting path.
     const pasteClipboard = async () => {
       await pasteTerminalClipboard({
         clipboard,
@@ -137,6 +137,7 @@ export const useTerminalSession = ({
         surface,
         spawnCommand,
         spawnSshConnection,
+        platform: TERMINAL_INPUT_PLATFORM,
       });
     };
 
@@ -179,6 +180,7 @@ export const useTerminalSession = ({
         surface,
         spawnCommand,
         spawnSshConnection,
+        platform: TERMINAL_INPUT_PLATFORM,
       });
     });
 

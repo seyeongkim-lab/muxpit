@@ -29,6 +29,8 @@ export type ClipboardImageEncoder = (input: {
   height: number;
 }) => Promise<Blob | null>;
 
+export type ClipboardImageBlobConverter = (blob: Blob) => Promise<Blob>;
+
 export interface TerminalClipboardPort {
   readImage(): Promise<Blob | null>;
   readText(): Promise<string>;
@@ -57,6 +59,38 @@ export const encodeRgbaToPngBlob: ClipboardImageEncoder = async ({ rgba, width, 
 
   context.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
   return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+};
+
+export const convertImageBlobToPng: ClipboardImageBlobConverter = async (blob) => {
+  if (
+    typeof document === "undefined" ||
+    typeof createImageBitmap === "undefined"
+  ) {
+    throw new Error("image conversion unavailable");
+  }
+
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("image conversion unavailable");
+    context.drawImage(bitmap, 0, 0);
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!png) throw new Error("image conversion failed");
+    return png;
+  } finally {
+    bitmap.close?.();
+  }
+};
+
+export const normalizeImageBlobToPng = async (
+  blob: Blob,
+  converter: ClipboardImageBlobConverter = convertImageBlobToPng,
+): Promise<Blob> => {
+  if (blob.type === "image/png") return blob;
+  return converter(blob);
 };
 
 const readNativeImage = async (

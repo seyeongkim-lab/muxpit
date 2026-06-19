@@ -9,6 +9,10 @@ import { quotePosixShellArg } from "./sshConnection.ts";
 //     pane just shows `[Process exited]` over a blank screen.
 export const buildAiRemoteCommand = (command: string): string => {
   const inner = `${command}; exec "\${SHELL:-/bin/sh}" -l`;
-  const outer = `shell=\${SHELL:-/bin/sh}; exec "$shell" -lc ${quotePosixShellArg(inner)}`;
+  const outer = [
+    "shell=${SHELL:-/bin/sh}",
+    'case "$shell" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) wmux_shell="$shell" ;; *) wmux_shell=/bin/sh ;; esac',
+    `exec "$wmux_shell" -lc ${quotePosixShellArg(inner)}`,
+  ].join("; ");
   return `/bin/sh -lc ${quotePosixShellArg(outer)}`;
 };

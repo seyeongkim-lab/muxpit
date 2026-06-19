@@ -5,6 +5,7 @@ import {
   blobToBase64,
   createTerminalClipboard,
   encodeRgbaToPngBlob,
+  normalizeImageBlobToPng,
   type ClipboardLike,
 } from "../src/utils/terminalClipboard.ts";
 
@@ -135,6 +136,39 @@ test("terminal clipboard png encoder is unavailable outside a browser DOM", asyn
       height: 1,
     }),
     null,
+  );
+});
+
+test("terminal clipboard normalizes non-png image blobs before saving", async () => {
+  const jpeg = new Blob(["jpeg"], { type: "image/jpeg" });
+  const unknown = new Blob(["unknown"]);
+  const png = new Blob(["png"], { type: "image/png" });
+  const converted: Blob[] = [];
+
+  assert.equal(
+    await normalizeImageBlobToPng(jpeg, async (input) => {
+      assert.equal(input, jpeg);
+      converted.push(input);
+      return png;
+    }),
+    png,
+  );
+  assert.equal(
+    await normalizeImageBlobToPng(unknown, async (input) => {
+      assert.equal(input, unknown);
+      converted.push(input);
+      return png;
+    }),
+    png,
+  );
+  assert.equal(converted.length, 2);
+  assert.equal(converted[0], jpeg);
+  assert.equal(converted[1], unknown);
+  assert.equal(
+    await normalizeImageBlobToPng(png, async () => {
+      throw new Error("unexpected conversion");
+    }),
+    png,
   );
 });
 
