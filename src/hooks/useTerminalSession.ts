@@ -40,7 +40,7 @@ import { createTerminalSurface, type TerminalSurface } from "../components/termi
 // Exponential backoff between tmux-CC reconnection attempts.
 const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
 
-const SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT = isLinuxWebKitRuntime();
+const SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT = isLinuxWebKitRuntime();
 
 interface UseTerminalSessionOptions {
   workspaceId: string;
@@ -92,7 +92,7 @@ const createConfiguredSurface = (): TerminalSurface => {
     fontFamily: settings.fontFamily,
     theme: getResolvedTheme(settings.themeName, settings.customColors),
     enableWebglRenderer: settings.enableWebglRenderer,
-    clearInputTextareaAfterCommit: SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT,
+    clearStaleInputBufferAfterTextInput: SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT,
     openLink: (uri) => open(uri).catch(() => {}),
   });
 };
@@ -312,7 +312,7 @@ export const useTerminalSession = ({
     const onData = surface.onData((data) => {
       if (ptyId === 0) return;
       tauriPtyBackend.write(ptyId, data).catch(console.error);
-      surface.clearInputBufferAfterPrintableCommit(data);
+      surface.clearStaleInputBufferAfterTextInput(data);
     });
 
     const onResize = surface.onResize(({ rows, cols }) => {

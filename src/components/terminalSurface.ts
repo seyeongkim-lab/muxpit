@@ -4,6 +4,10 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalTheme } from "../themes";
+import {
+  shouldClearTerminalInputBuffer,
+  shouldScheduleTerminalInputBufferCleanup,
+} from "../utils/terminalInput";
 
 export interface TerminalDisposable {
   dispose: () => void;
@@ -31,7 +35,7 @@ export interface TerminalSurface {
   onData(callback: (data: string) => void): TerminalDisposable;
   onResize(callback: (size: TerminalSize) => void): TerminalDisposable;
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
-  clearInputBufferAfterPrintableCommit(data: string): void;
+  clearStaleInputBufferAfterTextInput(data: string): void;
   setFont(fontSize: number, fontFamily: string): void;
   setTheme(theme: TerminalTheme): void;
   setWebglRenderer(enabled: boolean): void;
@@ -43,25 +47,26 @@ export interface CreateTerminalSurfaceOptions {
   fontFamily: string;
   theme: TerminalTheme;
   enableWebglRenderer: boolean;
-  clearInputTextareaAfterCommit: boolean;
+  clearStaleInputBufferAfterTextInput: boolean;
   openLink: (uri: string) => void;
 }
 
 export const createTerminalSurface = (options: CreateTerminalSurfaceOptions): TerminalSurface =>
   new XtermTerminalSurface(options);
 
-const isPrintableInput = (data: string) => data.length > 0 && !/[\x00-\x1f\x7f]/.test(data);
-
 class XtermTerminalSurface implements TerminalSurface {
   private readonly term: XTerm;
   private readonly fitAddon = new FitAddon();
-  private readonly clearInputTextareaAfterCommit: boolean;
   private webglAddon?: WebglAddon;
   private webglEnabled: boolean;
+  private readonly shouldClearStaleInputBufferAfterTextInput: boolean;
+  private inputCleanupTimer: number | undefined;
+  private textareaEventController: AbortController | undefined;
+  private isComposing = false;
 
   constructor(options: CreateTerminalSurfaceOptions) {
-    this.clearInputTextareaAfterCommit = options.clearInputTextareaAfterCommit;
     this.webglEnabled = options.enableWebglRenderer;
+    this.shouldClearStaleInputBufferAfterTextInput = options.clearStaleInputBufferAfterTextInput;
     this.term = new XTerm({
       cursorBlink: true,
       cursorStyle: "block",
@@ -91,6 +96,7 @@ class XtermTerminalSurface implements TerminalSurface {
 
   open(container: HTMLElement) {
     this.term.open(container);
+    this.attachTextareaEventGuards();
     if (this.webglEnabled) this.loadWebglAddon();
   }
 
@@ -144,21 +150,34 @@ class XtermTerminalSurface implements TerminalSurface {
     this.term.attachCustomKeyEventHandler(handler);
   }
 
-  clearInputBufferAfterPrintableCommit(data: string) {
+  clearStaleInputBufferAfterTextInput(data: string) {
     const textarea = this.term.textarea;
-    if (
-      !this.clearInputTextareaAfterCommit ||
-      !textarea ||
-      !isPrintableInput(data) ||
-      textarea.value.length === 0
-    ) {
+    if (!textarea || !shouldScheduleTerminalInputBufferCleanup({
+      enabled: this.shouldClearStaleInputBufferAfterTextInput,
+      data,
+      textareaValue: textarea.value,
+    })) {
       return;
     }
 
-    // WebKitGTK Korean IMEs can leave committed jamo in xterm's helper textarea.
-    // If it remains there, the next standalone jamo is appended to it and xterm
-    // sends the whole accumulated value.
-    textarea.value = "";
+    if (this.inputCleanupTimer !== undefined) {
+      window.clearTimeout(this.inputCleanupTimer);
+    }
+
+    this.inputCleanupTimer = window.setTimeout(() => {
+      this.inputCleanupTimer = undefined;
+      const textarea = this.term.textarea;
+      if (!textarea || !shouldClearTerminalInputBuffer({
+        isComposing: this.isComposing,
+        textareaValue: textarea.value,
+      })) {
+        return;
+      }
+      // xterm reads this textarea asynchronously for IME composition. Clearing
+      // only after onData avoids losing composed text while preventing WebKitGTK
+      // from re-sending accumulated standalone jamo.
+      textarea.value = "";
+    }, 0);
   }
 
   setFont(fontSize: number, fontFamily: string) {
@@ -186,8 +205,30 @@ class XtermTerminalSurface implements TerminalSurface {
   }
 
   dispose() {
+    if (this.inputCleanupTimer !== undefined) {
+      window.clearTimeout(this.inputCleanupTimer);
+      this.inputCleanupTimer = undefined;
+    }
+    this.textareaEventController?.abort();
     this.webglAddon?.dispose();
     this.term.dispose();
+  }
+
+  private attachTextareaEventGuards() {
+    if (this.textareaEventController || !this.term.textarea) return;
+
+    this.textareaEventController = new AbortController();
+    const { signal } = this.textareaEventController;
+    this.term.textarea.addEventListener("compositionstart", () => {
+      this.isComposing = true;
+      if (this.inputCleanupTimer !== undefined) {
+        window.clearTimeout(this.inputCleanupTimer);
+        this.inputCleanupTimer = undefined;
+      }
+    }, { signal });
+    this.term.textarea.addEventListener("compositionend", () => {
+      this.isComposing = false;
+    }, { signal });
   }
 
   private loadWebglAddon() {

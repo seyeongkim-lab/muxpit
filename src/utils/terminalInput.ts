@@ -4,6 +4,8 @@ export interface TerminalKeySnapshot {
   ctrlKey: boolean;
   shiftKey: boolean;
   metaKey: boolean;
+  isComposing?: boolean;
+  keyCode?: number;
 }
 
 export interface TerminalInputState {
@@ -19,10 +21,42 @@ export type TerminalInputDecision =
   | { kind: "copySelection" }
   | { kind: "pasteClipboard" };
 
+export const isTerminalCompositionKeyEvent = (event: TerminalKeySnapshot): boolean =>
+  event.isComposing === true || event.key === "Process" || event.keyCode === 229;
+
+export const isTerminalTextInputData = (data: string): boolean =>
+  data.length > 0 && !/[\x00-\x1f\x7f]/.test(data);
+
+export interface TerminalInputBufferCleanupSchedule {
+  enabled: boolean;
+  data: string;
+  textareaValue: string;
+}
+
+export interface TerminalInputBufferCleanupState {
+  isComposing: boolean;
+  textareaValue: string;
+}
+
+export const shouldScheduleTerminalInputBufferCleanup = ({
+  enabled,
+  data,
+  textareaValue,
+}: TerminalInputBufferCleanupSchedule): boolean =>
+  enabled && isTerminalTextInputData(data) && textareaValue.length > 0;
+
+export const shouldClearTerminalInputBuffer = ({
+  isComposing,
+  textareaValue,
+}: TerminalInputBufferCleanupState): boolean =>
+  !isComposing && textareaValue.length > 0;
+
 export const decideTerminalInput = (
   event: TerminalKeySnapshot,
   state: TerminalInputState,
 ): TerminalInputDecision => {
+  if (isTerminalCompositionKeyEvent(event)) return { kind: "allowTerminalInput" };
+
   // Let Ctrl+Shift combos bubble to App shortcuts without reaching the terminal.
   if (event.ctrlKey && event.shiftKey) return { kind: "blockTerminalInput" };
 

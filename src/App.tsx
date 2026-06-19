@@ -41,6 +41,7 @@ import { shouldShowNotificationForTarget } from "./utils/notificationRouting";
 import { playNotificationSound } from "./utils/notificationSound";
 import { matchesPrefixKey } from "./utils/prefixKey";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
+import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
   parseSshCommandLine,
@@ -561,6 +562,8 @@ export const App = () => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTerminalCompositionKeyEvent(e)) return;
+
       const prefixActive = usePrefixStore.getState().active;
       const paneNumbersVisible = usePrefixStore.getState().showPaneNumbers;
       const historyOpen = usePrefixStore.getState().historyOpen;
