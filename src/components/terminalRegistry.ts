@@ -11,6 +11,7 @@ export interface TerminalInstance {
     unlistenExit: () => void;
     onData: TerminalDisposable;
     onResize: TerminalDisposable;
+    onPaste: TerminalDisposable;
   };
 }
 
@@ -27,6 +28,7 @@ export const destroyTerminal = (leafId: string) => {
   instance.cleanup.unlistenExit();
   instance.cleanup.onData.dispose();
   instance.cleanup.onResize.dispose();
+  instance.cleanup.onPaste.dispose();
   instance.surface.dispose();
   terminalInstances.delete(leafId);
 };

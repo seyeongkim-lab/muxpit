@@ -8,6 +8,7 @@ import {
   shouldClearTerminalInputBuffer,
   shouldScheduleTerminalInputBufferCleanup,
 } from "../utils/terminalInput";
+import { getPastedImage } from "../utils/terminalPaste";
 
 export interface TerminalDisposable {
   dispose: () => void;
@@ -16,6 +17,12 @@ export interface TerminalDisposable {
 export interface TerminalSize {
   rows: number;
   cols: number;
+}
+
+export interface TerminalPasteEvent {
+  getImage(): Blob | null;
+  preventDefault(): void;
+  stopPropagation(): void;
 }
 
 export interface TerminalSurface {
@@ -34,6 +41,7 @@ export interface TerminalSurface {
   clearSelection(): void;
   onData(callback: (data: string) => void): TerminalDisposable;
   onResize(callback: (size: TerminalSize) => void): TerminalDisposable;
+  onPaste(callback: (event: TerminalPasteEvent) => void): TerminalDisposable;
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
   clearStaleInputBufferAfterTextInput(data: string): void;
   setFont(fontSize: number, fontFamily: string): void;
@@ -144,6 +152,23 @@ class XtermTerminalSurface implements TerminalSurface {
 
   onResize(callback: (size: TerminalSize) => void) {
     return this.term.onResize(callback);
+  }
+
+  onPaste(callback: (event: TerminalPasteEvent) => void) {
+    const target = this.term.element ?? this.term.textarea;
+    if (!target) return { dispose: () => {} };
+    const listener = (event: ClipboardEvent) => {
+      callback({
+        getImage: () => getPastedImage(event.clipboardData),
+        preventDefault: () => event.preventDefault(),
+        stopPropagation: () => {
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+        },
+      });
+    };
+    target.addEventListener("paste", listener, { capture: true });
+    return { dispose: () => target.removeEventListener("paste", listener, { capture: true }) };
   }
 
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {

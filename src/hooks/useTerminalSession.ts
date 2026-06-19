@@ -27,7 +27,11 @@ import {
 import { tauriPtyBackend } from "../utils/tauriPtyBackend";
 import { createTerminalClipboard } from "../utils/terminalClipboard";
 import { decideTerminalInput, shouldReadTerminalSelectionForInput } from "../utils/terminalInput";
-import { pasteTerminalClipboard } from "../utils/terminalPaste";
+import {
+  isTerminalRemotePasteTarget,
+  pasteTerminalClipboard,
+  pasteTerminalPasteEvent,
+} from "../utils/terminalPaste";
 import {
   findTerminalAiKind,
   findTerminalCloneFromPtyId,
@@ -168,6 +172,18 @@ export const useTerminalSession = ({
     surface.open(containerRef.current);
     requestAnimationFrame(() => surface.fit());
 
+    const onPaste = surface.onPaste((event) => {
+      if (!isTerminalRemotePasteTarget({ spawnCommand, spawnSshConnection })) return;
+      pasteTerminalPasteEvent({
+        event,
+        clipboard,
+        imageUploader: tauriPtyBackend,
+        surface,
+        spawnCommand,
+        spawnSshConnection,
+      });
+    });
+
     // Set up event listeners BEFORE spawning PTY to avoid missing output.
     // Race: the Rust reader thread starts emitting "pty-output" before the
     // spawn_pty invoke returns with the id, so events arriving in that window
@@ -296,6 +312,7 @@ export const useTerminalSession = ({
       unlistenExit();
       onData.dispose();
       onResize.dispose();
+      onPaste.dispose();
       surface.dispose();
     };
 
@@ -364,6 +381,7 @@ export const useTerminalSession = ({
           unlistenExit();
           onData.dispose();
           onResize.dispose();
+          onPaste.dispose();
           return;
         }
       } else {
@@ -371,6 +389,7 @@ export const useTerminalSession = ({
         unlistenExit();
         onData.dispose();
         onResize.dispose();
+        onPaste.dispose();
         return;
       }
     }
@@ -396,7 +415,7 @@ export const useTerminalSession = ({
     terminalInstances.set(leafId, {
       surface,
       ptyId,
-      cleanup: { unlistenOutput, unlistenExit, onData, onResize },
+      cleanup: { unlistenOutput, unlistenExit, onData, onResize, onPaste },
     });
 
     setPtyId(workspaceId, leafId, ptyId);

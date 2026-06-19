@@ -8,6 +8,7 @@ import {
   parseSshCommandLine,
   type SshConnection,
 } from "../utils/sshConnection";
+import { buildAiRemoteCommand } from "../utils/aiRemoteCommand";
 
 export const AI_KINDS: AiKind[] = ["claude", "codex", "gemini", "copilot"];
 
@@ -18,19 +19,11 @@ export const AI_LABEL: Record<AiKind, string> = {
   copilot: "copilot",
 };
 
-// Remote command launched inside a login shell on the SSH target.
-//   - `bash -lc` loads the user's profile PATH (AI CLIs commonly live in
-//     ~/.local/bin or a node version-manager dir that non-login shells miss).
-//   - The trailing `; exec bash -l` keeps the pane alive even when the AI CLI
-//     exits non-zero (missing binary, install bailout, OAuth flow that
-//     short-circuits, etc). Without this, the parent ssh closes too and the
-//     pane just shows `[Process exited]` over a blank screen — the user can't
-//     read the failure or run the install command by hand.
 const AI_REMOTE_CMD: Record<AiKind, string> = {
-  claude: "bash -lc 'claude --dangerously-skip-permissions; exec bash -l'",
-  codex: "bash -lc 'codex; exec bash -l'",
-  gemini: "bash -lc 'gemini; exec bash -l'",
-  copilot: "bash -lc 'copilot; exec bash -l'",
+  claude: buildAiRemoteCommand("claude --dangerously-skip-permissions"),
+  codex: buildAiRemoteCommand("codex"),
+  gemini: buildAiRemoteCommand("gemini"),
+  copilot: buildAiRemoteCommand("copilot"),
 };
 
 /** Parse `user@host` from a free-form ssh command. Returns null if not found. */

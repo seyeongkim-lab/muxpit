@@ -1,4 +1,5 @@
 import type { SshConnection } from "./sshConnection.ts";
+import { parseSshCommandLine } from "./sshConnection.ts";
 import { blobToBase64, type TerminalClipboardPort } from "./terminalClipboard.ts";
 
 export interface TerminalPasteSurface {
@@ -14,6 +15,11 @@ export interface TerminalImageUploader {
   }): Promise<string>;
 }
 
+export interface TerminalRemotePasteTarget {
+  spawnCommand: string | null;
+  spawnSshConnection: SshConnection | null;
+}
+
 export interface TerminalPasteOptions {
   clipboard: TerminalClipboardPort;
   imageUploader: TerminalImageUploader;
@@ -22,6 +28,64 @@ export interface TerminalPasteOptions {
   spawnSshConnection: SshConnection | null;
   logError?: (...args: unknown[]) => void;
 }
+
+export interface TerminalPasteEventLike {
+  getImage(): Blob | null;
+  preventDefault(): void;
+  stopPropagation(): void;
+}
+
+export interface TerminalPasteEventOptions extends TerminalPasteOptions {
+  event: TerminalPasteEventLike;
+}
+
+export interface PasteClipboardItemLike {
+  type: string;
+  getAsFile(): Blob | null;
+}
+
+export interface PasteClipboardDataLike {
+  items: ArrayLike<PasteClipboardItemLike>;
+}
+
+export const getPastedImage = (
+  clipboardData: PasteClipboardDataLike | null | undefined,
+): Blob | null => {
+  if (!clipboardData) return null;
+  for (let index = 0; index < clipboardData.items.length; index += 1) {
+    const item = clipboardData.items[index];
+    if (item.type.startsWith("image/")) return item.getAsFile();
+  }
+  return null;
+};
+
+export const isTerminalRemotePasteTarget = ({
+  spawnCommand,
+  spawnSshConnection,
+}: TerminalRemotePasteTarget): boolean =>
+  !!spawnCommand && (!!spawnSshConnection || !!parseSshCommandLine(spawnCommand));
+
+export const pasteTerminalImage = async ({
+  image,
+  imageUploader,
+  surface,
+  spawnCommand,
+  spawnSshConnection,
+  logError = console.error,
+}: Omit<TerminalPasteOptions, "clipboard"> & { image: Blob }): Promise<void> => {
+  if (!spawnCommand) return;
+  try {
+    const remotePath = await imageUploader.pushImageToRemote({
+      sshCommand: spawnCommand,
+      sshConnection: spawnSshConnection,
+      imageBase64: await blobToBase64(image),
+    });
+    surface.paste(remotePath + " ");
+  } catch (err) {
+    logError("[wmux] image paste failed:", err);
+    surface.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
+  }
+};
 
 export const pasteTerminalClipboard = async ({
   clipboard,
@@ -33,20 +97,55 @@ export const pasteTerminalClipboard = async ({
 }: TerminalPasteOptions): Promise<void> => {
   const image = spawnCommand ? await clipboard.readImage() : null;
   if (image && spawnCommand) {
-    try {
-      const remotePath = await imageUploader.pushImageToRemote({
-        sshCommand: spawnCommand,
-        sshConnection: spawnSshConnection,
-        imageBase64: await blobToBase64(image),
-      });
-      surface.paste(remotePath + " ");
-    } catch (err) {
-      logError("[wmux] image paste failed:", err);
-      surface.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
-    }
+    await pasteTerminalImage({
+      image,
+      imageUploader,
+      surface,
+      spawnCommand,
+      spawnSshConnection,
+      logError,
+    });
     return;
   }
 
   const text = await clipboard.readText();
   if (text) surface.paste(text);
+};
+
+export const pasteTerminalPasteEvent = async ({
+  event,
+  clipboard,
+  imageUploader,
+  surface,
+  spawnCommand,
+  spawnSshConnection,
+  logError = console.error,
+}: TerminalPasteEventOptions): Promise<boolean> => {
+  if (!isTerminalRemotePasteTarget({ spawnCommand, spawnSshConnection })) return false;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const image = event.getImage();
+  if (image) {
+    await pasteTerminalImage({
+      image,
+      imageUploader,
+      surface,
+      spawnCommand,
+      spawnSshConnection,
+      logError,
+    });
+    return true;
+  }
+
+  await pasteTerminalClipboard({
+    clipboard,
+    imageUploader,
+    surface,
+    spawnCommand,
+    spawnSshConnection,
+    logError,
+  });
+  return true;
 };

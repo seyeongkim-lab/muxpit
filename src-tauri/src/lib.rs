@@ -1,6 +1,7 @@
 mod monitor;
 mod platform;
 mod pty;
+mod remote_image;
 mod remote_monitor;
 mod ssh_command;
 mod tmux_cc;
@@ -13,7 +14,8 @@ use platform::process::{
     SessionMetadata, ShellContext, WorkspaceInfo,
 };
 use pty::{PtyManager, WmuxPtyContext};
-use ssh_command::{resolve_ssh_command, SshCommand};
+use remote_image::push_image_to_remote_sync;
+use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
 use tauri::{AppHandle, State};
@@ -262,13 +264,12 @@ fn check_remote_clis_sync(
     cmd.arg(&ssh.target);
 
     // One SSH invocation iterates all candidates and prints the names that resolve.
-    // Outer single-quotes wrap the bash -lc payload; only ASCII-safe names land
-    // unquoted inside the `for` list (filtered above).
+    // Only ASCII-safe names land unquoted inside the `for` list (filtered above).
     let remote = format!(
         "for n in {}; do command -v \"$n\" >/dev/null 2>&1 && echo \"$n\"; done",
         safe_names.join(" ")
     );
-    cmd.arg(format!("bash -lc '{remote}'"));
+    cmd.arg(login_shell_remote_command(&remote));
 
     cmd.stderr(Stdio::null());
 
@@ -295,6 +296,36 @@ fn check_remote_clis_sync(
     Ok(result)
 }
 
+fn login_shell_remote_command(command: &str) -> String {
+    let outer = format!(
+        "shell=${{SHELL:-/bin/sh}}; exec \"$shell\" -lc {}",
+        quote_posix_shell_arg(command)
+    );
+    format!("/bin/sh -lc {}", quote_posix_shell_arg(&outer))
+}
+
+#[cfg(test)]
+mod remote_cli_tests {
+    use super::*;
+
+    #[test]
+    fn remote_cli_probe_uses_configured_login_shell() {
+        let command = login_shell_remote_command("command -v claude");
+
+        assert!(command.starts_with("/bin/sh -lc "));
+        assert!(command.contains("${SHELL:-/bin/sh}"));
+        assert!(command.contains("command -v claude"));
+        assert!(!command.contains("bash -lc"));
+    }
+
+    #[test]
+    fn remote_cli_probe_quotes_inner_command() {
+        let command = login_shell_remote_command("printf '%s\\n' ok");
+
+        assert!(command.contains("'\\''%s\\n'\\''"));
+    }
+}
+
 #[tauri::command]
 async fn push_image_to_remote(
     ssh_command: Option<String>,
@@ -306,61 +337,6 @@ async fn push_image_to_remote(
     tauri::async_runtime::spawn_blocking(move || push_image_to_remote_sync(&ssh, &image_base64))
         .await
         .map_err(|e| format!("Task join error: {e}"))?
-}
-
-/// Upload a clipboard image to the pane's SSH host and return the remote path.
-/// `ssh_command` may be an AI-pane launcher (`ssh -t ... "bash -lc '...'"`):
-/// only `-p`/`-i` option pairs are kept, because `-t` allocates a pty that
-/// mangles the binary stdin stream and the trailing remote-command tokens are
-/// not ssh options.
-fn push_image_to_remote_sync(ssh: &SshCommand, image_base64: &str) -> Result<String, String> {
-    use base64::Engine as _;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(image_base64)
-        .map_err(|e| format!("invalid image data: {e}"))?;
-
-    let mut cmd = silent_command(&ssh.program);
-    cmd.args(ssh.filtered_options(&["-p", "-i", "-J", "-F", "-o", "-l"]));
-    cmd.args([
-        "-o",
-        "ConnectTimeout=10",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-    ]);
-    cmd.arg(&ssh.target);
-    cmd.arg(
-        "umask 077; dir=\"$HOME/.wmux/screenshots\"; \
-         mkdir -p \"$dir\" && path=$(mktemp \"$dir/wmux-XXXXXX.png\") && \
-         cat > \"$path\" && chmod 600 \"$path\" && printf '%s\\n' \"$path\"",
-    );
-
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let mut child = cmd.spawn().map_err(|e| format!("ssh spawn failed: {e}"))?;
-    {
-        use std::io::Write as _;
-        let mut stdin = child.stdin.take().ok_or("ssh stdin unavailable")?;
-        stdin
-            .write_all(&bytes)
-            .map_err(|e| format!("upload failed: {e}"))?;
-        // stdin drops here → EOF → remote `cat` completes
-    }
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("ssh failed: {e}"))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("upload failed: {}", err.trim()));
-    }
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if path.is_empty() {
-        return Err("upload failed: remote returned no path".into());
-    }
-    Ok(path)
 }
 
 #[tauri::command]
@@ -479,6 +455,7 @@ pub fn run() {
             start_monitor,
             stop_monitor,
         ])
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {

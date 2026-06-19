@@ -9,6 +9,26 @@ export interface ClipboardLike {
   writeText?: (text: string) => Promise<void>;
 }
 
+export interface NativeClipboardImageLike {
+  rgba(): Promise<Uint8Array>;
+  size(): Promise<{ width: number; height: number }>;
+  close?(): Promise<void>;
+}
+
+export interface NativeClipboardLike {
+  readImage?: () => Promise<NativeClipboardImageLike>;
+  readText?: () => Promise<string>;
+  writeText?: (text: string, options?: { label?: string }) => Promise<void>;
+}
+
+export type NativeClipboardProvider = () => Promise<NativeClipboardLike | null>;
+
+export type ClipboardImageEncoder = (input: {
+  rgba: Uint8Array;
+  width: number;
+  height: number;
+}) => Promise<Blob | null>;
+
 export interface TerminalClipboardPort {
   readImage(): Promise<Blob | null>;
   readText(): Promise<string>;
@@ -18,10 +38,57 @@ export interface TerminalClipboardPort {
 const currentClipboard = (): ClipboardLike | undefined =>
   typeof navigator === "undefined" ? undefined : navigator.clipboard;
 
+let nativeClipboardPromise: Promise<NativeClipboardLike | null> | undefined;
+
+const currentNativeClipboard = (): Promise<NativeClipboardLike | null> => {
+  nativeClipboardPromise ??= import("@tauri-apps/plugin-clipboard-manager")
+    .then((plugin) => plugin)
+    .catch(() => null);
+  return nativeClipboardPromise;
+};
+
+export const encodeRgbaToPngBlob: ClipboardImageEncoder = async ({ rgba, width, height }) => {
+  if (typeof document === "undefined" || typeof ImageData === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  context.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+};
+
+const readNativeImage = async (
+  nativeClipboard: NativeClipboardLike | null,
+  imageEncoder: ClipboardImageEncoder,
+): Promise<Blob | null> => {
+  if (!nativeClipboard?.readImage) return null;
+  let image: NativeClipboardImageLike | null = null;
+  try {
+    image = await nativeClipboard.readImage();
+    const [{ width, height }, rgba] = await Promise.all([image.size(), image.rgba()]);
+    return await imageEncoder({ rgba, width, height });
+  } catch {
+    return null;
+  } finally {
+    try {
+      await image?.close?.();
+    } catch {
+      // Clipboard image resources are best-effort cleanup.
+    }
+  }
+};
+
 export const createTerminalClipboard = (
   clipboard: ClipboardLike | undefined = currentClipboard(),
+  nativeClipboardProvider: NativeClipboardProvider = currentNativeClipboard,
+  imageEncoder: ClipboardImageEncoder = encodeRgbaToPngBlob,
 ): TerminalClipboardPort => ({
   readImage: async () => {
+    const nativeImage = await readNativeImage(await nativeClipboardProvider(), imageEncoder);
+    if (nativeImage) return nativeImage;
+
     if (!clipboard?.read) return null;
     try {
       for (const item of await clipboard.read()) {
@@ -34,6 +101,16 @@ export const createTerminalClipboard = (
     return null;
   },
   readText: async () => {
+    const nativeClipboard = await nativeClipboardProvider();
+    if (nativeClipboard?.readText) {
+      try {
+        const text = await nativeClipboard.readText();
+        if (text) return text;
+      } catch {
+        // Browser clipboard fallback below can still work in non-Tauri contexts.
+      }
+    }
+
     if (!clipboard?.readText) return "";
     try {
       return await clipboard.readText();
@@ -42,6 +119,16 @@ export const createTerminalClipboard = (
     }
   },
   writeText: async (text: string) => {
+    const nativeClipboard = await nativeClipboardProvider();
+    if (nativeClipboard?.writeText) {
+      try {
+        await nativeClipboard.writeText(text);
+        return;
+      } catch {
+        // Browser clipboard fallback below can still work in non-Tauri contexts.
+      }
+    }
+
     if (!clipboard?.writeText) return;
     try {
       await clipboard.writeText(text);
