@@ -174,6 +174,9 @@ interface WorkspaceState {
   setSplitRatio: (workspaceId: string, splitId: string, ratio: number) => void;
   toggleZoom: (workspaceId: string) => void;
   cycleLayout: (workspaceId: string) => void;
+  // Swap the focused pane's position with its previous/next pane in tree order
+  // (tmux swap-pane). Focus follows the pane; order wraps around.
+  swapPane: (workspaceId: string, direction: "prev" | "next") => void;
   breakPane: (workspaceId: string, leafId: string) => void;
   reorderWorkspaces: (fromIdx: number, toIdx: number) => void;
 
@@ -761,6 +764,39 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const nextMode = order[(curIdx + 1) % order.length];
         const newLayout = buildLayout(leaves, nextMode);
         return { ...w, layout: newLayout, layoutMode: nextMode, zoomedLeafId: undefined };
+      }),
+    }));
+  },
+
+  swapPane: (workspaceId, direction) => {
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const ordered = collectOrderedLeafNodes(w.layout);
+        if (ordered.length < 2) return w;
+        const idx = ordered.findIndex((n) => n.id === w.focusedLeafId);
+        if (idx === -1) return w;
+        const targetIdx =
+          direction === "next"
+            ? (idx + 1) % ordered.length
+            : (idx - 1 + ordered.length) % ordered.length;
+        const a = ordered[idx];
+        const b = ordered[targetIdx];
+        if (a.id === b.id) return w;
+        // Single pass: each id is unique, so swap the two nodes into each
+        // other's slot. Focus stays on `a` (it just moved position).
+        const swap = (node: LayoutNode): LayoutNode => {
+          if (node.id === a.id) return b;
+          if (node.id === b.id) return a;
+          if (node.type === "split") {
+            return {
+              ...node,
+              children: [swap(node.children[0]), swap(node.children[1])] as [LayoutNode, LayoutNode],
+            };
+          }
+          return node;
+        };
+        return { ...w, layout: swap(w.layout), zoomedLeafId: undefined };
       }),
     }));
   },

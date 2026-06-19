@@ -501,6 +501,12 @@ export const App = () => {
         case "q":
           triggerPaneNumbers();
           return false;
+        case "{":
+          st.swapPane(ws.id, "prev");
+          return true;
+        case "}":
+          st.swapPane(ws.id, "next");
+          return true;
         case "!":
           st.breakPane(ws.id, ws.focusedLeafId);
           return false;
