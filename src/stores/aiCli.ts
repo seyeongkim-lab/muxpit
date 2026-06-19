@@ -2,7 +2,12 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { AiKind } from "./workspace";
 import type { SshHost } from "./sshHosts";
-import { buildSshCommandWithRemoteCmd } from "./sshHosts";
+import { buildSshCommandWithRemoteCmdFromBase, buildSshConnection } from "./sshHosts";
+import {
+  buildSshCommandWithRemoteCmdFromConnection,
+  parseSshCommandLine,
+  type SshConnection,
+} from "../utils/sshConnection";
 
 export const AI_KINDS: AiKind[] = ["claude", "codex", "gemini", "copilot"];
 
@@ -30,13 +35,17 @@ const AI_REMOTE_CMD: Record<AiKind, string> = {
 
 /** Parse `user@host` from a free-form ssh command. Returns null if not found. */
 export const parseSshTarget = (cmd: string): string | null => {
-  for (const part of cmd.split(/\s+/)) {
-    if (part.startsWith("-") || part.startsWith('"') || part.toLowerCase().includes("ssh")) continue;
-    if (part.includes("@")) return part;
-  }
+  const parsed = parseSshCommandLine(cmd);
+  if (parsed) return parsed.connection.target;
   const m = cmd.match(/(\S+@\S+)/);
   return m ? m[1] : null;
 };
+
+export interface AiLaunchSpec {
+  command: string;
+  sshConnection?: SshConnection;
+  sshRemoteCommand?: string;
+}
 
 /**
  * Build the ssh command that drops the user straight into the requested AI CLI.
@@ -49,9 +58,26 @@ export const buildAiLaunchCommand = (
   rawSshCommand: string,
   host?: SshHost,
 ): string => {
+  return buildAiLaunchSpec(kind, rawSshCommand, host ? buildSshConnection(host) : undefined).command;
+};
+
+export const buildAiLaunchSpec = (
+  kind: AiKind,
+  rawSshCommand: string,
+  sshConnection?: SshConnection,
+): AiLaunchSpec => {
   const remote = AI_REMOTE_CMD[kind];
-  if (host) return buildSshCommandWithRemoteCmd(host, remote);
-  return rawSshCommand.replace(/^ssh\b/, "ssh -t") + ` "${remote}"`;
+  const connection = sshConnection ?? parseSshCommandLine(rawSshCommand)?.connection;
+  if (connection) {
+    return {
+      command: buildSshCommandWithRemoteCmdFromConnection(connection, remote, true),
+      sshConnection: connection,
+      sshRemoteCommand: remote,
+    };
+  }
+  return {
+    command: buildSshCommandWithRemoteCmdFromBase(rawSshCommand, remote, true),
+  };
 };
 
 interface AiCliState {
@@ -60,7 +86,7 @@ interface AiCliState {
   /** Targets currently being probed; suppresses duplicate concurrent invokes. */
   probing: Set<string>;
 
-  probe: (sshTarget: string, sshCommand: string) => Promise<void>;
+  probe: (sshTarget: string, sshCommand: string, sshConnection?: SshConnection) => Promise<void>;
   has: (sshTarget: string, kind: AiKind) => boolean;
   available: (sshTarget: string) => Set<AiKind> | undefined;
 }
@@ -69,9 +95,12 @@ export const useAiCliStore = create<AiCliState>((set, get) => ({
   availableByHost: {},
   probing: new Set(),
 
-  probe: async (sshTarget, sshCommand) => {
+  probe: async (sshTarget, sshCommand, sshConnection) => {
     const state = get();
     if (state.availableByHost[sshTarget] || state.probing.has(sshTarget)) return;
+    if (!sshConnection && !parseSshCommandLine(sshCommand)) {
+      return;
+    }
     set((s) => {
       const next = new Set(s.probing);
       next.add(sshTarget);
@@ -89,6 +118,7 @@ export const useAiCliStore = create<AiCliState>((set, get) => ({
         try {
           result = await invoke<Record<string, boolean>>("check_remote_clis", {
             sshCommand,
+            sshConnection: sshConnection ?? null,
             names: AI_KINDS,
           });
           break;

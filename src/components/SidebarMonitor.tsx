@@ -3,10 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useSidebarLayoutStore } from "../stores/sidebarLayout";
+import type { SshConnection } from "../utils/sshConnection";
 
 interface SidebarMonitorProps {
   monitorId: string;
   sshTarget: string;
+  sshCommand: string;
+  sshConnection?: SshConnection;
   onClose: () => void;
 }
 
@@ -91,14 +94,14 @@ const ProgressBar = ({ value, color, label }: { value: number; color: string; la
 
 const EMPTY_SERIES: MonitorSnapshot[] = [];
 
-export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitorProps) => {
+export const SidebarMonitor = ({ monitorId, sshTarget, sshCommand, sshConnection, onClose }: SidebarMonitorProps) => {
   const series = useMonitorStore((s) => s.series[monitorId]) ?? EMPTY_SERIES;
   const latest = series[series.length - 1] as MonitorSnapshot | undefined;
 
   // Start monitor on mount; re-start when monitorId changes
   useEffect(() => {
     let active = true;
-    invoke("start_monitor", { monitorId, sshTarget }).catch((err) => {
+    invoke("start_monitor", { monitorId, sshCommand, sshConnection: sshConnection ?? null }).catch((err) => {
       if (active) console.error("start_monitor error:", err);
     });
 
@@ -107,7 +110,7 @@ export const SidebarMonitor = ({ monitorId, sshTarget, onClose }: SidebarMonitor
       invoke("stop_monitor", { monitorId }).catch(() => {});
       useMonitorStore.getState().clearMonitor(monitorId);
     };
-  }, [monitorId, sshTarget]);
+  }, [monitorId, sshCommand, sshConnection]);
 
   // Listen for monitor-data events
   useEffect(() => {

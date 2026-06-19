@@ -5,7 +5,7 @@ import { useSidebarLayoutStore } from "../stores/sidebarLayout";
 interface SidebarClaudeProps {
   sessions: ClaudeSessionInfo[];
   sshTarget: string;
-  onViewSession: (project: string, sessionId: string) => void;
+  onViewSession: (project: string, projectPath: string, sessionId: string) => void;
   onResumeSession: (projectPath: string, sessionId: string) => void;
 }
 
@@ -108,7 +108,7 @@ export const SidebarClaude = ({ sessions, sshTarget: _sshTarget, onViewSession, 
                 <div
                   key={s.sessionId}
                   style={styles.sessionRow}
-                  onClick={() => onViewSession(s.project, s.sessionId)}
+                  onClick={() => onViewSession(s.project, s.projectPath, s.sessionId)}
                   onDoubleClick={() => onResumeSession(s.projectPath, s.sessionId)}
                   title={`Session: ${s.sessionId}\nMessages: ${s.messageCount}\nDouble-click to resume`}
                 >

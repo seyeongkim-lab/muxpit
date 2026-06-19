@@ -11,10 +11,13 @@ import { SidebarClaude } from "./SidebarClaude";
 import { SidebarTmuxSessions } from "./SidebarTmuxSessions";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useState, useRef } from "react";
+import type { SshConnection } from "../utils/sshConnection";
 
 interface SidebarMonitorInfo {
   monitorId: string;
   sshTarget: string;
+  sshCommand: string;
+  sshConnection?: SshConnection;
 }
 
 interface SidebarProps {
@@ -24,8 +27,8 @@ interface SidebarProps {
   onConnectHost?: (host: SshHost) => void;
   monitor?: SidebarMonitorInfo | null;
   onCloseMonitor?: () => void;
-  onViewClaudeSession?: (sshTarget: string, project: string, sessionId: string) => void;
-  onResumeClaudeSession?: (sshTarget: string, projectPath: string, sessionId: string) => void;
+  onViewClaudeSession?: (sshTarget: string, project: string, projectPath: string | undefined, sessionId: string, sshConnection?: SshConnection) => void;
+  onResumeClaudeSession?: (sshCommand: string, projectPath: string, sessionId: string, sshConnection?: SshConnection) => void;
   gridView?: boolean;
   onToggleGridView?: () => void;
 }
@@ -403,8 +406,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
         <SidebarClaude
           sessions={latestSnapshot.claudeSessions}
           sshTarget={monitor.sshTarget}
-          onViewSession={(project, sessionId) => onViewClaudeSession?.(monitor.sshTarget, project, sessionId)}
-          onResumeSession={(projectPath, sessionId) => onResumeClaudeSession?.(monitor.sshTarget, projectPath, sessionId)}
+          onViewSession={(project, projectPath, sessionId) => onViewClaudeSession?.(monitor.sshTarget, project, projectPath, sessionId, monitor.sshConnection)}
+          onResumeSession={(projectPath, sessionId) => onResumeClaudeSession?.(monitor.sshCommand, projectPath, sessionId, monitor.sshConnection)}
         />
       )}
 
@@ -412,6 +415,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
         <SidebarMonitor
           monitorId={monitor.monitorId}
           sshTarget={monitor.sshTarget}
+          sshCommand={monitor.sshCommand}
+          sshConnection={monitor.sshConnection}
           onClose={onCloseMonitor}
         />
       )}

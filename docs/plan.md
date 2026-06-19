@@ -1,3 +1,15 @@
+# Plan: OS Abstraction Review
+
+상세 계획서: `docs/plans/os-abstraction-review.md`
+
+## 요약
+
+15개 parallel reviewer로 전체 저장소를 검토한 결과를 정리한다.
+대부분은 순수 크로스플랫폼 리팩터링 항목이라기보다 실제 버그이며,
+반복 원인은 SSH/remote command 문자열 경계와 OS별 capability adapter 부재다.
+
+---
+
 # Plan: Auto Claude Split on SSH Connection
 
 상세 계획서: `docs/plans/auto-claude-split.md`

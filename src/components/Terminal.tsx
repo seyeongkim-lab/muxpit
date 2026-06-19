@@ -12,6 +12,13 @@ import { useHistoryStore } from "../stores/history";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
 import { playNotificationSound } from "../utils/notificationSound";
+import { consumePtyEventsForId, describePtyExit } from "../utils/ptyEvents";
+import { isLinuxWebKitRuntime, isPowerShellCommand, isWindowsPlatform } from "../utils/runtimePlatform";
+import {
+  parseSshCommandLine,
+  sshConnectionToArgv,
+  type SshConnection,
+} from "../utils/sshConnection";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { getResolvedTheme } from "../themes";
@@ -20,11 +27,13 @@ import "@xterm/xterm/css/xterm.css";
 interface PtyOutput {
   id: number;
   data: string;
+  surfaceId?: string | null;
 }
 
 interface PtyExit {
   id: number;
   code: number | null;
+  surfaceId?: string | null;
 }
 
 // Exponential backoff between tmux-CC reconnection attempts.
@@ -49,6 +58,12 @@ const SHELL_HISTORY_HOOK =
   'fi; } 2>/dev/null && clear\r';
 
 // OSC sequence parser: extracts OSC 7 (cwd) and OSC 777 (custom) from terminal output
+const normalizeOsc7Cwd = (rawPath: string): string => {
+  const decoded = decodeURIComponent(rawPath);
+  if (/^\/[A-Za-z]:\//.test(decoded)) return decoded.slice(1);
+  return decoded;
+};
+
 const parseOscSequences = (data: string, workspaceId: string, leafId: string) => {
   const patchInfo = useWorkspaceInfoStore.getState().patchInfo;
 
@@ -57,7 +72,7 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
   const osc7Re = /\x1b\]7;file:\/\/[^/]*([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
   let m;
   while ((m = osc7Re.exec(data)) !== null) {
-    const cwd = decodeURIComponent(m[1]);
+    const cwd = normalizeOsc7Cwd(m[1]);
     if (cwd) patchInfo(workspaceId, { cwd });
   }
 
@@ -113,18 +128,6 @@ const blobToBase64 = (blob: Blob): Promise<string> =>
 
 const isPrintableInput = (data: string) => data.length > 0 && !/[\x00-\x1f\x7f]/.test(data);
 
-const isLinuxWebKitRuntime = () => {
-  if (typeof navigator === "undefined") return false;
-  const platform = navigator.platform ?? "";
-  const userAgent = navigator.userAgent ?? "";
-
-  return (
-    /linux/i.test(platform) &&
-    /(applewebkit|webkitgtk)/i.test(userAgent) &&
-    !/(chrome|chromium|crios|edg|firefox)/i.test(userAgent)
-  );
-};
-
 const SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT = isLinuxWebKitRuntime();
 
 const clearInputTextareaAfterCommit = (term: XTerm, data: string) => {
@@ -148,16 +151,41 @@ interface TerminalLeafProps {
   leafId: string;
 }
 
-const findSshCommand = (wsId: string, leafId: string): string | undefined => {
+interface SpawnSpec {
+  command?: string;
+  commandArgv?: string[];
+  sshConnection?: SshConnection;
+}
+
+const spawnSpecFromLeaf = (node: any): SpawnSpec => {
+  const parsed = parseSshCommandLine(node.command ?? node.sshCommand);
+  const sshConnection = node.sshConnection && parsed?.connection?.ttyMode && !node.sshConnection.ttyMode
+    ? { ...node.sshConnection, ttyMode: parsed.connection.ttyMode }
+    : node.sshConnection ?? parsed?.connection;
+  const sshRemoteCommand = node.sshRemoteCommand ?? parsed?.remoteCommand;
+  const command = node.command ?? node.sshCommand;
+  return {
+    command,
+    commandArgv: sshConnection
+      ? sshConnectionToArgv(sshConnection, {
+          preserveTtyMode: true,
+          remoteCommand: sshRemoteCommand,
+        })
+      : undefined,
+    sshConnection,
+  };
+};
+
+const findSpawnSpec = (wsId: string, leafId: string): SpawnSpec => {
   const state = useWorkspaceStore.getState();
   const ws = state.workspaces.find((w) => w.id === wsId);
-  if (!ws) return undefined;
-  const find = (node: any): string | undefined => {
-    if (node.type === "leaf" && node.id === leafId) return node.command ?? node.sshCommand;
+  if (!ws) return {};
+  const find = (node: any): SpawnSpec | undefined => {
+    if (node.type === "leaf" && node.id === leafId) return spawnSpecFromLeaf(node);
     if (node.type === "split") return find(node.children[0]) ?? find(node.children[1]);
     return undefined;
   };
-  return find(ws.layout);
+  return find(ws.layout) ?? {};
 };
 
 const findCloneFromPtyId = (wsId: string, leafId: string): number | undefined => {
@@ -196,11 +224,24 @@ const findAiKind = (wsId: string, leafId: string): AiKind | undefined => {
   return find(ws.layout);
 };
 
+const leafExists = (wsId: string, leafId: string): boolean => {
+  const state = useWorkspaceStore.getState();
+  const ws = state.workspaces.find((w) => w.id === wsId);
+  if (!ws) return false;
+  const find = (node: any): boolean => {
+    if (node.type === "leaf") return node.id === leafId;
+    if (node.type === "split") return find(node.children[0]) || find(node.children[1]);
+    return false;
+  };
+  return find(ws.layout);
+};
+
 const AI_CLI_COMMAND_PATTERN = /(?:^|[\s"'\/])(claude|codex|gemini|copilot)(?=$|[\s;"'])/i;
 
 export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
+  const disposedRef = useRef(false);
   const setPtyId = useWorkspaceStore((s) => s.setPtyId);
   const setFocusedLeaf = useWorkspaceStore((s) => s.setFocusedLeaf);
   const fontSize = useSettingsStore((s) => s.fontSize);
@@ -251,6 +292,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // key handler and pty-exit listener can reference it without hitting the
     // temporal dead zone on early keypresses.
     let spawnCommand: string | null = null;
+    let spawnCommandArgv: string[] | null = null;
+    let spawnSshConnection: SshConnection | null = null;
 
     // Ctrl+V entry point. A clipboard image on an SSH pane is uploaded to the
     // remote host and its path pasted instead — AI CLIs (claude etc.) running
@@ -275,6 +318,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
         try {
           const remotePath = await invoke<string>("push_image_to_remote", {
             sshCommand: spawnCommand,
+            sshConnection: spawnSshConnection,
             imageBase64: await blobToBase64(image),
           });
           term.paste(remotePath + " ");
@@ -347,6 +391,9 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     let idAssigned = false;
     const bufferedOutput: PtyOutput[] = [];
     const bufferedExit: PtyExit[] = [];
+    const reconnectOutput: PtyOutput[] = [];
+    const reconnectExit: PtyExit[] = [];
+    const tmuxSession = findTmuxSession(workspaceId, leafId);
 
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
@@ -360,6 +407,9 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
         return;
       }
       if (event.payload.id === ptyId) handleOutput(event.payload);
+      else if (reconnecting && event.payload.surfaceId === leafId) {
+        reconnectOutput.push(event.payload);
+      }
     });
 
     // Guard against overlapping reconnect loops when pty-exit fires multiple times
@@ -380,21 +430,39 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           // If the terminal was destroyed while we were waiting, bail out.
           if (!terminalInstances.has(leafId)) return;
           try {
+            const oldId = ptyId;
             const newId = await invoke<number>("spawn_pty_tmux_cc", {
               rows: Math.max(term.rows, 1),
               cols: Math.max(term.cols, 1),
               sshCommand,
+              sshConnection: spawnSshConnection,
               sessionName,
               workspaceId,
               surfaceId: leafId,
             });
-            ptyId = newId;
             const inst = terminalInstances.get(leafId);
-            if (inst) inst.ptyId = newId;
+            if (!inst) {
+              invoke("kill_pty", { id: newId }).catch(() => {});
+              return;
+            }
+            ptyId = newId;
+            inst.ptyId = newId;
             setPtyId(workspaceId, leafId, newId);
+            if (oldId && oldId !== newId) {
+              invoke("kill_pty", { id: oldId }).catch(() => {});
+            }
+            for (const payload of consumePtyEventsForId(reconnectOutput, newId)) {
+              handleOutput(payload);
+            }
+            const exits = consumePtyEventsForId(reconnectExit, newId);
+            if (exits.length > 0) {
+              throw new Error(describePtyExit(exits[0].code));
+            }
             term.write(`\x1b[32m[reconnected]\x1b[0m\r\n`);
             return;
           } catch (err) {
+            reconnectOutput.length = 0;
+            reconnectExit.length = 0;
             const msg = err instanceof Error ? err.message : String(err);
             term.write(`\x1b[31m[reconnect attempt failed: ${msg}]\x1b[0m\r\n`);
           }
@@ -405,18 +473,24 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     };
 
-    const unlistenExit = await listen<PtyExit>("pty-exit", (event) => {
-      if (!idAssigned) {
-        bufferedExit.push(event.payload);
-        return;
-      }
-      if (event.payload.id !== ptyId) return;
-
+    const handleExit = (_payload: PtyExit) => {
       // Tmux-CC persist mode: attempt to re-attach the remote session.
       if (tmuxSession && spawnCommand) {
         tryReconnect(spawnCommand, tmuxSession);
       } else {
         term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
+      }
+    };
+
+    const unlistenExit = await listen<PtyExit>("pty-exit", (event) => {
+      if (!idAssigned) {
+        bufferedExit.push(event.payload);
+        return;
+      }
+      if (event.payload.id === ptyId) {
+        handleExit(event.payload);
+      } else if (reconnecting && event.payload.surfaceId === leafId) {
+        reconnectExit.push(event.payload);
       }
     });
 
@@ -432,12 +506,28 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       invoke("resize_pty", { id: ptyId, rows, cols }).catch(console.error);
     });
 
+    const cleanupUnregisteredTerminal = () => {
+      unlistenOutput();
+      unlistenExit();
+      onData.dispose();
+      onResize.dispose();
+      term.dispose();
+    };
+
+    const isCancelled = () => disposedRef.current || !leafExists(workspaceId, leafId);
+    if (isCancelled()) {
+      cleanupUnregisteredTerminal();
+      return;
+    }
+
     // Determine command to run: explicit leaf command first (split inheritance / session restore),
     // then fall back to cloning parent PTY's SSH context.
     const cloneFromPtyId = findCloneFromPtyId(workspaceId, leafId);
-    const savedCmd = findSshCommand(workspaceId, leafId);
-    if (savedCmd) {
-      spawnCommand = savedCmd;
+    const savedSpec = findSpawnSpec(workspaceId, leafId);
+    if (savedSpec.command || savedSpec.commandArgv) {
+      spawnCommand = savedSpec.command ?? null;
+      spawnCommandArgv = savedSpec.commandArgv ?? null;
+      spawnSshConnection = savedSpec.sshConnection ?? null;
     } else if (cloneFromPtyId) {
       try {
         const ctx = await invoke<{ ssh_command: string | null; cwd: string | null }>(
@@ -445,7 +535,15 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           { id: cloneFromPtyId },
         );
         if (ctx.ssh_command) {
+          const parsed = parseSshCommandLine(ctx.ssh_command);
           spawnCommand = ctx.ssh_command;
+          spawnCommandArgv = parsed
+            ? sshConnectionToArgv(parsed.connection, {
+                preserveTtyMode: true,
+                remoteCommand: parsed.remoteCommand,
+              })
+            : null;
+          spawnSshConnection = parsed?.connection ?? null;
         }
       } catch {
         // Silently ignore context fetch errors
@@ -456,23 +554,24 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // If spawning with an explicit command fails (e.g. ssh binary missing after a
     // session restore), fall back to the default shell so the pane is usable instead
     // of leaving a silent empty xterm.
-    const tmuxSession = findTmuxSession(workspaceId, leafId);
     try {
       if (tmuxSession && spawnCommand) {
         // Persist-mode SSH: wrap remote shell in `tmux -CC new -A -s ...`.
-        ptyId = await invoke<number>("spawn_pty_tmux_cc", {
-          rows: Math.max(term.rows, 1),
-          cols: Math.max(term.cols, 1),
-          sshCommand: spawnCommand,
-          sessionName: tmuxSession,
-          workspaceId,
-          surfaceId: leafId,
+          ptyId = await invoke<number>("spawn_pty_tmux_cc", {
+            rows: Math.max(term.rows, 1),
+            cols: Math.max(term.cols, 1),
+            sshCommand: spawnCommand,
+            sshConnection: spawnSshConnection,
+            sessionName: tmuxSession,
+            workspaceId,
+            surfaceId: leafId,
         });
       } else {
         ptyId = await invoke<number>("spawn_pty", {
           rows: Math.max(term.rows, 1),
           cols: Math.max(term.cols, 1),
           command: spawnCommand,
+          commandArgv: spawnCommandArgv,
           workspaceId,
           surfaceId: leafId,
         });
@@ -487,6 +586,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
             rows: Math.max(term.rows, 1),
             cols: Math.max(term.cols, 1),
             command: null,
+            commandArgv: null,
             workspaceId,
             surfaceId: leafId,
           });
@@ -508,6 +608,14 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     }
 
+    if (isCancelled()) {
+      if (ptyId !== 0) {
+        invoke("kill_pty", { id: ptyId }).catch(() => {});
+      }
+      cleanupUnregisteredTerminal();
+      return;
+    }
+
     // Mark id as assigned and drain any events that arrived during the spawn
     // window. Runs synchronously before any further awaits, so no other event
     // handlers can interleave and reorder output.
@@ -518,7 +626,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     bufferedOutput.length = 0;
     for (const payload of bufferedExit) {
       if (payload.id === ptyId) {
-        term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
+        handleExit(payload);
       }
     }
     bufferedExit.length = 0;
@@ -560,8 +668,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     //     screen on reconnect — history is already captured when the session was first started)
     //   - PowerShell / cmd panes (POSIX `[ -n ... ]` syntax raises a ParserError)
     const isAiCliPane = !!findAiKind(workspaceId, leafId) || !!(spawnCommand && AI_CLI_COMMAND_PATTERN.test(spawnCommand));
-    const isWindowsLocalShell = !spawnCommand && /^win/i.test(navigator.platform);
-    const isPowerShellTarget = !!(spawnCommand && /\b(pwsh|powershell|cmd\.exe)\b/i.test(spawnCommand));
+    const isWindowsLocalShell = !spawnCommand && isWindowsPlatform();
+    const isPowerShellTarget = !!(spawnCommand && isPowerShellCommand(spawnCommand));
     if (!isAiCliPane && !tmuxSession && !isWindowsLocalShell && !isPowerShellTarget) {
       setTimeout(() => {
         invoke("write_pty", { id: ptyId, data: SHELL_HISTORY_HOOK }).catch(() => {});
@@ -572,9 +680,13 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   }, [workspaceId, leafId, setPtyId]);
 
   useEffect(() => {
+    disposedRef.current = false;
     initTerminal().catch((err) => {
       console.error(`[wmux] initTerminal failed for leaf ${leafId}:`, err);
     });
+    return () => {
+      disposedRef.current = true;
+    };
   }, [initTerminal, leafId]);
 
   // Apply font settings changes to existing terminals.

@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from "react";
-import { useAiCliStore, AI_KINDS, AI_LABEL, buildAiLaunchCommand } from "../stores/aiCli";
+import { useAiCliStore, AI_KINDS, AI_LABEL, buildAiLaunchSpec } from "../stores/aiCli";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace";
-import { useSshHostsStore, buildSshCommand } from "../stores/sshHosts";
+import { useSshHostsStore, buildSshCommand, buildSshConnection } from "../stores/sshHosts";
+import { parseSshCommandLine, sshConnectionToCommandLine, type SshConnection } from "../utils/sshConnection";
 
 interface AiPaneToolbarProps {
   workspaceId: string;
@@ -10,6 +11,7 @@ interface AiPaneToolbarProps {
   currentKind: AiKind;
   /** `user@host` of the underlying SSH connection — keys availability lookup. */
   sshTarget: string;
+  sshConnection?: SshConnection;
 }
 
 /**
@@ -22,7 +24,7 @@ interface AiPaneToolbarProps {
  * probe by reusing the parent leaf's ssh command — best-effort, silent on
  * failure.
  */
-export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget }: AiPaneToolbarProps) => {
+export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget, sshConnection }: AiPaneToolbarProps) => {
   const available = useAiCliStore((s) => s.availableByHost[sshTarget]);
   const probe = useAiCliStore((s) => s.probe);
   const splitLeafWithCommand = useWorkspaceStore((s) => s.splitLeafWithCommand);
@@ -39,20 +41,29 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget }: A
   // one, producing `ssh ... "...claude..." "...codex..."` — ssh joins those args
   // and the resulting remote command is garbage.
   const baseSshCommand = useMemo(
-    () => (host ? buildSshCommand(host) : `ssh ${sshTarget}`),
-    [host, sshTarget],
+    () => (sshConnection ? sshConnectionToCommandLine(sshConnection) : host ? buildSshCommand(host) : `ssh ${sshTarget}`),
+    [sshConnection, host, sshTarget],
+  );
+  const baseSshConnection = useMemo(
+    () => sshConnection ?? (host ? buildSshConnection(host) : parseSshCommandLine(baseSshCommand)?.connection),
+    [sshConnection, host, baseSshCommand],
   );
 
   // Re-probe lazily if availability is unknown for this target (e.g. session
   // restored before `App.autoAiSplit` got a chance to populate the cache).
   useEffect(() => {
     if (available !== undefined) return;
-    probe(sshTarget, baseSshCommand).catch(() => {});
-  }, [available, sshTarget, baseSshCommand, probe]);
+    probe(sshTarget, baseSshCommand, baseSshConnection).catch(() => {});
+  }, [available, sshTarget, baseSshCommand, baseSshConnection, probe]);
 
   const handleAdd = (kind: AiKind) => {
-    const cmd = buildAiLaunchCommand(kind, baseSshCommand, host);
-    splitLeafWithCommand(workspaceId, leafId, "vertical", cmd, { aiKind: kind, aiSshTarget: sshTarget });
+    const spec = buildAiLaunchSpec(kind, baseSshCommand, baseSshConnection);
+    splitLeafWithCommand(workspaceId, leafId, "vertical", spec.command, {
+      aiKind: kind,
+      aiSshTarget: sshTarget,
+      sshConnection: spec.sshConnection,
+      sshRemoteCommand: spec.sshRemoteCommand,
+    });
   };
 
   const candidates = AI_KINDS.filter((k) => k !== currentKind && available?.has(k));

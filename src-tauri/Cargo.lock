@@ -5799,7 +5799,12 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-shell",
  "windows-sys 0.59.0",
+ "wmux-platform",
 ]
+
+[[package]]
+name = "wmux-platform"
+version = "0.1.0"
 
 [[package]]
 name = "writeable"

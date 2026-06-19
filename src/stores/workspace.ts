@@ -1,5 +1,13 @@
 import { create } from "zustand";
 import { useTmuxSessionsStore } from "./tmuxSessions";
+import { getRuntimePlatform, type RuntimePlatform } from "../utils/runtimePlatform";
+import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession";
+import {
+  buildSshCommandWithRemoteCmdFromConnection,
+  parseSshCommandLine,
+  sshConnectionToCommandLine,
+  type SshConnection,
+} from "../utils/sshConnection";
 
 // Split tree types
 export type SplitDirection = "horizontal" | "vertical";
@@ -24,6 +32,8 @@ export interface LeafNode {
   cloneFromPtyId?: number; // PTY ID of the source pane when split
   sshCommand?: string; // SSH command to restore on session reload
   command?: string; // Direct command to run as PTY process (e.g., "ssh user@host")
+  sshConnection?: SshConnection;
+  sshRemoteCommand?: string;
   /**
    * When set, spawn via `spawn_pty_tmux_cc` using `command` as ssh_command and this
    * field as tmux session name. Enables tmux-CC persistence on the remote.
@@ -46,6 +56,8 @@ export interface MonitorNode {
   type: "monitor";
   id: string;
   sshTarget: string;
+  sshCommand?: string;
+  sshConnection?: SshConnection;
   monitorId: string;
 }
 
@@ -53,7 +65,9 @@ export interface ClaudeSessionNode {
   type: "claudeSession";
   id: string;
   sshTarget: string;
+  sshConnection?: SshConnection;
   project: string;
+  projectPath?: string;
   sessionId: string;
   monitorId: string;
 }
@@ -84,6 +98,8 @@ interface SavedLeaf {
   id: string;
   sshCommand?: string;
   command?: string;
+  sshConnection?: SshConnection;
+  sshRemoteCommand?: string;
   tmuxSession?: string;
   aiKind?: AiKind;
   aiSshTarget?: string;
@@ -107,6 +123,8 @@ interface SavedMonitor {
   type: "monitor";
   id: string;
   sshTarget: string;
+  sshCommand?: string;
+  sshConnection?: SshConnection;
   monitorId: string;
 }
 
@@ -114,7 +132,9 @@ interface SavedClaudeSession {
   type: "claudeSession";
   id: string;
   sshTarget: string;
+  sshConnection?: SshConnection;
   project: string;
+  projectPath?: string;
   sessionId: string;
   monitorId: string;
 }
@@ -130,6 +150,8 @@ interface SavedWorkspace {
 }
 
 interface SavedSession {
+  schemaVersion?: number;
+  sourcePlatform?: RuntimePlatform;
   workspaces: SavedWorkspace[];
   activeId: string | null;
 }
@@ -138,7 +160,7 @@ interface WorkspaceState {
   workspaces: Workspace[];
   activeId: string | null;
 
-  addWorkspace: (name?: string, command?: string, tmuxSession?: string) => string;
+  addWorkspace: (name?: string, command?: string, tmuxSession?: string, sshConnection?: SshConnection, sshRemoteCommand?: string) => string;
   removeWorkspace: (id: string) => void;
   setActive: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
@@ -155,7 +177,7 @@ interface WorkspaceState {
     leafId: string,
     direction: SplitDirection,
     command: string,
-    aiMeta?: { aiKind: AiKind; aiSshTarget?: string },
+    aiMeta?: { aiKind: AiKind; aiSshTarget?: string; sshConnection?: SshConnection; sshRemoteCommand?: string },
   ) => string;
   /**
    * Split the focused leaf and attach the new pane to a remote tmux session via
@@ -182,8 +204,17 @@ interface WorkspaceState {
 
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => void;
 
-  openMonitor: (workspaceId: string, leafId: string, sshTarget: string) => string;
-  openClaudeSession: (workspaceId: string, leafId: string, sshTarget: string, project: string, sessionId: string, monitorId: string) => string;
+  openMonitor: (workspaceId: string, leafId: string, sshTarget: string, sshCommand?: string, sshConnection?: SshConnection) => string;
+  openClaudeSession: (
+    workspaceId: string,
+    leafId: string,
+    sshTarget: string,
+    project: string,
+    projectPath: string | undefined,
+    sessionId: string,
+    monitorId: string,
+    sshConnection?: SshConnection,
+  ) => string;
 
   // Session persistence
   saveSession: () => void;
@@ -192,6 +223,26 @@ interface WorkspaceState {
 
 let counter = 0;
 const genId = () => `n-${Date.now()}-${counter++}`;
+const SESSION_STORAGE_KEY = "wmux-session";
+const SESSION_SCHEMA_VERSION = 2;
+const SESSION_PLATFORMS: RuntimePlatform[] = ["linux", "windows", "macos", "unknown"];
+let saveToPlatformSpecificSessionKey = false;
+
+const platformSessionKey = (platform: RuntimePlatform): string =>
+  `${SESSION_STORAGE_KEY}:${platform}`;
+
+const savedPlatform = (platform: unknown): RuntimePlatform =>
+  SESSION_PLATFORMS.includes(platform as RuntimePlatform)
+    ? (platform as RuntimePlatform)
+    : "unknown";
+
+const isSessionPlatformCompatible = (
+  sourcePlatform: RuntimePlatform,
+  currentPlatform: RuntimePlatform,
+): boolean =>
+  sourcePlatform === "unknown" ||
+  currentPlatform === "unknown" ||
+  sourcePlatform === currentPlatform;
 
 const isDefaultWorkspaceName = (name: string | undefined): boolean =>
   !name || /^Shell \d+$/.test(name);
@@ -200,18 +251,15 @@ const isDefaultWorkspaceName = (name: string | undefined): boolean =>
 // Used by `restoreSession` so leaves saved by a pre-aiKind build still get a
 // toolbar and don't trigger a duplicate auto-split on first launch after upgrade.
 const AI_KIND_PATTERN = /(?:^|['" /])(claude|codex|gemini|copilot)\b/;
-const SSH_TARGET_PATTERN = /(\S+@\S+)/;
 const inferAiMetaFromCommand = (
   command: string | undefined,
 ): { aiKind: AiKind; aiSshTarget: string } | undefined => {
   if (!command) return undefined;
-  const km = command.match(AI_KIND_PATTERN);
+  const parsed = parseSshCommandLine(command);
+  if (!parsed) return undefined;
+  const km = (parsed.remoteCommand ?? command).match(AI_KIND_PATTERN);
   if (!km) return undefined;
-  const tm = command.match(SSH_TARGET_PATTERN);
-  if (!tm) return undefined;
-  // Strip a trailing quote if the matched token is something like `"user@host"`.
-  const target = tm[1].replace(/^["']|["']$/g, "");
-  return { aiKind: km[1] as AiKind, aiSshTarget: target };
+  return { aiKind: km[1] as AiKind, aiSshTarget: parsed.connection.target };
 };
 
 // Helper: find and replace a node in the tree
@@ -283,7 +331,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   activeId: null,
 
-  addWorkspace: (name?: string, command?: string, tmuxSession?: string) => {
+  addWorkspace: (name?: string, command?: string, tmuxSession?: string, sshConnection?: SshConnection, sshRemoteCommand?: string) => {
     const leafId = genId();
     const wsId = genId();
     const leaf: LeafNode = {
@@ -291,6 +339,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       id: leafId,
       ptyId: null,
       command: command ?? undefined,
+      sshConnection: sshConnection ?? undefined,
+      sshRemoteCommand: sshRemoteCommand ?? undefined,
       tmuxSession: tmuxSession ?? undefined,
     };
     const ws: Workspace = {
@@ -348,7 +398,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }));
   },
 
-  openMonitor: (workspaceId: string, leafId: string, sshTarget: string) => {
+  openMonitor: (workspaceId: string, leafId: string, sshTarget: string, sshCommand?: string, sshConnection?: SshConnection) => {
     const monitorNodeId = genId();
     const monitorId = `mon-${Date.now()}`;
     set((s) => ({
@@ -361,7 +411,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           ratio: 0.7,
           children: [
             preserveLeaf(w.layout, leafId),
-            { type: "monitor", id: monitorNodeId, sshTarget, monitorId },
+            { type: "monitor", id: monitorNodeId, sshTarget, sshCommand, sshConnection, monitorId },
           ],
         };
         return { ...w, layout: replaceNode(w.layout, leafId, splitNode) };
@@ -370,7 +420,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return monitorId;
   },
 
-  openClaudeSession: (workspaceId: string, leafId: string, sshTarget: string, project: string, sessionId: string, monitorId: string) => {
+  openClaudeSession: (
+    workspaceId: string,
+    leafId: string,
+    sshTarget: string,
+    project: string,
+    projectPath: string | undefined,
+    sessionId: string,
+    monitorId: string,
+    sshConnection?: SshConnection,
+  ) => {
     const claudeNodeId = genId();
     set((s) => ({
       workspaces: s.workspaces.map((w) => {
@@ -382,7 +441,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           ratio: 0.5,
           children: [
             preserveLeaf(w.layout, leafId),
-            { type: "claudeSession", id: claudeNodeId, sshTarget, project, sessionId, monitorId },
+            { type: "claudeSession", id: claudeNodeId, sshTarget, sshConnection, project, projectPath, sessionId, monitorId },
           ],
         };
         return { ...w, layout: replaceNode(w.layout, leafId, splitNode) };
@@ -455,8 +514,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       workspaces: s.workspaces.map((w) => {
         if (w.id !== workspaceId) return w;
         const parent = findLeaf(w.layout, leafId);
-        const inheritedCmd =
-          parent?.command && /^ssh\b/i.test(parent.command) ? parent.command : undefined;
+        const parentCommand = parent?.command ?? parent?.sshCommand;
+        const parsedParentSsh = parseSshCommandLine(parentCommand);
+        const inheritedSshConnection = parent?.sshConnection ?? parsedParentSsh?.connection;
+        const inheritedSshRemoteCommand = parent?.sshRemoteCommand ?? parsedParentSsh?.remoteCommand;
+        const inheritedCmd = inheritedSshConnection
+          ? parentCommand ?? sshConnectionToCommandLine(inheritedSshConnection, {
+              preserveTtyMode: true,
+              remoteCommand: inheritedSshRemoteCommand,
+            })
+          : undefined;
         // Inherit tmux-persist mode with a unique session name per pane so each leaf
         // reconnects independently. Strip any prior `-n-<ts>-<cnt>` marker (from a
         // previous split) so names stay bounded across repeated splits; the `n-`
@@ -479,6 +546,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               ptyId: null,
               cloneFromPtyId: parent?.ptyId ?? undefined,
               command: inheritedCmd,
+              sshConnection: inheritedSshConnection,
+              sshRemoteCommand: inheritedSshRemoteCommand,
               tmuxSession: inheritedTmuxSession,
             },
           ],
@@ -518,6 +587,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               id: newLeafId,
               ptyId: null,
               command,
+              sshConnection: aiMeta?.sshConnection,
+              sshRemoteCommand: aiMeta?.sshRemoteCommand,
               aiKind: aiMeta?.aiKind,
               aiSshTarget: aiMeta?.aiSshTarget,
             },
@@ -624,10 +695,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   saveSession: () => {
     const state = get();
     const stripPty = (node: LayoutNode): SavedLayout => {
-      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget };
+      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget };
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
-      if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, monitorId: node.monitorId };
-      if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, project: node.project, sessionId: node.sessionId, monitorId: node.monitorId };
+      if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, sshCommand: node.sshCommand, sshConnection: node.sshConnection, monitorId: node.monitorId };
+      if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, sshConnection: node.sshConnection, project: node.project, projectPath: node.projectPath, sessionId: node.sessionId, monitorId: node.monitorId };
       return {
         type: "split",
         id: node.id,
@@ -638,6 +709,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     };
 
     const session: SavedSession = {
+      schemaVersion: SESSION_SCHEMA_VERSION,
+      sourcePlatform: getRuntimePlatform(),
       workspaces: state.workspaces.map((w) => ({
         id: w.id,
         name: w.name,
@@ -649,40 +722,77 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     };
 
     try {
-      localStorage.setItem("wmux-session", JSON.stringify(session));
+      const currentPlatform = getRuntimePlatform();
+      const key = saveToPlatformSpecificSessionKey
+        ? platformSessionKey(currentPlatform)
+        : SESSION_STORAGE_KEY;
+      localStorage.setItem(key, JSON.stringify(session));
     } catch {}
   },
 
   restoreSession: () => {
     try {
-      const raw = localStorage.getItem("wmux-session");
+      const currentPlatform = getRuntimePlatform();
+      const platformRaw = localStorage.getItem(platformSessionKey(currentPlatform));
+      const raw = platformRaw ?? localStorage.getItem(SESSION_STORAGE_KEY);
       if (!raw) return false;
 
       const session: SavedSession = JSON.parse(raw);
       if (!session.workspaces || session.workspaces.length === 0) return false;
+      const sourcePlatform = savedPlatform(session.sourcePlatform);
+      const restorePlatformBoundCommands = isSessionPlatformCompatible(
+        sourcePlatform,
+        currentPlatform,
+      );
+      saveToPlatformSpecificSessionKey =
+        !!platformRaw || sourcePlatform === "unknown" || !restorePlatformBoundCommands;
 
       const restoreLayout = (node: SavedLayout): LayoutNode => {
         if (node.type === "leaf") {
+          const command = restorePlatformBoundCommands ? node.command : undefined;
+          const sshCommand = restorePlatformBoundCommands ? node.sshCommand : undefined;
+          const tmuxSession = restorePlatformBoundCommands ? node.tmuxSession : undefined;
+          const parsedSsh = parseSshCommandLine(command ?? sshCommand);
+          const sshConnection = restorePlatformBoundCommands ? node.sshConnection ?? parsedSsh?.connection : undefined;
+          const sshRemoteCommand = restorePlatformBoundCommands ? node.sshRemoteCommand ?? parsedSsh?.remoteCommand : undefined;
           // Migration: leaves saved by builds before aiKind existed have only the
           // command string. Try to infer kind+target so the toolbar still works
           // and `hasAiPane` checks aren't fooled into adding a duplicate.
-          const inferred = node.aiKind ? undefined : inferAiMetaFromCommand(node.command);
+          const inferred = node.aiKind ? undefined : inferAiMetaFromCommand(command);
           return {
             type: "leaf",
             id: node.id,
             ptyId: null,
-            sshCommand: node.sshCommand,
-            command: node.command,
-            tmuxSession: node.tmuxSession,
-            aiKind: node.aiKind ?? inferred?.aiKind,
-            aiSshTarget: node.aiSshTarget ?? inferred?.aiSshTarget,
+            sshCommand,
+            command,
+            sshConnection,
+            sshRemoteCommand,
+            tmuxSession,
+            aiKind: restorePlatformBoundCommands ? node.aiKind ?? inferred?.aiKind : undefined,
+            aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
           };
         }
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
         // Monitor nodes are now sidebar-based; restore as plain leaf
         if (node.type === "monitor") return { type: "leaf", id: node.id, ptyId: null };
         // ClaudeSession nodes need active SSH connection; restore as SSH terminal leaf
-        if (node.type === "claudeSession") return { type: "leaf", id: node.id, ptyId: null, command: `ssh ${node.sshTarget}` };
+        if (node.type === "claudeSession") {
+          const fallback = parseSshCommandLine(`ssh ${node.sshTarget}`);
+          const sshConnection = restorePlatformBoundCommands ? node.sshConnection ?? fallback?.connection : undefined;
+          const remote = buildClaudeResumeRemoteCommand(node.projectPath, node.sessionId);
+          return {
+            type: "leaf",
+            id: node.id,
+            ptyId: null,
+            command: restorePlatformBoundCommands && sshConnection
+              ? buildSshCommandWithRemoteCmdFromConnection(sshConnection, remote, true)
+              : undefined,
+            sshConnection,
+            sshRemoteCommand: restorePlatformBoundCommands ? remote : undefined,
+            aiKind: restorePlatformBoundCommands ? "claude" : undefined,
+            aiSshTarget: restorePlatformBoundCommands ? node.sshTarget : undefined,
+          };
+        }
         return {
           type: "split",
           id: node.id,
@@ -970,13 +1080,13 @@ const findLeaf = (node: LayoutNode, id: string): LeafNode | null => {
 export const findLeafByPtyId = (
   workspaces: Workspace[],
   ptyId: number,
-): { workspaceId: string; leafId: string; leafCount: number } | null => {
+): { workspaceId: string; leafId: string; leafCount: number; tmuxSession?: string } | null => {
   for (const ws of workspaces) {
     const leaves = collectLeafIds(ws.layout);
     for (const leafId of leaves) {
       const leaf = findLeaf(ws.layout, leafId);
       if (leaf && leaf.ptyId === ptyId) {
-        return { workspaceId: ws.id, leafId, leafCount: leaves.length };
+        return { workspaceId: ws.id, leafId, leafCount: leaves.length, tmuxSession: leaf.tmuxSession };
       }
     }
   }

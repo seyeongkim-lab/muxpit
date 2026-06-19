@@ -3,6 +3,8 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 wmux-cli/target/
+crates/*/target/
+crates/*/Cargo.lock
 *.local
 .env
 

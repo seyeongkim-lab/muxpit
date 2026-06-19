@@ -2,11 +2,19 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "../stores/workspace";
+import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession";
+import {
+  buildSshCommandWithRemoteCmdFromConnection,
+  parseSshCommandLine,
+  type SshConnection,
+} from "../utils/sshConnection";
 
 interface ClaudeSessionPaneProps {
   id: string;
   sshTarget: string;
+  sshConnection?: SshConnection;
   project: string;
+  projectPath?: string;
   sessionId: string;
   monitorId: string;
 }
@@ -73,7 +81,7 @@ const parseJournalEntries = (raw: string | string[]): MessageEntry[] => {
   return messages;
 };
 
-export const ClaudeSessionPane = ({ id, sshTarget, project, sessionId, monitorId }: ClaudeSessionPaneProps) => {
+export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, projectPath, sessionId, monitorId }: ClaudeSessionPaneProps) => {
   const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -139,11 +147,13 @@ export const ClaudeSessionPane = ({ id, sshTarget, project, sessionId, monitorId
   }, [id]);
 
   const handleResume = useCallback(() => {
-    // Decode projectPath from project name by fetching from store
-    // For now use project as-is; the actual projectPath would come from session data
-    const cmd = `ssh -t ${sshTarget} "claude --resume ${sessionId}"`;
-    useWorkspaceStore.getState().addWorkspace(`Claude: ${project}`, cmd);
-  }, [sshTarget, project, sessionId]);
+    const connection = sshConnection ?? parseSshCommandLine(`ssh ${sshTarget}`)?.connection;
+    const remote = buildClaudeResumeRemoteCommand(projectPath, sessionId);
+    const cmd = connection
+      ? buildSshCommandWithRemoteCmdFromConnection(connection, remote, true)
+      : undefined;
+    useWorkspaceStore.getState().addWorkspace(`Claude: ${project}`, cmd, undefined, connection, remote);
+  }, [sshTarget, sshConnection, project, projectPath, sessionId]);
 
   const projectLabel = project.replace(/-/g, "/");
 
