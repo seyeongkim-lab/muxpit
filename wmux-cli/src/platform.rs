@@ -1,4 +1,5 @@
 use std::env;
+#[cfg(not(windows))]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -139,6 +140,7 @@ pub(crate) fn hook_command(
     }
 }
 
+#[cfg(any(not(windows), test))]
 fn unix_hook_command(agent_name: &str, disabled_env: &str, current_exe: Option<&Path>) -> String {
     let current_exe = current_exe
         .map(|path| shell_single_quote(path.to_string_lossy().as_ref()))
@@ -176,6 +178,7 @@ fn windows_hook_command(
     )
 }
 
+#[cfg(any(not(windows), test))]
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
