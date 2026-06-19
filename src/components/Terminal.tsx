@@ -12,6 +12,7 @@ import { useHistoryStore } from "../stores/history";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
 import { playNotificationSound } from "../utils/notificationSound";
+import { consumePtyEventsForId, describePtyExit } from "../utils/ptyEvents";
 import { isLinuxWebKitRuntime, isPowerShellCommand, isWindowsPlatform } from "../utils/runtimePlatform";
 import {
   parseSshCommandLine,
@@ -450,11 +451,12 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
             if (oldId && oldId !== newId) {
               invoke("kill_pty", { id: oldId }).catch(() => {});
             }
-            for (const payload of reconnectOutput.splice(0)) {
-              if (payload.id === newId) handleOutput(payload);
+            for (const payload of consumePtyEventsForId(reconnectOutput, newId)) {
+              handleOutput(payload);
             }
-            for (const payload of reconnectExit.splice(0)) {
-              if (payload.id === newId) handleExit(payload);
+            const exits = consumePtyEventsForId(reconnectExit, newId);
+            if (exits.length > 0) {
+              throw new Error(describePtyExit(exits[0].code));
             }
             term.write(`\x1b[32m[reconnected]\x1b[0m\r\n`);
             return;
