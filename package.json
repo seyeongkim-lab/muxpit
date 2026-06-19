@@ -9,6 +9,7 @@
     "build:cli": "cargo build --manifest-path wmux-cli/Cargo.toml --release",
     "test:ts": "node --test tests/*.test.ts",
     "preview": "vite preview",
+    "tauri:dev:isolated": "node scripts/tauri-isolated-dev.mjs",
     "tauri": "tauri"
   },
   "packageManager": "pnpm@10.32.1",
