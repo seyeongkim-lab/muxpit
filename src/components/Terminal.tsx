@@ -1,7 +1,4 @@
 import { useEffect, useRef, useCallback } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
@@ -22,7 +19,8 @@ import {
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { getResolvedTheme } from "../themes";
-import "@xterm/xterm/css/xterm.css";
+import { terminalInstances } from "./terminalRegistry";
+import { createTerminalSurface } from "./terminalSurface";
 
 interface PtyOutput {
   id: number;
@@ -112,8 +110,6 @@ const parseOscSequences = (data: string, workspaceId: string, leafId: string) =>
   }
 };
 
-import { loadWebglAddon, terminalInstances } from "./terminalRegistry";
-
 // Strip the "data:image/png;base64," prefix; the backend wants raw base64.
 const blobToBase64 = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -126,25 +122,7 @@ const blobToBase64 = (blob: Blob): Promise<string> =>
     reader.readAsDataURL(blob);
   });
 
-const isPrintableInput = (data: string) => data.length > 0 && !/[\x00-\x1f\x7f]/.test(data);
-
 const SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT = isLinuxWebKitRuntime();
-
-const clearInputTextareaAfterCommit = (term: XTerm, data: string) => {
-  const textarea = term.textarea;
-  if (
-    !SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT ||
-    !textarea ||
-    !isPrintableInput(data) ||
-    textarea.value.length === 0
-  ) {
-    return;
-  }
-
-  // WebKitGTK Korean IMEs can leave committed jamo in xterm's helper textarea. If it remains
-  // there, the next standalone jamo is appended to it and xterm sends the whole accumulated value.
-  textarea.value = "";
-};
 
 interface TerminalLeafProps {
   workspaceId: string;
@@ -258,35 +236,25 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     const existing = terminalInstances.get(leafId);
     if (existing) {
       initializedRef.current = true;
-      const xtermEl = existing.term.element;
-      if (xtermEl) {
-        containerRef.current.appendChild(xtermEl);
-        requestAnimationFrame(() => {
-          existing.fitAddon.fit();
-          existing.term.focus();
-        });
-      }
+      existing.surface.attachTo(containerRef.current);
+      requestAnimationFrame(() => {
+        existing.surface.fit();
+        existing.surface.focus();
+      });
       return;
     }
 
     initializedRef.current = true;
 
     const settings = useSettingsStore.getState();
-    const term = new XTerm({
-      cursorBlink: true,
-      cursorStyle: "block",
+    const surface = createTerminalSurface({
       fontSize: settings.fontSize,
       fontFamily: settings.fontFamily,
       theme: getResolvedTheme(settings.themeName, settings.customColors),
-      allowProposedApi: true,
-      scrollback: 5000,
+      enableWebglRenderer: settings.enableWebglRenderer,
+      clearInputTextareaAfterCommit: SHOULD_CLEAR_INPUT_TEXTAREA_AFTER_COMMIT,
+      openLink: (uri) => open(uri).catch(() => {}),
     });
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon((e, uri) => {
-      if (e.ctrlKey) open(uri).catch(() => {});
-    }));
 
     // Declared here (assigned after the spawn-source resolution below) so the
     // key handler and pty-exit listener can reference it without hitting the
@@ -321,19 +289,19 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
             sshConnection: spawnSshConnection,
             imageBase64: await blobToBase64(image),
           });
-          term.paste(remotePath + " ");
+          surface.paste(remotePath + " ");
         } catch (err) {
           console.error("[wmux] image paste failed:", err);
-          term.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
+          surface.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
         }
         return;
       }
       const text = await navigator.clipboard.readText().catch(() => "");
-      if (text) term.paste(text);
+      if (text) surface.paste(text);
     };
 
     // Clipboard & shortcut handling
-    term.attachCustomKeyEventHandler((e) => {
+    surface.attachCustomKeyEventHandler((e) => {
       // Let Ctrl+Shift combos bubble to App shortcuts
       if (e.ctrlKey && e.shiftKey) return false;
 
@@ -352,10 +320,10 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
       // Ctrl+C: copy selection if text is selected, otherwise send interrupt
       if (e.ctrlKey && e.key === "c") {
-        const selection = term.getSelection();
+        const selection = surface.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection);
-          term.clearSelection();
+          surface.clearSelection();
           return false;
         }
         return true; // no selection → send ^C to PTY
@@ -371,15 +339,13 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       return true;
     });
 
-    term.open(containerRef.current);
-
-    const webglAddon = settings.enableWebglRenderer ? loadWebglAddon(term) : undefined;
+    surface.open(containerRef.current);
 
     // Defer to next frame so document-level zoom (set by App.tsx via the settings store)
-    // has taken effect on layout before xterm measures the container. Without this,
-    // fitAddon sees the pre-zoom pixel size and picks too few cols/rows, leaving
+    // has taken effect on layout before the terminal measures the container. Without this,
+    // the fit pass sees the pre-zoom pixel size and picks too few cols/rows, leaving
     // top/right gaps.
-    requestAnimationFrame(() => fitAddon.fit());
+    requestAnimationFrame(() => surface.fit());
 
     // Set up event listeners BEFORE spawning PTY to avoid missing output.
     // Race: the Rust reader thread starts emitting "pty-output" *before* the
@@ -397,7 +363,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
-      term.write(data);
+      surface.write(data);
       if (data.includes("\x1b]")) parseOscSequences(data, workspaceId, leafId);
     };
 
@@ -422,7 +388,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       try {
         for (let i = 0; i < RECONNECT_BACKOFF_MS.length; i++) {
           const delay = RECONNECT_BACKOFF_MS[i];
-          term.write(
+          surface.write(
             `\r\n\x1b[33m[disconnected — reconnecting in ${delay / 1000}s ` +
               `(attempt ${i + 1}/${RECONNECT_BACKOFF_MS.length})]\x1b[0m\r\n`,
           );
@@ -432,8 +398,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           try {
             const oldId = ptyId;
             const newId = await invoke<number>("spawn_pty_tmux_cc", {
-              rows: Math.max(term.rows, 1),
-              cols: Math.max(term.cols, 1),
+              rows: Math.max(surface.rows, 1),
+              cols: Math.max(surface.cols, 1),
               sshCommand,
               sshConnection: spawnSshConnection,
               sessionName,
@@ -458,16 +424,16 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
             if (exits.length > 0) {
               throw new Error(describePtyExit(exits[0].code));
             }
-            term.write(`\x1b[32m[reconnected]\x1b[0m\r\n`);
+            surface.write(`\x1b[32m[reconnected]\x1b[0m\r\n`);
             return;
           } catch (err) {
             reconnectOutput.length = 0;
             reconnectExit.length = 0;
             const msg = err instanceof Error ? err.message : String(err);
-            term.write(`\x1b[31m[reconnect attempt failed: ${msg}]\x1b[0m\r\n`);
+            surface.write(`\x1b[31m[reconnect attempt failed: ${msg}]\x1b[0m\r\n`);
           }
         }
-        term.write(`\r\n\x1b[31m[reconnect gave up after ${RECONNECT_BACKOFF_MS.length} attempts]\x1b[0m\r\n`);
+        surface.write(`\r\n\x1b[31m[reconnect gave up after ${RECONNECT_BACKOFF_MS.length} attempts]\x1b[0m\r\n`);
       } finally {
         reconnecting = false;
       }
@@ -478,7 +444,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       if (tmuxSession && spawnCommand) {
         tryReconnect(spawnCommand, tmuxSession);
       } else {
-        term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
+        surface.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
       }
     };
 
@@ -494,14 +460,14 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     });
 
-    const onData = term.onData((data) => {
+    const onData = surface.onData((data) => {
       // ptyId stays 0 until spawn returns; don't forward input to PTY 0.
       if (ptyId === 0) return;
       invoke("write_pty", { id: ptyId, data }).catch(console.error);
-      clearInputTextareaAfterCommit(term, data);
+      surface.clearInputBufferAfterPrintableCommit(data);
     });
 
-    const onResize = term.onResize(({ rows, cols }) => {
+    const onResize = surface.onResize(({ rows, cols }) => {
       if (ptyId === 0) return;
       invoke("resize_pty", { id: ptyId, rows, cols }).catch(console.error);
     });
@@ -511,7 +477,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       unlistenExit();
       onData.dispose();
       onResize.dispose();
-      term.dispose();
+      surface.dispose();
     };
 
     const isCancelled = () => disposedRef.current || !leafExists(workspaceId, leafId);
@@ -553,23 +519,23 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // Spawn PTY — with command for SSH direct execution, or null for default shell.
     // If spawning with an explicit command fails (e.g. ssh binary missing after a
     // session restore), fall back to the default shell so the pane is usable instead
-    // of leaving a silent empty xterm.
+    // of leaving a silent empty terminal.
     try {
       if (tmuxSession && spawnCommand) {
         // Persist-mode SSH: wrap remote shell in `tmux -CC new -A -s ...`.
-          ptyId = await invoke<number>("spawn_pty_tmux_cc", {
-            rows: Math.max(term.rows, 1),
-            cols: Math.max(term.cols, 1),
-            sshCommand: spawnCommand,
-            sshConnection: spawnSshConnection,
-            sessionName: tmuxSession,
-            workspaceId,
-            surfaceId: leafId,
+        ptyId = await invoke<number>("spawn_pty_tmux_cc", {
+          rows: Math.max(surface.rows, 1),
+          cols: Math.max(surface.cols, 1),
+          sshCommand: spawnCommand,
+          sshConnection: spawnSshConnection,
+          sessionName: tmuxSession,
+          workspaceId,
+          surfaceId: leafId,
         });
       } else {
         ptyId = await invoke<number>("spawn_pty", {
-          rows: Math.max(term.rows, 1),
-          cols: Math.max(term.cols, 1),
+          rows: Math.max(surface.rows, 1),
+          cols: Math.max(surface.cols, 1),
           command: spawnCommand,
           commandArgv: spawnCommandArgv,
           workspaceId,
@@ -578,13 +544,13 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      term.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
+      surface.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
       if (spawnCommand) {
-        term.write(`\x1b[33m[retrying with default shell]\x1b[0m\r\n`);
+        surface.write(`\x1b[33m[retrying with default shell]\x1b[0m\r\n`);
         try {
           ptyId = await invoke<number>("spawn_pty", {
-            rows: Math.max(term.rows, 1),
-            cols: Math.max(term.cols, 1),
+            rows: Math.max(surface.rows, 1),
+            cols: Math.max(surface.cols, 1),
             command: null,
             commandArgv: null,
             workspaceId,
@@ -592,7 +558,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           });
         } catch (err2) {
           const msg2 = err2 instanceof Error ? err2.message : String(err2);
-          term.write(`\r\n\x1b[31m[default shell also failed: ${msg2}]\x1b[0m\r\n`);
+          surface.write(`\r\n\x1b[31m[default shell also failed: ${msg2}]\x1b[0m\r\n`);
           unlistenOutput();
           unlistenExit();
           onData.dispose();
@@ -632,10 +598,8 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     bufferedExit.length = 0;
 
     terminalInstances.set(leafId, {
-      term,
-      fitAddon,
+      surface,
       ptyId,
-      webglAddon,
       cleanup: { unlistenOutput, unlistenExit, onData, onResize },
     });
 
@@ -676,7 +640,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }, 700);
     }
 
-    term.focus();
+    surface.focus();
   }, [workspaceId, leafId, setPtyId]);
 
   useEffect(() => {
@@ -690,17 +654,16 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   }, [initTerminal, leafId]);
 
   // Apply font settings changes to existing terminals.
-  // xterm renders its own canvas, so Chromium's `zoom` on <html> (used by App.tsx to
+  // The current terminal surface renders its own canvas, so Chromium's `zoom` on <html> (used by App.tsx to
   // scale the chrome) does not reach the WebGL canvas. The terminal font must be
-  // resized through xterm's own options. fit() runs in the next frame because the
+  // resized through the surface options. fit() runs in the next frame because the
   // zoom useEffect in App.tsx also fires on fontSize changes and the relative order
   // isn't guaranteed — waiting a frame ensures zoom is already applied.
   useEffect(() => {
     const instance = terminalInstances.get(leafId);
     if (instance) {
-      instance.term.options.fontSize = fontSize;
-      instance.term.options.fontFamily = fontFamily;
-      requestAnimationFrame(() => instance.fitAddon.fit());
+      instance.surface.setFont(fontSize, fontFamily);
+      requestAnimationFrame(() => instance.surface.fit());
     }
   }, [fontSize, fontFamily, leafId]);
 
@@ -709,7 +672,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     if (!containerRef.current) return;
     const resizeObserver = new ResizeObserver(() => {
       const instance = terminalInstances.get(leafId);
-      if (instance) requestAnimationFrame(() => instance.fitAddon.fit());
+      if (instance) requestAnimationFrame(() => instance.surface.fit());
     });
     resizeObserver.observe(containerRef.current);
     return () => resizeObserver.disconnect();
@@ -717,17 +680,16 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
   // Focus management — only force-focus when the browser focus is NOT already
   // inside this terminal. A mousedown on an unfocused pane triggers
-  // `setFocusedLeaf`, which re-runs this effect; calling `term.focus()` during
+  // `setFocusedLeaf`, which re-runs this effect; calling focus() during
   // an active drag selection yanks focus to the helper textarea and clears the
   // selection before `mouseup`, so the user cannot copy by drag. Native click
-  // already focuses xterm, so skipping the explicit focus() in that path is safe.
+  // already focuses the terminal, so skipping the explicit focus() in that path is safe.
   useEffect(() => {
     if (focusedLeafId !== leafId) return;
     const instance = terminalInstances.get(leafId);
     if (!instance) return;
-    const container = instance.term.element;
-    if (container && container.contains(document.activeElement)) return;
-    instance.term.focus();
+    if (instance.surface.containsActiveElement(document.activeElement)) return;
+    instance.surface.focus();
   }, [focusedLeafId, leafId]);
 
   const handleMouseDown = () => {
