@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { sanitizeTmuxSessionName } from "../utils/tmuxSession";
+import { pickActiveSession, reconcileActiveSession } from "../utils/tmuxSessionState";
 import type { SshConnection } from "../utils/sshConnection";
 
 export interface TmuxSession {
@@ -11,7 +12,7 @@ export interface TmuxSession {
   activity: number;
 }
 
-interface AttachInfo {
+export interface AttachInfo {
   sshCommand: string;
   sshConnection?: SshConnection;
   wrapperSession: string;
@@ -52,6 +53,17 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const failures = new Map<string, number>();
 let paused = false;
 
+const sameAttachContext = (
+  prev: AttachInfo | undefined,
+  sshCommand: string,
+  sshConnection: SshConnection | undefined,
+  wrapperSession: string,
+): boolean =>
+  !!prev &&
+  prev.sshCommand === sshCommand &&
+  JSON.stringify(prev.sshConnection ?? null) === JSON.stringify(sshConnection ?? null) &&
+  prev.wrapperSession === wrapperSession;
+
 const nextDelay = (wsId: string): number => {
   const f = failures.get(wsId) ?? 0;
   if (f === 0) return POLL_INTERVAL_MS;
@@ -84,6 +96,53 @@ const stopTimer = (wsId: string) => {
   }
 };
 
+type StoreGet = () => TmuxSessionsState;
+type StoreSet = (fn: (state: TmuxSessionsState) => Partial<TmuxSessionsState>) => void;
+
+const invokeSwitchClient = (ctx: AttachInfo, targetSession: string): Promise<void> =>
+  invoke<void>("tmux_switch_client", {
+    sshCommand: ctx.sshCommand,
+    sshConnection: ctx.sshConnection ?? null,
+    wrapperSession: ctx.activeSession,
+    targetSession,
+  });
+
+const switchClientWithActiveRetry = async (
+  wsId: string,
+  targetSession: string,
+  ctx: AttachInfo,
+  get: StoreGet,
+): Promise<void> => {
+  try {
+    await invokeSwitchClient(ctx, targetSession);
+    return;
+  } catch (firstError) {
+    await get().refresh(wsId);
+    const refreshed = get()._attach[wsId];
+    if (!refreshed || refreshed.activeSession === ctx.activeSession) {
+      throw firstError;
+    }
+    await invokeSwitchClient(refreshed, targetSession);
+  }
+};
+
+const setActiveSession = (
+  wsId: string,
+  activeSession: string,
+  set: StoreSet,
+) => {
+  set((s) => {
+    const current = s._attach[wsId];
+    if (!current) return {};
+    return {
+      _attach: {
+        ...s._attach,
+        [wsId]: { ...current, activeSession },
+      },
+    };
+  });
+};
+
 export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   byWs: {},
   _attach: {},
@@ -96,12 +155,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     // Idempotent: re-attaching with the same context is a no-op beyond a
     // refresh. Different ssh/wrapper replaces and resets state.
     const prev = get()._attach[wsId];
-    if (
-      prev &&
-      prev.sshCommand === sshCommand &&
-      JSON.stringify(prev.sshConnection ?? null) === JSON.stringify(sshConnection ?? null) &&
-      prev.wrapperSession === wrapper
-    ) {
+    if (sameAttachContext(prev, sshCommand, sshConnection, wrapper)) {
       void get().refresh(wsId);
       return;
     }
@@ -140,6 +194,12 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       });
       failures.delete(wsId);
       set((s) => ({
+        _attach: s._attach[wsId]
+          ? {
+              ...s._attach,
+              [wsId]: reconcileActiveSession(s._attach[wsId], sessions),
+            }
+          : s._attach,
         byWs: {
           ...s.byWs,
           [wsId]: {
@@ -169,21 +229,8 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   switchTo: async (wsId, sessionId) => {
     const ctx = get()._attach[wsId];
     if (!ctx) return;
-    await invoke("tmux_switch_client", {
-      sshCommand: ctx.sshCommand,
-      sshConnection: ctx.sshConnection ?? null,
-      wrapperSession: ctx.activeSession,
-      targetSession: sessionId,
-    });
-    set((s) => ({
-      _attach: {
-        ...s._attach,
-        [wsId]: {
-          ...ctx,
-          activeSession: sessionId,
-        },
-      },
-    }));
+    await switchClientWithActiveRetry(wsId, sessionId, ctx, get);
+    setActiveSession(wsId, sessionId, set);
     await get().refresh(wsId);
   },
 
@@ -196,21 +243,8 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
       name: name && name.trim() ? name.trim() : null,
     });
     // Switch to the freshly created session so the user lands in it.
-    await invoke("tmux_switch_client", {
-      sshCommand: ctx.sshCommand,
-      sshConnection: ctx.sshConnection ?? null,
-      wrapperSession: ctx.activeSession,
-      targetSession: newId,
-    });
-    set((s) => ({
-      _attach: {
-        ...s._attach,
-        [wsId]: {
-          ...ctx,
-          activeSession: newId,
-        },
-      },
-    }));
+    await switchClientWithActiveRetry(wsId, newId, ctx, get);
+    setActiveSession(wsId, newId, set);
     await get().refresh(wsId);
   },
 
@@ -250,16 +284,4 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
 /** Snapshot of attach contexts for read-only Sidebar lookups. */
 export const useAttachInfo = () => useTmuxSessionsStore((s) => s._attach);
 
-/** Identify the attached non-wrapper session, falling back to the wrapper itself. */
-export const pickActiveSession = (
-  sessions: TmuxSession[],
-  wrapperName: string,
-): TmuxSession | null => {
-  const attached = sessions.filter((s) => s.attached);
-  // Prefer the most recently active non-wrapper attached session.
-  const nonWrapper = attached
-    .filter((s) => s.name !== wrapperName)
-    .sort((a, b) => b.activity - a.activity);
-  if (nonWrapper.length > 0) return nonWrapper[0];
-  return attached.find((s) => s.name === wrapperName) ?? attached[0] ?? null;
-};
+export { pickActiveSession, reconcileActiveSession };
