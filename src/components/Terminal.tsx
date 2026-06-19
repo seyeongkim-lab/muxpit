@@ -1,6 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
@@ -9,104 +8,52 @@ import { useHistoryStore } from "../stores/history";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
 import { playNotificationSound } from "../utils/notificationSound";
+import { type PtyExit, type PtyOutput, spawnTerminalPty } from "../utils/ptyBackend";
 import { consumePtyEventsForId, describePtyExit } from "../utils/ptyEvents";
-import { isLinuxWebKitRuntime, isPowerShellCommand, isWindowsPlatform } from "../utils/runtimePlatform";
+import { isLinuxWebKitRuntime } from "../utils/runtimePlatform";
+import {
+  buildShellHistoryHookContext,
+  shouldInjectShellHistoryHook,
+  SHELL_HISTORY_HOOK,
+} from "../utils/shellIntegration";
 import {
   parseSshCommandLine,
   sshConnectionToArgv,
   type SshConnection,
 } from "../utils/sshConnection";
+import { decideTerminalInput } from "../utils/terminalInput";
+import { parseTerminalOutputEvents, type TerminalOutputEvent } from "../utils/terminalOutput";
+import { tauriPtyBackend } from "../utils/tauriPtyBackend";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { getResolvedTheme } from "../themes";
 import { terminalInstances } from "./terminalRegistry";
 import { createTerminalSurface } from "./terminalSurface";
 
-interface PtyOutput {
-  id: number;
-  data: string;
-  surfaceId?: string | null;
-}
-
-interface PtyExit {
-  id: number;
-  code: number | null;
-  surfaceId?: string | null;
-}
-
 // Exponential backoff between tmux-CC reconnection attempts.
 const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
 
-// Shell history capture hook: injects a bash PROMPT_COMMAND + zsh preexec hook into the spawned
-// shell (local or SSH remote) so it emits OSC 777;cmd;<command> before every interactive command.
-// wmux parses those sequences and stores them in the shared history store.
-// The trailing `&& clear` hides the visual footprint of the injection.
-const SHELL_HISTORY_HOOK =
-  '{ if [ -n "$BASH_VERSION" ]; then ' +
-  '__wmux_emit() { local c=$(fc -ln -1 2>/dev/null); c="${c# }"; c="${c#\t}"; ' +
-  '[ -z "$c" ] && return; [ "$c" = "$__wmux_prev" ] && return; ' +
-  'case "$c" in *__wmux_emit*|*__wmux_preexec*) return;; esac; ' +
-  'printf \'\\033]777;cmd;%s\\a\' "$c"; __wmux_prev="$c"; }; ' +
-  'PROMPT_COMMAND="__wmux_emit;${PROMPT_COMMAND:-}"; ' +
-  'elif [ -n "$ZSH_VERSION" ]; then ' +
-  'autoload -Uz add-zsh-hook; ' +
-  '__wmux_preexec() { case "$1" in *__wmux_emit*|*__wmux_preexec*) return;; esac; ' +
-  'printf \'\\033]777;cmd;%s\\a\' "$1"; }; ' +
-  'add-zsh-hook preexec __wmux_preexec; ' +
-  'fi; } 2>/dev/null && clear\r';
-
-// OSC sequence parser: extracts OSC 7 (cwd) and OSC 777 (custom) from terminal output
-const normalizeOsc7Cwd = (rawPath: string): string => {
-  const decoded = decodeURIComponent(rawPath);
-  if (/^\/[A-Za-z]:\//.test(decoded)) return decoded.slice(1);
-  return decoded;
-};
-
-const parseOscSequences = (data: string, workspaceId: string, leafId: string) => {
+const handleTerminalOutputEvent = (event: TerminalOutputEvent, workspaceId: string, leafId: string) => {
   const patchInfo = useWorkspaceInfoStore.getState().patchInfo;
-
-  // OSC 7: current working directory
-  // Format: \e]7;file://hostname/path\a  or \e]7;file://hostname/path\e\\
-  const osc7Re = /\x1b\]7;file:\/\/[^/]*([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
-  let m;
-  while ((m = osc7Re.exec(data)) !== null) {
-    const cwd = normalizeOsc7Cwd(m[1]);
-    if (cwd) patchInfo(workspaceId, { cwd });
-  }
-
-  // OSC 0/2: terminal title. Some full-screen CLIs use this for session context.
-  const titleRe = /\x1b\](?:0|2);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
-  while ((m = titleRe.exec(data)) !== null) {
-    const title = m[1].trim();
-    if (title) patchInfo(workspaceId, { terminalTitle: title });
-  }
-
-  // OSC 777: custom notifications and metadata
-  // Format: \e]777;notify;Title;Body\a
-  const osc777NotifyRe = /\x1b\]777;notify;([^;]*);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
-  while ((m = osc777NotifyRe.exec(data)) !== null) {
-    const title = m[1];
-    const body = m[2];
-    if (!shouldShowNotificationForTarget(workspaceId, leafId)) continue;
-    useNotificationStore.getState().addNotification(workspaceId, title, body);
-    playNotificationSound();
-    invoke("send_notification", { title, body }).catch(() => {});
-  }
-
-  // OSC 777: git branch info
-  // Format: \e]777;git;branchname\a
-  const osc777GitRe = /\x1b\]777;git;([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
-  while ((m = osc777GitRe.exec(data)) !== null) {
-    const branch = m[1].trim();
-    patchInfo(workspaceId, { gitBranch: branch || null });
-  }
-
-  // OSC 777: shell command history (emitted by wmux-injected hook in bash/zsh)
-  // Format: \e]777;cmd;<command text>\a
-  const osc777CmdRe = /\x1b\]777;cmd;([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
-  while ((m = osc777CmdRe.exec(data)) !== null) {
-    const cmd = m[1];
-    if (cmd) useHistoryStore.getState().addEntry(workspaceId, leafId, cmd);
+  switch (event.type) {
+    case "cwd":
+      patchInfo(workspaceId, { cwd: event.cwd });
+      return;
+    case "title":
+      patchInfo(workspaceId, { terminalTitle: event.title });
+      return;
+    case "notification":
+      if (!shouldShowNotificationForTarget(workspaceId, leafId)) return;
+      useNotificationStore.getState().addNotification(workspaceId, event.title, event.body);
+      playNotificationSound();
+      invoke("send_notification", { title: event.title, body: event.body }).catch(() => {});
+      return;
+    case "gitBranch":
+      patchInfo(workspaceId, { gitBranch: event.branch });
+      return;
+    case "historyCommand":
+      useHistoryStore.getState().addEntry(workspaceId, leafId, event.command);
+      return;
   }
 };
 
@@ -214,8 +161,6 @@ const leafExists = (wsId: string, leafId: string): boolean => {
   return find(ws.layout);
 };
 
-const AI_CLI_COMMAND_PATTERN = /(?:^|[\s"'\/])(claude|codex|gemini|copilot)(?=$|[\s;"'])/i;
-
 export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
@@ -282,9 +227,9 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           // clipboard.read() denied/unsupported → treat as text-only clipboard
         }
       }
-      if (image) {
+      if (image && spawnCommand) {
         try {
-          const remotePath = await invoke<string>("push_image_to_remote", {
+          const remotePath = await tauriPtyBackend.pushImageToRemote({
             sshCommand: spawnCommand,
             sshConnection: spawnSshConnection,
             imageBase64: await blobToBase64(image),
@@ -302,41 +247,29 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
     // Clipboard & shortcut handling
     surface.attachCustomKeyEventHandler((e) => {
-      // Let Ctrl+Shift combos bubble to App shortcuts
-      if (e.ctrlKey && e.shiftKey) return false;
-
-      // Let Win/Meta key combos pass through to OS (e.g. Win+V clipboard history)
-      if (e.metaKey) return false;
-
-      if (e.type !== "keydown") return true;
-
-      // Prefix mode active or history panel open → swallow all keys
       const prefSt = usePrefixStore.getState();
-      if (prefSt.active || prefSt.historyOpen) return false;
+      const selection = e.ctrlKey && e.key === "c" ? surface.getSelection() : "";
+      const decision = decideTerminalInput(e, {
+        prefixActive: prefSt.active,
+        historyOpen: prefSt.historyOpen,
+        prefixKeyMatches: matchesPrefixKey(e, useSettingsStore.getState().prefixKey),
+        hasSelection: !!selection,
+      });
 
-      // Pressing the configured prefix key → swallow (App handler will activate prefix mode)
-      const prefixKey = useSettingsStore.getState().prefixKey;
-      if (matchesPrefixKey(e, prefixKey)) return false;
-
-      // Ctrl+C: copy selection if text is selected, otherwise send interrupt
-      if (e.ctrlKey && e.key === "c") {
-        const selection = surface.getSelection();
-        if (selection) {
+      switch (decision.kind) {
+        case "allowTerminalInput":
+          return true;
+        case "copySelection":
           navigator.clipboard.writeText(selection);
           surface.clearSelection();
           return false;
-        }
-        return true; // no selection → send ^C to PTY
+        case "pasteClipboard":
+          e.preventDefault();
+          pasteClipboard();
+          return false;
+        case "blockTerminalInput":
+          return false;
       }
-
-      // Ctrl+V: always paste from clipboard
-      if (e.ctrlKey && e.key === "v") {
-        e.preventDefault();
-        pasteClipboard();
-        return false;
-      }
-
-      return true;
     });
 
     surface.open(containerRef.current);
@@ -364,17 +297,21 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
       surface.write(data);
-      if (data.includes("\x1b]")) parseOscSequences(data, workspaceId, leafId);
+      if (data.includes("\x1b]")) {
+        for (const event of parseTerminalOutputEvents(data)) {
+          handleTerminalOutputEvent(event, workspaceId, leafId);
+        }
+      }
     };
 
-    const unlistenOutput = await listen<PtyOutput>("pty-output", (event) => {
+    const unlistenOutput = await tauriPtyBackend.onOutput((payload) => {
       if (!idAssigned) {
-        bufferedOutput.push(event.payload);
+        bufferedOutput.push(payload);
         return;
       }
-      if (event.payload.id === ptyId) handleOutput(event.payload);
-      else if (reconnecting && event.payload.surfaceId === leafId) {
-        reconnectOutput.push(event.payload);
+      if (payload.id === ptyId) handleOutput(payload);
+      else if (reconnecting && payload.surfaceId === leafId) {
+        reconnectOutput.push(payload);
       }
     });
 
@@ -397,25 +334,26 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
           if (!terminalInstances.has(leafId)) return;
           try {
             const oldId = ptyId;
-            const newId = await invoke<number>("spawn_pty_tmux_cc", {
+            const newId = await spawnTerminalPty(tauriPtyBackend, {
               rows: Math.max(surface.rows, 1),
               cols: Math.max(surface.cols, 1),
-              sshCommand,
-              sshConnection: spawnSshConnection,
-              sessionName,
+              spawnCommand: sshCommand,
+              spawnCommandArgv: null,
+              spawnSshConnection,
+              tmuxSession: sessionName,
               workspaceId,
-              surfaceId: leafId,
+              leafId,
             });
             const inst = terminalInstances.get(leafId);
             if (!inst) {
-              invoke("kill_pty", { id: newId }).catch(() => {});
+              tauriPtyBackend.kill(newId).catch(() => {});
               return;
             }
             ptyId = newId;
             inst.ptyId = newId;
             setPtyId(workspaceId, leafId, newId);
             if (oldId && oldId !== newId) {
-              invoke("kill_pty", { id: oldId }).catch(() => {});
+              tauriPtyBackend.kill(oldId).catch(() => {});
             }
             for (const payload of consumePtyEventsForId(reconnectOutput, newId)) {
               handleOutput(payload);
@@ -448,28 +386,28 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }
     };
 
-    const unlistenExit = await listen<PtyExit>("pty-exit", (event) => {
+    const unlistenExit = await tauriPtyBackend.onExit((payload) => {
       if (!idAssigned) {
-        bufferedExit.push(event.payload);
+        bufferedExit.push(payload);
         return;
       }
-      if (event.payload.id === ptyId) {
-        handleExit(event.payload);
-      } else if (reconnecting && event.payload.surfaceId === leafId) {
-        reconnectExit.push(event.payload);
+      if (payload.id === ptyId) {
+        handleExit(payload);
+      } else if (reconnecting && payload.surfaceId === leafId) {
+        reconnectExit.push(payload);
       }
     });
 
     const onData = surface.onData((data) => {
       // ptyId stays 0 until spawn returns; don't forward input to PTY 0.
       if (ptyId === 0) return;
-      invoke("write_pty", { id: ptyId, data }).catch(console.error);
+      tauriPtyBackend.write(ptyId, data).catch(console.error);
       surface.clearInputBufferAfterPrintableCommit(data);
     });
 
     const onResize = surface.onResize(({ rows, cols }) => {
       if (ptyId === 0) return;
-      invoke("resize_pty", { id: ptyId, rows, cols }).catch(console.error);
+      tauriPtyBackend.resize(ptyId, rows, cols).catch(console.error);
     });
 
     const cleanupUnregisteredTerminal = () => {
@@ -496,10 +434,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       spawnSshConnection = savedSpec.sshConnection ?? null;
     } else if (cloneFromPtyId) {
       try {
-        const ctx = await invoke<{ ssh_command: string | null; cwd: string | null }>(
-          "get_shell_ctx",
-          { id: cloneFromPtyId },
-        );
+        const ctx = await tauriPtyBackend.getShellContext(cloneFromPtyId);
         if (ctx.ssh_command) {
           const parsed = parseSshCommandLine(ctx.ssh_command);
           spawnCommand = ctx.ssh_command;
@@ -521,34 +456,23 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // session restore), fall back to the default shell so the pane is usable instead
     // of leaving a silent empty terminal.
     try {
-      if (tmuxSession && spawnCommand) {
-        // Persist-mode SSH: wrap remote shell in `tmux -CC new -A -s ...`.
-        ptyId = await invoke<number>("spawn_pty_tmux_cc", {
-          rows: Math.max(surface.rows, 1),
-          cols: Math.max(surface.cols, 1),
-          sshCommand: spawnCommand,
-          sshConnection: spawnSshConnection,
-          sessionName: tmuxSession,
-          workspaceId,
-          surfaceId: leafId,
-        });
-      } else {
-        ptyId = await invoke<number>("spawn_pty", {
-          rows: Math.max(surface.rows, 1),
-          cols: Math.max(surface.cols, 1),
-          command: spawnCommand,
-          commandArgv: spawnCommandArgv,
-          workspaceId,
-          surfaceId: leafId,
-        });
-      }
+      ptyId = await spawnTerminalPty(tauriPtyBackend, {
+        rows: Math.max(surface.rows, 1),
+        cols: Math.max(surface.cols, 1),
+        spawnCommand,
+        spawnCommandArgv,
+        spawnSshConnection,
+        tmuxSession,
+        workspaceId,
+        leafId,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       surface.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
       if (spawnCommand) {
         surface.write(`\x1b[33m[retrying with default shell]\x1b[0m\r\n`);
         try {
-          ptyId = await invoke<number>("spawn_pty", {
+          ptyId = await tauriPtyBackend.spawn({
             rows: Math.max(surface.rows, 1),
             cols: Math.max(surface.cols, 1),
             command: null,
@@ -576,7 +500,7 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
 
     if (isCancelled()) {
       if (ptyId !== 0) {
-        invoke("kill_pty", { id: ptyId }).catch(() => {});
+        tauriPtyBackend.kill(ptyId).catch(() => {});
       }
       cleanupUnregisteredTerminal();
       return;
@@ -609,16 +533,10 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     // For non-SSH clones, replicate local cwd
     if (cloneFromPtyId && !spawnCommand) {
       try {
-        const ctx = await invoke<{ ssh_command: string | null; cwd: string | null }>(
-          "get_shell_ctx",
-          { id: cloneFromPtyId },
-        );
+        const ctx = await tauriPtyBackend.getShellContext(cloneFromPtyId);
         if (ctx.cwd) {
           setTimeout(() => {
-            invoke("write_pty", {
-              id: ptyId,
-              data: `cd "${ctx.cwd}"\r`,
-            }).catch(() => {});
+            tauriPtyBackend.write(ptyId, `cd "${ctx.cwd}"\r`).catch(() => {});
           }, 500);
         }
       } catch {
@@ -631,12 +549,13 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     //   - tmux-persist panes (the hook ends with `clear`, which erases the existing tmux
     //     screen on reconnect — history is already captured when the session was first started)
     //   - PowerShell / cmd panes (POSIX `[ -n ... ]` syntax raises a ParserError)
-    const isAiCliPane = !!findAiKind(workspaceId, leafId) || !!(spawnCommand && AI_CLI_COMMAND_PATTERN.test(spawnCommand));
-    const isWindowsLocalShell = !spawnCommand && isWindowsPlatform();
-    const isPowerShellTarget = !!(spawnCommand && isPowerShellCommand(spawnCommand));
-    if (!isAiCliPane && !tmuxSession && !isWindowsLocalShell && !isPowerShellTarget) {
+    if (
+      shouldInjectShellHistoryHook(
+        buildShellHistoryHookContext(findAiKind(workspaceId, leafId), spawnCommand, tmuxSession),
+      )
+    ) {
       setTimeout(() => {
-        invoke("write_pty", { id: ptyId, data: SHELL_HISTORY_HOOK }).catch(() => {});
+        tauriPtyBackend.write(ptyId, SHELL_HISTORY_HOOK).catch(() => {});
       }, 700);
     }
 

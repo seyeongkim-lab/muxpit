@@ -1,8 +1,33 @@
-import type { ITheme } from "@xterm/xterm";
-
 export interface ThemeEntry {
   name: string;
-  theme: ITheme;
+  theme: TerminalTheme;
+}
+
+export interface TerminalTheme {
+  background?: string;
+  foreground?: string;
+  cursor?: string;
+  cursorAccent?: string;
+  selectionBackground?: string;
+  selectionForeground?: string;
+  selectionInactiveBackground?: string;
+  black?: string;
+  red?: string;
+  green?: string;
+  yellow?: string;
+  blue?: string;
+  magenta?: string;
+  cyan?: string;
+  white?: string;
+  brightBlack?: string;
+  brightRed?: string;
+  brightGreen?: string;
+  brightYellow?: string;
+  brightBlue?: string;
+  brightMagenta?: string;
+  brightCyan?: string;
+  brightWhite?: string;
+  extendedAnsi?: string[];
 }
 
 export const THEMES: ThemeEntry[] = [
@@ -163,8 +188,8 @@ export const getThemeByName = (name: string): ThemeEntry =>
 
 // Only string-valued theme keys (excludes extendedAnsi which is string[])
 export type ThemeColorKey = Exclude<{
-  [K in keyof ITheme]: ITheme[K] extends string | undefined ? K : never;
-}[keyof ITheme], undefined>;
+  [K in keyof TerminalTheme]: TerminalTheme[K] extends string | undefined ? K : never;
+}[keyof TerminalTheme], undefined>;
 
 export const THEME_COLOR_GROUPS: { label: string; keys: ThemeColorKey[] }[] = [
   {
@@ -183,7 +208,7 @@ export const THEME_COLOR_GROUPS: { label: string; keys: ThemeColorKey[] }[] = [
 
 export type CustomColors = Record<string, Partial<Record<ThemeColorKey, string>>>;
 
-export const getResolvedTheme = (name: string, customColors: CustomColors): ITheme => {
+export const getResolvedTheme = (name: string, customColors: CustomColors): TerminalTheme => {
   const base = getThemeByName(name).theme;
   const overrides = customColors[name];
   if (!overrides) return base;
@@ -221,7 +246,7 @@ const darken = (hex: string, factor: number): string => {
  * bg so the two surfaces read as separate planes — terminal is content,
  * sidebar is chrome.
  */
-export const applyThemeVars = (theme: ITheme): void => {
+export const applyThemeVars = (theme: TerminalTheme): void => {
   const root = document.documentElement;
   const bg = theme.background ?? "#1e1e2e";
   const accent = theme.blue ?? "#89b4fa";

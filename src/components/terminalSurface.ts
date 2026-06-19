@@ -3,6 +3,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import type { TerminalTheme } from "../themes";
 
 export interface TerminalDisposable {
   dispose: () => void;
@@ -32,7 +33,7 @@ export interface TerminalSurface {
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
   clearInputBufferAfterPrintableCommit(data: string): void;
   setFont(fontSize: number, fontFamily: string): void;
-  setTheme(theme: ITheme): void;
+  setTheme(theme: TerminalTheme): void;
   setWebglRenderer(enabled: boolean): void;
   dispose(): void;
 }
@@ -40,7 +41,7 @@ export interface TerminalSurface {
 export interface CreateTerminalSurfaceOptions {
   fontSize: number;
   fontFamily: string;
-  theme: ITheme;
+  theme: TerminalTheme;
   enableWebglRenderer: boolean;
   clearInputTextareaAfterCommit: boolean;
   openLink: (uri: string) => void;
@@ -66,7 +67,7 @@ class XtermTerminalSurface implements TerminalSurface {
       cursorStyle: "block",
       fontSize: options.fontSize,
       fontFamily: options.fontFamily,
-      theme: options.theme,
+      theme: toXtermTheme(options.theme),
       allowProposedApi: true,
       scrollback: 5000,
     });
@@ -165,8 +166,8 @@ class XtermTerminalSurface implements TerminalSurface {
     this.term.options.fontFamily = fontFamily;
   }
 
-  setTheme(theme: ITheme) {
-    this.term.options.theme = theme;
+  setTheme(theme: TerminalTheme) {
+    this.term.options.theme = toXtermTheme(theme);
   }
 
   setWebglRenderer(enabled: boolean) {
@@ -199,3 +200,5 @@ class XtermTerminalSurface implements TerminalSurface {
     }
   }
 }
+
+const toXtermTheme = (theme: TerminalTheme): ITheme => theme;

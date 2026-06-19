@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "../stores/settings";
 import { getResolvedTheme } from "../themes";
+import { tauriPtyBackend } from "../utils/tauriPtyBackend";
 import type { TerminalDisposable, TerminalSurface } from "./terminalSurface";
 
 export interface TerminalInstance {
@@ -22,7 +22,7 @@ export const terminalInstances = new Map<string, TerminalInstance>();
 export const destroyTerminal = (leafId: string) => {
   const instance = terminalInstances.get(leafId);
   if (!instance) return;
-  invoke("kill_pty", { id: instance.ptyId }).catch(() => {});
+  tauriPtyBackend.kill(instance.ptyId).catch(() => {});
   instance.cleanup.unlistenOutput();
   instance.cleanup.unlistenExit();
   instance.cleanup.onData.dispose();
