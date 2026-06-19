@@ -25,7 +25,9 @@ import {
   type SshConnection,
 } from "../utils/sshConnection";
 import { tauriPtyBackend } from "../utils/tauriPtyBackend";
+import { createTerminalClipboard } from "../utils/terminalClipboard";
 import { decideTerminalInput, shouldReadTerminalSelectionForInput } from "../utils/terminalInput";
+import { pasteTerminalClipboard } from "../utils/terminalPaste";
 import {
   findTerminalAiKind,
   findTerminalCloneFromPtyId,
@@ -74,18 +76,6 @@ const handleTerminalOutputEvent = (event: TerminalOutputEvent, workspaceId: stri
   }
 };
 
-// Strip the "data:image/png;base64," prefix; the backend wants raw base64.
-const blobToBase64 = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      resolve(url.slice(url.indexOf(",") + 1));
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-
 const createConfiguredSurface = (): TerminalSurface => {
   const settings = useSettingsStore.getState();
   return createTerminalSurface({
@@ -132,41 +122,19 @@ export const useTerminalSession = ({
     let spawnCommand: string | null = null;
     let spawnCommandArgv: string[] | null = null;
     let spawnSshConnection: SshConnection | null = null;
+    const clipboard = createTerminalClipboard();
 
     // Ctrl+V entry point. A clipboard image on an SSH pane is uploaded to the
     // remote host and its path pasted instead. Everything else falls back to
     // plain text paste.
     const pasteClipboard = async () => {
-      let image: Blob | null = null;
-      if (spawnCommand) {
-        try {
-          for (const item of await navigator.clipboard.read()) {
-            const type = item.types.find((t) => t.startsWith("image/"));
-            if (type) {
-              image = await item.getType(type);
-              break;
-            }
-          }
-        } catch {
-          // clipboard.read() denied/unsupported -> treat as text-only clipboard
-        }
-      }
-      if (image && spawnCommand) {
-        try {
-          const remotePath = await tauriPtyBackend.pushImageToRemote({
-            sshCommand: spawnCommand,
-            sshConnection: spawnSshConnection,
-            imageBase64: await blobToBase64(image),
-          });
-          surface.paste(remotePath + " ");
-        } catch (err) {
-          console.error("[wmux] image paste failed:", err);
-          surface.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
-        }
-        return;
-      }
-      const text = await navigator.clipboard.readText().catch(() => "");
-      if (text) surface.paste(text);
+      await pasteTerminalClipboard({
+        clipboard,
+        imageUploader: tauriPtyBackend,
+        surface,
+        spawnCommand,
+        spawnSshConnection,
+      });
     };
 
     surface.attachCustomKeyEventHandler((event) => {
@@ -185,7 +153,7 @@ export const useTerminalSession = ({
         case "allowNativeClipboard":
           return false;
         case "copySelection":
-          navigator.clipboard.writeText(selection);
+          clipboard.writeText(selection);
           surface.clearSelection();
           return false;
         case "pasteClipboard":
@@ -452,6 +420,7 @@ export const useTerminalSession = ({
           findTerminalAiKind(getWorkspaces(), workspaceId, leafId),
           spawnCommand,
           tmuxSession,
+          TERMINAL_INPUT_PLATFORM,
         ),
       )
     ) {

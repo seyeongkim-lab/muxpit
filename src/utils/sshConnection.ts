@@ -1,3 +1,5 @@
+import { getRuntimePlatform, type RuntimePlatform } from "./runtimePlatform.ts";
+
 export type SshTtyMode = "allocate" | "force" | "disable";
 
 export interface SshConnection {
@@ -64,8 +66,15 @@ const SSH_EXECUTION_MODE_OPTIONS: Record<string, SshTtyMode> = {
   "-T": "disable",
 };
 
-const isWindowsRuntime = (): boolean =>
-  typeof navigator !== "undefined" && /^win/i.test(navigator.platform ?? "");
+export interface CommandLineSplitOptions {
+  platform?: RuntimePlatform;
+  windows?: boolean;
+}
+
+const shouldUseWindowsCommandLineRules = (options: CommandLineSplitOptions): boolean => {
+  if (options.windows !== undefined) return options.windows;
+  return (options.platform ?? getRuntimePlatform()) === "windows";
+};
 
 const isSshProgram = (program: string): boolean => {
   const normalized = program.replace(/\\/g, "/").toLowerCase();
@@ -81,13 +90,13 @@ const splitAttachedOptionValue = (option: string): [string, string] | null => {
 
 export const splitCommandLine = (
   input: string,
-  options: { windows?: boolean } = {},
+  options: CommandLineSplitOptions = {},
 ): string[] => {
   const words: string[] = [];
   let current = "";
   let inSingle = false;
   let inDouble = false;
-  const windows = options.windows ?? isWindowsRuntime();
+  const windows = shouldUseWindowsCommandLineRules(options);
 
   for (let i = 0; i < input.length; i += 1) {
     const ch = input[i];
@@ -129,12 +138,15 @@ export const splitCommandLine = (
   return words;
 };
 
-export const parseSshCommandLine = (command: string | undefined): SshCommandLine | null => {
+export const parseSshCommandLine = (
+  command: string | undefined,
+  splitOptions: CommandLineSplitOptions = {},
+): SshCommandLine | null => {
   if (!command) return null;
-  const parts = splitCommandLine(command);
+  const parts = splitCommandLine(command, splitOptions);
   if (parts.length < 2 || !isSshProgram(parts[0])) return null;
 
-  const options: string[] = [];
+  const sshOptions: string[] = [];
   let targetIndex = -1;
   let ttyMode: SshTtyMode | undefined;
   for (let index = 1; index < parts.length; index += 1) {
@@ -150,13 +162,13 @@ export const parseSshCommandLine = (command: string | undefined): SshCommandLine
     }
     const attached = splitAttachedOptionValue(part);
     if (attached) {
-      options.push(attached[0], attached[1]);
+      sshOptions.push(attached[0], attached[1]);
       continue;
     }
-    options.push(part);
+    sshOptions.push(part);
     if (SSH_OPTIONS_WITH_VALUE.has(part) && index + 1 < parts.length) {
       index += 1;
-      options.push(parts[index]);
+      sshOptions.push(parts[index]);
     }
   }
 
@@ -165,7 +177,7 @@ export const parseSshCommandLine = (command: string | undefined): SshCommandLine
   return {
     connection: {
       program: parts[0],
-      options,
+      options: sshOptions,
       target: parts[targetIndex],
       ttyMode,
     },
