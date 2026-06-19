@@ -5,7 +5,9 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +211,24 @@ impl PtyManager {
         let pty_id = id;
         let reader_tmux_state = tmux_state.clone();
         let reader_surface_id = wmux_context.surface_id.clone();
+
+        // Plain (non-tmux) output is coalesced on a short time window by a
+        // dedicated emitter thread. This collapses the many small reads of a
+        // high-throughput burst into a handful of Tauri events, and re-joins
+        // multi-byte UTF-8 sequences that a 4KB read boundary would otherwise
+        // split into replacement characters.
+        let output_tx = if reader_tmux_state.is_none() {
+            let (tx, rx) = mpsc::channel::<OutputMsg>();
+            let emit_app = app.clone();
+            let emit_surface = reader_surface_id.clone();
+            std::thread::spawn(move || {
+                run_output_emitter(rx, pty_id, emit_surface, emit_app);
+            });
+            Some(tx)
+        } else {
+            None
+        };
+
         std::thread::spawn(move || {
             let mut parser = if reader_tmux_state.is_some() {
                 Some(TmuxCcParser::new())
@@ -219,14 +239,7 @@ impl PtyManager {
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        let _ = app_clone.emit(
-                            "pty-exit",
-                            PtyExit {
-                                id: pty_id,
-                                code: None,
-                                surface_id: reader_surface_id.clone(),
-                            },
-                        );
+                        emit_reader_exit(&output_tx, &app_clone, pty_id, &reader_surface_id);
                         break;
                     }
                     Ok(n) => {
@@ -243,27 +256,14 @@ impl PtyManager {
                                     &app_clone,
                                 );
                             }
-                        } else {
-                            let text = String::from_utf8_lossy(chunk).to_string();
-                            let _ = app_clone.emit(
-                                "pty-output",
-                                PtyOutput {
-                                    id: pty_id,
-                                    data: text,
-                                    surface_id: reader_surface_id.clone(),
-                                },
-                            );
+                        } else if let Some(tx) = &output_tx {
+                            if tx.send(OutputMsg::Data(chunk.to_vec())).is_err() {
+                                break;
+                            }
                         }
                     }
                     Err(_) => {
-                        let _ = app_clone.emit(
-                            "pty-exit",
-                            PtyExit {
-                                id: pty_id,
-                                code: None,
-                                surface_id: reader_surface_id.clone(),
-                            },
-                        );
+                        emit_reader_exit(&output_tx, &app_clone, pty_id, &reader_surface_id);
                         break;
                     }
                 }
@@ -375,6 +375,126 @@ impl PtyManager {
             .ok_or_else(|| format!("PTY {id} not found"))?;
         Ok(instance.child_pid)
     }
+}
+
+/// Message sent from the PTY reader thread to its output emitter thread.
+enum OutputMsg {
+    Data(Vec<u8>),
+    Exit(Option<i32>),
+}
+
+/// Routes the reader thread's EOF/error exit through the emitter (so any
+/// buffered output flushes first) when output is coalesced, or emits the
+/// `pty-exit` event directly for the tmux path which has no emitter thread.
+fn emit_reader_exit(
+    output_tx: &Option<mpsc::Sender<OutputMsg>>,
+    app: &AppHandle,
+    pty_id: u32,
+    surface_id: &Option<String>,
+) {
+    if let Some(tx) = output_tx {
+        let _ = tx.send(OutputMsg::Exit(None));
+    } else {
+        let _ = app.emit(
+            "pty-exit",
+            PtyExit {
+                id: pty_id,
+                code: None,
+                surface_id: surface_id.clone(),
+            },
+        );
+    }
+}
+
+/// Coalesces plain PTY output on a short time window and emits batched
+/// `pty-output` events, then a final `pty-exit` once the reader signals EOF.
+fn run_output_emitter(
+    rx: mpsc::Receiver<OutputMsg>,
+    pty_id: u32,
+    surface_id: Option<String>,
+    app: AppHandle,
+) {
+    const WINDOW: Duration = Duration::from_millis(8);
+    const FLUSH_THRESHOLD: usize = 64 * 1024;
+    let mut acc: Vec<u8> = Vec::with_capacity(16 * 1024);
+    loop {
+        match rx.recv_timeout(WINDOW) {
+            Ok(OutputMsg::Data(bytes)) => {
+                acc.extend_from_slice(&bytes);
+                if acc.len() >= FLUSH_THRESHOLD {
+                    flush_output(&mut acc, pty_id, &surface_id, &app, false);
+                }
+            }
+            Ok(OutputMsg::Exit(code)) => {
+                flush_output(&mut acc, pty_id, &surface_id, &app, true);
+                let _ = app.emit(
+                    "pty-exit",
+                    PtyExit {
+                        id: pty_id,
+                        code,
+                        surface_id: surface_id.clone(),
+                    },
+                );
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                flush_output(&mut acc, pty_id, &surface_id, &app, false);
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                flush_output(&mut acc, pty_id, &surface_id, &app, true);
+                break;
+            }
+        }
+    }
+}
+
+/// Emits the valid UTF-8 prefix of `acc` as a `pty-output` event. A trailing
+/// incomplete multi-byte sequence is kept in `acc` for the next flush so it is
+/// never split into replacement characters — unless `final_flush` is set (EOF),
+/// where the remainder is emitted lossily.
+fn flush_output(
+    acc: &mut Vec<u8>,
+    pty_id: u32,
+    surface_id: &Option<String>,
+    app: &AppHandle,
+    final_flush: bool,
+) {
+    if acc.is_empty() {
+        return;
+    }
+    let emit = |text: String| {
+        let _ = app.emit(
+            "pty-output",
+            PtyOutput {
+                id: pty_id,
+                data: text,
+                surface_id: surface_id.clone(),
+            },
+        );
+    };
+    if final_flush {
+        emit(String::from_utf8_lossy(acc).into_owned());
+        acc.clear();
+        return;
+    }
+    let valid = match std::str::from_utf8(acc) {
+        Ok(_) => acc.len(),
+        Err(e) => {
+            if e.error_len().is_some() {
+                // Genuinely invalid bytes mid-stream: flush lossily so we never
+                // get stuck holding un-decodable input.
+                emit(String::from_utf8_lossy(acc).into_owned());
+                acc.clear();
+                return;
+            }
+            e.valid_up_to()
+        }
+    };
+    if valid == 0 {
+        return; // only an incomplete multi-byte char buffered so far
+    }
+    emit(std::str::from_utf8(&acc[..valid]).unwrap().to_owned());
+    acc.drain(..valid);
 }
 
 fn handle_tmux_event(

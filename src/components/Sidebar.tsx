@@ -76,8 +76,15 @@ const formatMemory = (bytes: number): string => {
 };
 
 export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
-  const { workspaces, activeId, addWorkspace, removeWorkspace, setActive, renameWorkspace, reorderWorkspaces } =
-    useWorkspaceStore();
+  // Granular selectors so the sidebar only re-renders on the slices it shows,
+  // not on every workspace-store mutation. Actions are stable refs in zustand.
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const activeId = useWorkspaceStore((s) => s.activeId);
+  const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
+  const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
+  const setActive = useWorkspaceStore((s) => s.setActive);
+  const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
+  const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
   const infoMap = useWorkspaceInfoStore((s) => s.info);
   const notifications = useNotificationStore((s) => s.notifications);
   const togglePanel = useNotificationStore((s) => s.togglePanel);
@@ -248,12 +255,14 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
             const terminalLeaves = collectTerminalLeaves(ws.layout);
             const isSsh = terminalLeaves.some(isSshLeaf) || !!tmuxAttach[ws.id];
             const sshTarget = getWorkspaceSshTarget(ws);
-            const lastCommand = (() => {
-              for (let idx = historyEntries.length - 1; idx >= 0; idx--) {
-                if (historyEntries[idx].workspaceId === ws.id) return historyEntries[idx].command;
-              }
-              return null;
-            })();
+            const lastCommand = sessionListMetadata.lastCommand
+              ? (() => {
+                  for (let idx = historyEntries.length - 1; idx >= 0; idx--) {
+                    if (historyEntries[idx].workspaceId === ws.id) return historyEntries[idx].command;
+                  }
+                  return null;
+                })()
+              : null;
             const metaItems: { label: string; style: React.CSSProperties; title?: string }[] = [];
             const pushMeta = (label: string | null | undefined, style: React.CSSProperties, title?: string) => {
               if (label) metaItems.push({ label, style, title });
