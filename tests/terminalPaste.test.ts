@@ -7,6 +7,7 @@ import {
   pasteTerminalClipboard,
   pasteTerminalPasteEvent,
   pasteTerminalImage,
+  resolveTerminalImagePasteTarget,
 } from "../src/utils/terminalPaste.ts";
 import type { TerminalClipboardPort } from "../src/utils/terminalClipboard.ts";
 
@@ -37,7 +38,10 @@ test("terminal paste reads plain text for local panes", async () => {
 
   await pasteTerminalClipboard({
     clipboard,
-    imageUploader: {
+    imageStore: {
+      saveImageLocally: async () => {
+        throw new Error("unexpected local save");
+      },
       pushImageToRemote: async () => {
         throw new Error("unexpected upload");
       },
@@ -47,7 +51,7 @@ test("terminal paste reads plain text for local panes", async () => {
     spawnSshConnection: null,
   });
 
-  assert.equal(imageRead, false);
+  assert.equal(imageRead, true);
   assert.deepEqual(pasted, ["hello"]);
 });
 
@@ -64,7 +68,10 @@ test("terminal paste uploads clipboard images for spawned SSH panes", async () =
 
   await pasteTerminalClipboard({
     clipboard,
-    imageUploader: {
+    imageStore: {
+      saveImageLocally: async () => {
+        throw new Error("unexpected local save");
+      },
       pushImageToRemote: async ({ sshCommand, imageBase64 }) => {
         assert.equal(sshCommand, "ssh host");
         assert.equal(imageBase64, "aW1hZ2U=");
@@ -79,13 +86,46 @@ test("terminal paste uploads clipboard images for spawned SSH panes", async () =
   assert.deepEqual(pasted, ["/tmp/wmux-image.png "]);
 });
 
+test("terminal paste saves clipboard images for local panes", async () => {
+  const { pasted, surface } = createSurface();
+  const image = new Blob(["local-image"]);
+  const clipboard: TerminalClipboardPort = {
+    readImage: async () => image,
+    readText: async () => {
+      throw new Error("unexpected text fallback");
+    },
+    writeText: async () => {},
+  };
+
+  await pasteTerminalClipboard({
+    clipboard,
+    imageStore: {
+      saveImageLocally: async ({ imageBase64 }) => {
+        assert.equal(imageBase64, "bG9jYWwtaW1hZ2U=");
+        return "/home/me/.wmux/screenshots/local.png";
+      },
+      pushImageToRemote: async () => {
+        throw new Error("unexpected upload");
+      },
+    },
+    surface,
+    spawnCommand: null,
+    spawnSshConnection: null,
+  });
+
+  assert.deepEqual(pasted, ["/home/me/.wmux/screenshots/local.png "]);
+});
+
 test("terminal paste uploads an image supplied by a native paste event", async () => {
   const { pasted, surface } = createSurface();
   const image = new Blob(["native-image"]);
 
   await pasteTerminalImage({
     image,
-    imageUploader: {
+    imageStore: {
+      saveImageLocally: async () => {
+        throw new Error("unexpected local save");
+      },
       pushImageToRemote: async ({ imageBase64 }) => {
         assert.equal(imageBase64, "bmF0aXZlLWltYWdl");
         return "/tmp/native-image.png";
@@ -117,7 +157,10 @@ test("terminal paste event falls back to native clipboard image reads for remote
       stopPropagation: () => calls.push("stopPropagation"),
     },
     clipboard,
-    imageUploader: {
+    imageStore: {
+      saveImageLocally: async () => {
+        throw new Error("unexpected local save");
+      },
       pushImageToRemote: async ({ imageBase64 }) => {
         assert.equal(imageBase64, "bmF0aXZlLWNsaXBib2FyZC1pbWFnZQ==");
         return "/tmp/clipboard-image.png";
@@ -148,7 +191,10 @@ test("terminal paste event falls back to text for remote panes without images", 
       stopPropagation: () => {},
     },
     clipboard,
-    imageUploader: {
+    imageStore: {
+      saveImageLocally: async () => {
+        throw new Error("unexpected local save");
+      },
       pushImageToRemote: async () => {
         throw new Error("unexpected upload");
       },
@@ -162,13 +208,11 @@ test("terminal paste event falls back to text for remote panes without images", 
   assert.deepEqual(pasted, ["hello"]);
 });
 
-test("terminal paste event leaves local panes to xterm", async () => {
+test("terminal paste event saves native clipboard images for local panes", async () => {
   const { pasted, surface } = createSurface();
   const calls: string[] = [];
   const clipboard: TerminalClipboardPort = {
-    readImage: async () => {
-      throw new Error("unexpected image read");
-    },
+    readImage: async () => new Blob(["local-event-image"]),
     readText: async () => {
       throw new Error("unexpected text read");
     },
@@ -182,7 +226,11 @@ test("terminal paste event leaves local panes to xterm", async () => {
       stopPropagation: () => calls.push("stopPropagation"),
     },
     clipboard,
-    imageUploader: {
+    imageStore: {
+      saveImageLocally: async ({ imageBase64 }) => {
+        assert.equal(imageBase64, "aW1hZ2U=");
+        return "/home/me/.wmux/screenshots/event.png";
+      },
       pushImageToRemote: async () => {
         throw new Error("unexpected upload");
       },
@@ -192,9 +240,41 @@ test("terminal paste event leaves local panes to xterm", async () => {
     spawnSshConnection: null,
   });
 
-  assert.equal(handled, false);
-  assert.deepEqual(calls, []);
-  assert.deepEqual(pasted, []);
+  assert.equal(handled, true);
+  assert.deepEqual(calls, ["preventDefault", "stopPropagation"]);
+  assert.deepEqual(pasted, ["/home/me/.wmux/screenshots/event.png "]);
+});
+
+test("terminal paste event falls back to text for local panes without images", async () => {
+  const { pasted, surface } = createSurface();
+  const clipboard: TerminalClipboardPort = {
+    readImage: async () => null,
+    readText: async () => "local text",
+    writeText: async () => {},
+  };
+
+  const handled = await pasteTerminalPasteEvent({
+    event: {
+      getImage: () => null,
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    },
+    clipboard,
+    imageStore: {
+      saveImageLocally: async () => {
+        throw new Error("unexpected local save");
+      },
+      pushImageToRemote: async () => {
+        throw new Error("unexpected upload");
+      },
+    },
+    surface,
+    spawnCommand: null,
+    spawnSshConnection: null,
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(pasted, ["local text"]);
 });
 
 test("terminal paste reports image upload failures without falling through to text", async () => {
@@ -210,7 +290,10 @@ test("terminal paste reports image upload failures without falling through to te
 
   await pasteTerminalClipboard({
     clipboard,
-    imageUploader: {
+    imageStore: {
+      saveImageLocally: async () => {
+        throw new Error("unexpected local save");
+      },
       pushImageToRemote: async () => {
         throw new Error("upload failed");
       },
@@ -223,7 +306,7 @@ test("terminal paste reports image upload failures without falling through to te
 
   assert.deepEqual(pasted, []);
   assert.equal(logs.length, 1);
-  assert.match(written[0], /image upload failed/);
+  assert.match(written[0], /image paste failed/);
 });
 
 test("terminal paste detects image data from native paste clipboard items", () => {
@@ -280,5 +363,33 @@ test("terminal paste marks only SSH panes as remote image paste targets", () => 
       },
     }),
     true,
+  );
+});
+
+test("terminal paste target resolves local and remote image destinations", () => {
+  assert.deepEqual(
+    resolveTerminalImagePasteTarget({
+      spawnCommand: null,
+      spawnSshConnection: null,
+    }),
+    { kind: "local" },
+  );
+  assert.deepEqual(
+    resolveTerminalImagePasteTarget({
+      spawnCommand: "bash",
+      spawnSshConnection: null,
+    }),
+    { kind: "local" },
+  );
+  assert.deepEqual(
+    resolveTerminalImagePasteTarget({
+      spawnCommand: "ssh host",
+      spawnSshConnection: null,
+    }),
+    {
+      kind: "remote",
+      sshCommand: "ssh host",
+      sshConnection: null,
+    },
   );
 });

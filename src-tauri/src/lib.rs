@@ -1,20 +1,20 @@
 mod monitor;
+mod pasted_image;
 mod platform;
 mod pty;
-mod remote_image;
 mod remote_monitor;
 mod ssh_command;
 mod tmux_cc;
 mod tmux_remote;
 
 use monitor::MonitorManager;
+use pasted_image::{push_image_to_remote_sync, save_image_locally_sync};
 use platform::command::silent_command;
 use platform::process::{
     collect_session_metadata, gather_workspace_info, get_listening_ports, get_shell_context,
     SessionMetadata, ShellContext, WorkspaceInfo,
 };
 use pty::{PtyManager, WmuxPtyContext};
-use remote_image::push_image_to_remote_sync;
 use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -327,6 +327,13 @@ mod remote_cli_tests {
 }
 
 #[tauri::command]
+async fn save_image_locally(image_base64: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || save_image_locally_sync(&image_base64))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
 async fn push_image_to_remote(
     ssh_command: Option<String>,
     ssh_connection: Option<SshCommand>,
@@ -444,6 +451,7 @@ pub fn run() {
             list_fonts,
             check_remote_clis,
             check_remote_tmux,
+            save_image_locally,
             push_image_to_remote,
             tmux_list_sessions,
             tmux_switch_client,

@@ -28,7 +28,6 @@ import { tauriPtyBackend } from "../utils/tauriPtyBackend";
 import { createTerminalClipboard } from "../utils/terminalClipboard";
 import { decideTerminalInput, shouldReadTerminalSelectionForInput } from "../utils/terminalInput";
 import {
-  isTerminalRemotePasteTarget,
   pasteTerminalClipboard,
   pasteTerminalPasteEvent,
 } from "../utils/terminalPaste";
@@ -134,7 +133,7 @@ export const useTerminalSession = ({
     const pasteClipboard = async () => {
       await pasteTerminalClipboard({
         clipboard,
-        imageUploader: tauriPtyBackend,
+        imageStore: tauriPtyBackend,
         surface,
         spawnCommand,
         spawnSshConnection,
@@ -173,11 +172,10 @@ export const useTerminalSession = ({
     requestAnimationFrame(() => surface.fit());
 
     const onPaste = surface.onPaste((event) => {
-      if (!isTerminalRemotePasteTarget({ spawnCommand, spawnSshConnection })) return;
       pasteTerminalPasteEvent({
         event,
         clipboard,
-        imageUploader: tauriPtyBackend,
+        imageStore: tauriPtyBackend,
         surface,
         spawnCommand,
         spawnSshConnection,

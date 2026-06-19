@@ -7,7 +7,10 @@ export interface TerminalPasteSurface {
   write(data: string): void;
 }
 
-export interface TerminalImageUploader {
+export interface TerminalImageStore {
+  saveImageLocally(input: {
+    imageBase64: string;
+  }): Promise<string>;
   pushImageToRemote(input: {
     sshCommand: string;
     sshConnection: SshConnection | null;
@@ -22,7 +25,7 @@ export interface TerminalRemotePasteTarget {
 
 export interface TerminalPasteOptions {
   clipboard: TerminalClipboardPort;
-  imageUploader: TerminalImageUploader;
+  imageStore: TerminalImageStore;
   surface: TerminalPasteSurface;
   spawnCommand: string | null;
   spawnSshConnection: SshConnection | null;
@@ -65,41 +68,66 @@ export const isTerminalRemotePasteTarget = ({
 }: TerminalRemotePasteTarget): boolean =>
   !!spawnCommand && (!!spawnSshConnection || !!parseSshCommandLine(spawnCommand));
 
+export type TerminalImagePasteTarget =
+  | {
+      kind: "remote";
+      sshCommand: string;
+      sshConnection: SshConnection | null;
+    }
+  | { kind: "local" };
+
+export const resolveTerminalImagePasteTarget = ({
+  spawnCommand,
+  spawnSshConnection,
+}: TerminalRemotePasteTarget): TerminalImagePasteTarget => {
+  if (isTerminalRemotePasteTarget({ spawnCommand, spawnSshConnection })) {
+    return {
+      kind: "remote",
+      sshCommand: spawnCommand as string,
+      sshConnection: spawnSshConnection,
+    };
+  }
+  return { kind: "local" };
+};
+
 export const pasteTerminalImage = async ({
   image,
-  imageUploader,
+  imageStore,
   surface,
   spawnCommand,
   spawnSshConnection,
   logError = console.error,
 }: Omit<TerminalPasteOptions, "clipboard"> & { image: Blob }): Promise<void> => {
-  if (!spawnCommand) return;
   try {
-    const remotePath = await imageUploader.pushImageToRemote({
-      sshCommand: spawnCommand,
-      sshConnection: spawnSshConnection,
-      imageBase64: await blobToBase64(image),
-    });
-    surface.paste(remotePath + " ");
+    const imageBase64 = await blobToBase64(image);
+    const target = resolveTerminalImagePasteTarget({ spawnCommand, spawnSshConnection });
+    const path = target.kind === "remote"
+      ? await imageStore.pushImageToRemote({
+          sshCommand: target.sshCommand,
+          sshConnection: target.sshConnection,
+          imageBase64,
+        })
+      : await imageStore.saveImageLocally({ imageBase64 });
+    surface.paste(path + " ");
   } catch (err) {
     logError("[wmux] image paste failed:", err);
-    surface.write(`\r\n\x1b[31m[image upload failed: ${err}]\x1b[0m\r\n`);
+    surface.write(`\r\n\x1b[31m[image paste failed: ${err}]\x1b[0m\r\n`);
   }
 };
 
 export const pasteTerminalClipboard = async ({
   clipboard,
-  imageUploader,
+  imageStore,
   surface,
   spawnCommand,
   spawnSshConnection,
   logError = console.error,
 }: TerminalPasteOptions): Promise<void> => {
-  const image = spawnCommand ? await clipboard.readImage() : null;
-  if (image && spawnCommand) {
+  const image = await clipboard.readImage();
+  if (image) {
     await pasteTerminalImage({
       image,
-      imageUploader,
+      imageStore,
       surface,
       spawnCommand,
       spawnSshConnection,
@@ -115,14 +143,12 @@ export const pasteTerminalClipboard = async ({
 export const pasteTerminalPasteEvent = async ({
   event,
   clipboard,
-  imageUploader,
+  imageStore,
   surface,
   spawnCommand,
   spawnSshConnection,
   logError = console.error,
 }: TerminalPasteEventOptions): Promise<boolean> => {
-  if (!isTerminalRemotePasteTarget({ spawnCommand, spawnSshConnection })) return false;
-
   event.preventDefault();
   event.stopPropagation();
 
@@ -130,7 +156,7 @@ export const pasteTerminalPasteEvent = async ({
   if (image) {
     await pasteTerminalImage({
       image,
-      imageUploader,
+      imageStore,
       surface,
       spawnCommand,
       spawnSshConnection,
@@ -141,7 +167,7 @@ export const pasteTerminalPasteEvent = async ({
 
   await pasteTerminalClipboard({
     clipboard,
-    imageUploader,
+    imageStore,
     surface,
     spawnCommand,
     spawnSshConnection,
