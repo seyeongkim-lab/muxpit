@@ -109,20 +109,31 @@ Build a release binary / installer:
 pnpm tauri build              # platform default bundles
 pnpm tauri build --no-bundle  # just the executable
 pnpm tauri build --bundles deb  # Linux .deb
+pnpm tauri build --bundles rpm  # Linux .rpm
+pnpm tauri build --bundles appimage  # Linux AppImage
 ```
 
 Build the companion CLI:
 
 ```bash
 pnpm build:cli
+WMUX_CLI_TARGET=x86_64-pc-windows-msvc pnpm build:cli
 # then, with the app running:
 wmux-cli ping
 wmux-cli notify "Build done" "All tests passed"
 wmux-cli ls
 ```
 
-Linux `.deb` bundles include both `/usr/bin/wmux` for the GUI app and
-`/usr/bin/wmux-cli` for the companion CLI.
+Release bundles include the companion CLI:
+
+- Linux `.deb`/`.rpm`: `/usr/bin/wmux-cli`
+- Linux AppImage: bundled inside the AppImage under `usr/bin/wmux-cli`
+- Windows installer: `wmux-cli.exe` next to `wmux.exe` in the install directory
+- macOS `.app`: `Contents/MacOS/wmux-cli`; Settings can install
+  `~/.local/bin/wmux-cli` as a symlink for terminal use
+
+For cross-target packaging, set `WMUX_CLI_TARGET` to the Tauri/Rust target triple
+before `pnpm tauri build` so the sidecar CLI is prepared for the same target.
 
 ## Keyboard shortcuts
 
