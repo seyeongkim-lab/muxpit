@@ -41,6 +41,19 @@ SSH 호스트 연결 시 원격 서버에 `claude` CLI가 설치되어 있으면
 
 ---
 
+# Plan: Agent Hook Interface
+
+상세 계획서: `docs/plans/agent-hooks.md`
+
+## 요약
+
+Codex와 Claude Code hook 이벤트를 wmux의 agent별 adapter로 분리한다. 현재는
+`Stop`, `PermissionRequest`, Claude `Notification`을 알림으로 처리하고,
+Codex의 `SessionStart`, `UserPromptSubmit`, `PreToolUse`는 향후 resume/context
+주입을 위한 설치 지점으로만 둔다.
+
+---
+
 # Plan: Grid Overview (All Workspaces at a Glance)
 
 상세 계획서: `docs/plans/grid-overview.md`

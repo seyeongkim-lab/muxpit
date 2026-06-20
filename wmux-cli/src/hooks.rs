@@ -2,7 +2,7 @@ use crate::platform::{binary_on_path, home_dir, hook_command, replace_file};
 use serde_json::{json, Map, Value};
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,13 +73,199 @@ impl Agent {
             Agent::Claude => "WMUX_CLAUDE_HOOKS_DISABLED",
         }
     }
+}
 
-    fn event_name(self) -> &'static str {
-        "Stop"
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentHookEvent {
+    SessionStart,
+    UserPromptSubmit,
+    Stop,
+    PreToolUse,
+    PermissionRequest,
+    Notification,
+    SessionEnd,
+    SubagentStop,
+}
+
+impl AgentHookEvent {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "sessionstart" | "session-start" | "session_start" => Some(Self::SessionStart),
+            "userpromptsubmit" | "user-prompt-submit" | "user_prompt_submit" => {
+                Some(Self::UserPromptSubmit)
+            }
+            "stop" => Some(Self::Stop),
+            "pretooluse" | "pre-tool-use" | "pre_tool_use" => Some(Self::PreToolUse),
+            "permissionrequest" | "permission-request" | "permission_request" => {
+                Some(Self::PermissionRequest)
+            }
+            "notification" | "notify" => Some(Self::Notification),
+            "sessionend" | "session-end" | "session_end" => Some(Self::SessionEnd),
+            "subagentstop" | "subagent-stop" | "subagent_stop" => Some(Self::SubagentStop),
+            _ => None,
+        }
     }
 
-    fn notify_body(self) -> &'static str {
-        "Prompt completed"
+    fn name(self) -> &'static str {
+        match self {
+            Self::SessionStart => "SessionStart",
+            Self::UserPromptSubmit => "UserPromptSubmit",
+            Self::Stop => "Stop",
+            Self::PreToolUse => "PreToolUse",
+            Self::PermissionRequest => "PermissionRequest",
+            Self::Notification => "Notification",
+            Self::SessionEnd => "SessionEnd",
+            Self::SubagentStop => "SubagentStop",
+        }
+    }
+}
+
+const CODEX_HOOK_EVENTS: &[AgentHookEvent] = &[
+    AgentHookEvent::SessionStart,
+    AgentHookEvent::UserPromptSubmit,
+    AgentHookEvent::Stop,
+    AgentHookEvent::PreToolUse,
+    AgentHookEvent::PermissionRequest,
+];
+
+const CLAUDE_HOOK_EVENTS: &[AgentHookEvent] = &[
+    AgentHookEvent::SessionStart,
+    AgentHookEvent::UserPromptSubmit,
+    AgentHookEvent::Stop,
+    AgentHookEvent::PreToolUse,
+    AgentHookEvent::PermissionRequest,
+    AgentHookEvent::Notification,
+    AgentHookEvent::SessionEnd,
+    AgentHookEvent::SubagentStop,
+];
+
+const CLAUDE_INSTALLED_HOOK_EVENTS: &[AgentHookEvent] = &[
+    AgentHookEvent::Stop,
+    AgentHookEvent::PermissionRequest,
+    AgentHookEvent::Notification,
+];
+
+trait AgentHookAdapter: Sync {
+    fn known_events(&self) -> &'static [AgentHookEvent];
+    fn installed_events(&self) -> &'static [AgentHookEvent];
+    fn install(&self, yes: bool) -> Result<(), String>;
+    fn uninstall(&self, yes: bool) -> Result<(), String>;
+    fn handle_event(&self, event: AgentHookEvent, payload: &Value) -> HookOutcome;
+}
+
+#[derive(Default)]
+struct HookOutcome {
+    notification: Option<HookNotification>,
+}
+
+struct HookNotification {
+    title: &'static str,
+    body: String,
+}
+
+struct CodexHookAdapter;
+struct ClaudeHookAdapter;
+
+impl AgentHookAdapter for CodexHookAdapter {
+    fn known_events(&self) -> &'static [AgentHookEvent] {
+        CODEX_HOOK_EVENTS
+    }
+
+    fn installed_events(&self) -> &'static [AgentHookEvent] {
+        CODEX_HOOK_EVENTS
+    }
+
+    fn install(&self, yes: bool) -> Result<(), String> {
+        install_agent_config(Agent::Codex, self.installed_events(), yes)?;
+        let config_dir = Agent::Codex.config_dir()?;
+        install_codex_hooks_feature(&config_dir.join("config.toml"), yes)
+    }
+
+    fn uninstall(&self, yes: bool) -> Result<(), String> {
+        uninstall_agent_config(Agent::Codex, yes)?;
+        let config_dir = Agent::Codex.config_dir()?;
+        uninstall_codex_hooks_feature(&config_dir.join("config.toml"), yes)
+    }
+
+    fn handle_event(&self, event: AgentHookEvent, payload: &Value) -> HookOutcome {
+        match event {
+            AgentHookEvent::Stop => HookOutcome {
+                notification: Some(HookNotification {
+                    title: "Codex",
+                    body: payload_string(payload, &["message", "summary"])
+                        .unwrap_or_else(|| "Prompt completed".to_string()),
+                }),
+            },
+            AgentHookEvent::PermissionRequest => HookOutcome {
+                notification: Some(HookNotification {
+                    title: "Codex",
+                    body: payload_string(payload, &["tool_name", "toolName", "command", "message"])
+                        .map(|value| format!("Permission requested: {value}"))
+                        .unwrap_or_else(|| "Permission requested".to_string()),
+                }),
+            },
+            _ => HookOutcome::default(),
+        }
+    }
+}
+
+impl AgentHookAdapter for ClaudeHookAdapter {
+    fn known_events(&self) -> &'static [AgentHookEvent] {
+        CLAUDE_HOOK_EVENTS
+    }
+
+    fn installed_events(&self) -> &'static [AgentHookEvent] {
+        CLAUDE_INSTALLED_HOOK_EVENTS
+    }
+
+    fn install(&self, yes: bool) -> Result<(), String> {
+        install_agent_config(Agent::Claude, self.installed_events(), yes)?;
+        println!(
+            "Claude Code resume hooks are not implemented yet; installed notification hooks only."
+        );
+        Ok(())
+    }
+
+    fn uninstall(&self, yes: bool) -> Result<(), String> {
+        uninstall_agent_config(Agent::Claude, yes)
+    }
+
+    fn handle_event(&self, event: AgentHookEvent, payload: &Value) -> HookOutcome {
+        match event {
+            AgentHookEvent::Stop => HookOutcome {
+                notification: Some(HookNotification {
+                    title: "Claude Code",
+                    body: payload_string(payload, &["message", "summary"])
+                        .unwrap_or_else(|| "Prompt completed".to_string()),
+                }),
+            },
+            AgentHookEvent::PermissionRequest => HookOutcome {
+                notification: Some(HookNotification {
+                    title: "Claude Code",
+                    body: payload_string(payload, &["tool_name", "toolName", "command", "message"])
+                        .map(|value| format!("Permission requested: {value}"))
+                        .unwrap_or_else(|| "Permission requested".to_string()),
+                }),
+            },
+            AgentHookEvent::Notification => HookOutcome {
+                notification: Some(HookNotification {
+                    title: "Claude Code",
+                    body: payload_string(payload, &["message", "body", "text"])
+                        .unwrap_or_else(|| "Needs attention".to_string()),
+                }),
+            },
+            _ => HookOutcome::default(),
+        }
+    }
+}
+
+static CODEX_ADAPTER: CodexHookAdapter = CodexHookAdapter;
+static CLAUDE_ADAPTER: ClaudeHookAdapter = ClaudeHookAdapter;
+
+fn agent_adapter(agent: Agent) -> &'static dyn AgentHookAdapter {
+    match agent {
+        Agent::Codex => &CODEX_ADAPTER,
+        Agent::Claude => &CLAUDE_ADAPTER,
     }
 }
 
@@ -98,7 +284,7 @@ pub(crate) fn handle_hooks_command(args: &[String]) -> Result<(), String> {
             let action = args
                 .get(1)
                 .map(String::as_str)
-                .ok_or_else(|| "Missing hooks action. Try: install, uninstall, stop".to_string())?;
+                .ok_or_else(|| "Missing hooks action. Try: install, uninstall, Stop".to_string())?;
             match action {
                 "install" => {
                     let options = hooks_options(&args[2..])?;
@@ -110,26 +296,46 @@ pub(crate) fn handle_hooks_command(args: &[String]) -> Result<(), String> {
                     ensure_target_matches(agent, options.agent)?;
                     uninstall_agent(agent, options.yes)
                 }
-                "stop" | "notification" | "notify" => run_agent_hook(agent, action),
-                other => Err(format!("Unknown hooks action: {other}")),
+                event_name => {
+                    let event = AgentHookEvent::parse(event_name)
+                        .ok_or_else(|| format!("Unknown hooks action: {event_name}"))?;
+                    run_agent_hook(agent, event)
+                }
             }
         }
     }
 }
 
 fn print_hooks_help() {
+    let codex_events = event_names_for_help(agent_adapter(Agent::Codex).known_events());
+    let claude_events = event_names_for_help(agent_adapter(Agent::Claude).known_events());
     println!(
-        r#"wmux-cli hooks - install and run agent notification hooks
+        "wmux-cli hooks - install and run agent notification hooks
 
 Usage:
   wmux-cli hooks setup [codex|claude] [--agent <agent>] [--yes|-y]
   wmux-cli hooks uninstall [codex|claude] [--agent <agent>] [--yes|-y]
   wmux-cli hooks <codex|claude> install [--yes|-y]
   wmux-cli hooks <codex|claude> uninstall [--yes|-y]
-  wmux-cli hooks <codex|claude> stop
+  wmux-cli hooks <codex|claude> <event>
 
-Installed hooks no-op unless WMUX_SURFACE_ID is present."#
+Codex events:
+  {codex_events}
+
+Claude resume hooks are not implemented yet; notification hooks are installed for Stop.
+Known Claude events:
+  {claude_events}
+
+Installed hooks no-op unless WMUX_SURFACE_ID is present."
     );
+}
+
+fn event_names_for_help(events: &[AgentHookEvent]) -> String {
+    events
+        .iter()
+        .map(|event| event.name())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Default)]
@@ -220,15 +426,25 @@ fn run_setup_hooks(args: &[String], uninstall: bool) -> Result<(), String> {
 }
 
 fn install_agent(agent: Agent, yes: bool) -> Result<(), String> {
+    agent_adapter(agent).install(yes)
+}
+
+fn uninstall_agent(agent: Agent, yes: bool) -> Result<(), String> {
+    agent_adapter(agent).uninstall(yes)
+}
+
+fn install_agent_config(agent: Agent, events: &[AgentHookEvent], yes: bool) -> Result<(), String> {
     let config_dir = agent.config_dir()?;
     fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Could not create {}: {e}", config_dir.display()))?;
     let config_path = config_dir.join(agent.config_file());
     let mut config = read_json_object(&config_path)?;
     let mut hooks = take_hooks_object(&mut config)?;
-    let insertion_index = remove_owned_hooks(&mut hooks, agent);
+    remove_owned_hooks(&mut hooks, agent);
 
-    insert_hook_group(&mut hooks, agent, insertion_index);
+    for event in events {
+        insert_hook_group(&mut hooks, agent, *event);
+    }
     config.insert("hooks".to_string(), Value::Object(hooks));
 
     write_json_if_changed(
@@ -238,14 +454,10 @@ fn install_agent(agent: Agent, yes: bool) -> Result<(), String> {
         &format!("{} hooks", agent.display_name()),
     )?;
 
-    if agent == Agent::Codex {
-        install_codex_hooks_feature(&config_dir.join("config.toml"), yes)?;
-    }
-
     Ok(())
 }
 
-fn uninstall_agent(agent: Agent, yes: bool) -> Result<(), String> {
+fn uninstall_agent_config(agent: Agent, yes: bool) -> Result<(), String> {
     let config_dir = agent.config_dir()?;
     let config_path = config_dir.join(agent.config_file());
     if !config_path.exists() {
@@ -259,7 +471,7 @@ fn uninstall_agent(agent: Agent, yes: bool) -> Result<(), String> {
 
     let mut config = read_json_object(&config_path)?;
     let mut hooks = take_hooks_object(&mut config)?;
-    let removed = remove_owned_hooks(&mut hooks, agent).is_some();
+    let removed = remove_owned_hooks(&mut hooks, agent);
 
     if hooks.is_empty() {
         config.remove("hooks");
@@ -278,29 +490,30 @@ fn uninstall_agent(agent: Agent, yes: bool) -> Result<(), String> {
         println!("Removed 0 wmux hook(s) from {}", config_path.display());
     }
 
-    if agent == Agent::Codex {
-        uninstall_codex_hooks_feature(&config_dir.join("config.toml"), yes)?;
-    }
-
     Ok(())
 }
 
-fn run_agent_hook(agent: Agent, action: &str) -> Result<(), String> {
+fn run_agent_hook(agent: Agent, event: AgentHookEvent) -> Result<(), String> {
     if env::var(agent.disabled_env()).ok().as_deref() == Some("1") {
         println!("{{}}");
         return Ok(());
     }
 
-    if env::var_os("WMUX_SURFACE_ID").is_some() {
-        let mut params = Map::new();
-        params.insert("title".to_string(), json!(agent.display_name()));
-        params.insert("body".to_string(), json!(agent.notify_body()));
-        params.insert("source".to_string(), json!(agent.name()));
-        params.insert("event".to_string(), json!(action));
-        insert_env(&mut params, "workspace_id", "WMUX_WORKSPACE_ID");
-        insert_env(&mut params, "surface_id", "WMUX_SURFACE_ID");
+    let payload = read_hook_payload();
+    let outcome = agent_adapter(agent).handle_event(event, &payload);
 
-        let _ = crate::send_request_value("notify", Value::Object(params));
+    if env::var_os("WMUX_SURFACE_ID").is_some() {
+        if let Some(notification) = outcome.notification {
+            let mut params = Map::new();
+            params.insert("title".to_string(), json!(notification.title));
+            params.insert("body".to_string(), json!(notification.body));
+            params.insert("source".to_string(), json!(agent.name()));
+            params.insert("event".to_string(), json!(event.name()));
+            insert_env(&mut params, "workspace_id", "WMUX_WORKSPACE_ID");
+            insert_env(&mut params, "surface_id", "WMUX_SURFACE_ID");
+
+            let _ = crate::send_request_value("notify", Value::Object(params));
+        }
     }
 
     println!("{{}}");
@@ -311,6 +524,31 @@ fn insert_env(map: &mut Map<String, Value>, key: &str, env_key: &str) {
     if let Some(value) = env::var(env_key).ok().filter(|value| !value.is_empty()) {
         map.insert(key.to_string(), json!(value));
     }
+}
+
+fn read_hook_payload() -> Value {
+    let mut stdin = io::stdin();
+    if stdin.is_terminal() {
+        return Value::Null;
+    }
+
+    let mut raw = String::new();
+    if stdin.read_to_string(&mut raw).is_err() || raw.trim().is_empty() {
+        return Value::Null;
+    }
+    serde_json::from_str(&raw).unwrap_or(Value::Null)
+}
+
+fn payload_string(payload: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let Some(value) = payload.get(*key) else {
+            continue;
+        };
+        if let Some(text) = value.as_str().filter(|text| !text.trim().is_empty()) {
+            return Some(text.trim().to_string());
+        }
+    }
+    None
 }
 
 fn read_json_object(path: &Path) -> Result<Map<String, Value>, String> {
@@ -339,23 +577,18 @@ fn take_hooks_object(config: &mut Map<String, Value>) -> Result<Map<String, Valu
     }
 }
 
-fn insert_hook_group(hooks: &mut Map<String, Value>, agent: Agent, insertion_index: Option<usize>) {
-    let event = agent.event_name().to_string();
-    let mut groups = match hooks.remove(&event) {
+fn insert_hook_group(hooks: &mut Map<String, Value>, agent: Agent, event: AgentHookEvent) {
+    let event_name = event.name().to_string();
+    let mut groups = match hooks.remove(&event_name) {
         Some(Value::Array(groups)) => groups,
         Some(value) => vec![value],
         None => Vec::new(),
     };
-    let group = hook_group(agent);
-    if let Some(index) = insertion_index {
-        groups.insert(index.min(groups.len()), group);
-    } else {
-        groups.push(group);
-    }
-    hooks.insert(event, Value::Array(groups));
+    groups.push(hook_group(agent, event));
+    hooks.insert(event_name, Value::Array(groups));
 }
 
-fn hook_group(agent: Agent) -> Value {
+fn hook_group(agent: Agent, event: AgentHookEvent) -> Value {
     let mut hook = Map::new();
     hook.insert("type".to_string(), json!("command"));
     let current_exe = env::current_exe().ok();
@@ -364,6 +597,7 @@ fn hook_group(agent: Agent) -> Value {
         json!(hook_command(
             agent.name(),
             agent.disabled_env(),
+            event.name(),
             current_exe.as_deref()
         )),
     );
@@ -379,8 +613,8 @@ fn hook_group(agent: Agent) -> Value {
     Value::Object(group)
 }
 
-fn remove_owned_hooks(hooks: &mut Map<String, Value>, agent: Agent) -> Option<usize> {
-    let mut insertion_index = None;
+fn remove_owned_hooks(hooks: &mut Map<String, Value>, agent: Agent) -> bool {
+    let mut removed_any = false;
     let events: Vec<String> = hooks.keys().cloned().collect();
 
     for event in events {
@@ -415,8 +649,8 @@ fn remove_owned_hooks(hooks: &mut Map<String, Value>, agent: Agent) -> Option<us
                 .into_iter()
                 .filter(|hook| !is_owned_hook_value(hook, agent))
                 .collect();
-            if kept.len() != before && event == agent.event_name() && insertion_index.is_none() {
-                insertion_index = Some(rewritten.len());
+            if kept.len() != before {
+                removed_any = true;
             }
 
             if !kept.is_empty() {
@@ -430,7 +664,7 @@ fn remove_owned_hooks(hooks: &mut Map<String, Value>, agent: Agent) -> Option<us
         }
     }
 
-    insertion_index
+    removed_any
 }
 
 fn is_owned_hook_value(value: &Value, agent: Agent) -> bool {
@@ -439,7 +673,7 @@ fn is_owned_hook_value(value: &Value, agent: Agent) -> bool {
     };
     command.contains(&format!("wmux hooks {}", agent.name()))
         || command.contains(&format!("wmux-cli hooks {}", agent.name()))
-        || command.contains(&format!("hooks {} stop", agent.name()))
+        || command.contains(&format!("hooks {} ", agent.name()))
 }
 
 fn write_json_if_changed(
@@ -604,9 +838,120 @@ fn insert_codex_feature_block(content: &str) -> String {
 mod tests {
     use super::*;
 
+    fn names(events: &[AgentHookEvent]) -> Vec<&'static str> {
+        events.iter().map(|event| event.name()).collect()
+    }
+
     #[test]
     fn managed_block_round_trips() {
         let content = "a\n# wmux-codex-hooks-feature begin\n[features]\nhooks = true\n# wmux-codex-hooks-feature end\nb\n";
         assert_eq!(remove_managed_block(content), "a\nb\n");
+    }
+
+    #[test]
+    fn codex_and_claude_adapters_expose_hook_interfaces() {
+        assert_eq!(
+            names(CODEX_ADAPTER.known_events()),
+            vec![
+                "SessionStart",
+                "UserPromptSubmit",
+                "Stop",
+                "PreToolUse",
+                "PermissionRequest",
+            ]
+        );
+        assert_eq!(
+            names(CLAUDE_ADAPTER.known_events()),
+            vec![
+                "SessionStart",
+                "UserPromptSubmit",
+                "Stop",
+                "PreToolUse",
+                "PermissionRequest",
+                "Notification",
+                "SessionEnd",
+                "SubagentStop",
+            ]
+        );
+        assert_eq!(
+            names(CLAUDE_ADAPTER.installed_events()),
+            vec!["Stop", "PermissionRequest", "Notification"]
+        );
+    }
+
+    #[test]
+    fn codex_hook_install_writes_one_group_per_supported_event() {
+        let mut hooks = Map::new();
+        for event in CODEX_ADAPTER.installed_events() {
+            insert_hook_group(&mut hooks, Agent::Codex, *event);
+        }
+
+        for event in CODEX_ADAPTER.installed_events() {
+            let groups = hooks
+                .get(event.name())
+                .and_then(Value::as_array)
+                .expect("event group");
+            assert_eq!(groups.len(), 1);
+            let command = groups[0]
+                .get("hooks")
+                .and_then(Value::as_array)
+                .and_then(|hooks| hooks.first())
+                .and_then(|hook| hook.get("command"))
+                .and_then(Value::as_str)
+                .expect("hook command");
+            assert!(command.contains(&format!("hooks codex {}", event.name())));
+        }
+    }
+
+    #[test]
+    fn codex_notification_policy_depends_on_hook_event() {
+        let stop = CODEX_ADAPTER.handle_event(
+            AgentHookEvent::Stop,
+            &json!({ "summary": "Tests finished" }),
+        );
+        assert_eq!(stop.notification.as_ref().unwrap().title, "Codex");
+        assert_eq!(stop.notification.as_ref().unwrap().body, "Tests finished");
+
+        let permission = CODEX_ADAPTER.handle_event(
+            AgentHookEvent::PermissionRequest,
+            &json!({ "toolName": "apply_patch" }),
+        );
+        assert_eq!(
+            permission.notification.as_ref().unwrap().body,
+            "Permission requested: apply_patch"
+        );
+
+        let prompt = CODEX_ADAPTER.handle_event(AgentHookEvent::UserPromptSubmit, &Value::Null);
+        assert!(prompt.notification.is_none());
+        let claude_stop = CLAUDE_ADAPTER.handle_event(
+            AgentHookEvent::Stop,
+            &json!({ "message": "Claude finished" }),
+        );
+        assert_eq!(
+            claude_stop.notification.as_ref().unwrap().title,
+            "Claude Code"
+        );
+        assert_eq!(
+            claude_stop.notification.as_ref().unwrap().body,
+            "Claude finished"
+        );
+
+        let claude_permission = CLAUDE_ADAPTER.handle_event(
+            AgentHookEvent::PermissionRequest,
+            &json!({ "tool_name": "Bash" }),
+        );
+        assert_eq!(
+            claude_permission.notification.as_ref().unwrap().body,
+            "Permission requested: Bash"
+        );
+
+        let claude_notification = CLAUDE_ADAPTER.handle_event(
+            AgentHookEvent::Notification,
+            &json!({ "message": "Waiting for input" }),
+        );
+        assert_eq!(
+            claude_notification.notification.as_ref().unwrap().body,
+            "Waiting for input"
+        );
     }
 }
