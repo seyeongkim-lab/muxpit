@@ -526,6 +526,18 @@ fn command_line(process: &sysinfo_crate::Process) -> Option<String> {
     }
 }
 
+#[cfg(windows)]
+fn process_cwd(process: &sysinfo_crate::Process) -> Option<String> {
+    // sysinfo reads the process's Win32 current directory from the PEB. PowerShell's
+    // `Set-Location` (cd) does not update that — it only moves the provider $PWD — so
+    // the PEB keeps reporting the launch directory and would clobber the accurate cwd
+    // the shell hook reports via OSC 7. Defer to the frontend-provided cwd instead,
+    // matching get_process_cwd's Windows policy.
+    let _ = process;
+    None
+}
+
+#[cfg(not(windows))]
 fn process_cwd(process: &sysinfo_crate::Process) -> Option<String> {
     process
         .cwd()
