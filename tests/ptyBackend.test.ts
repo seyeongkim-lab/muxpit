@@ -1,21 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { spawnTerminalPty, type PtyBackend } from "../src/utils/ptyBackend.ts";
+import {
+  spawnTerminalPty,
+  type PtyBackend,
+  type SpawnPtyRequest,
+  type SpawnTmuxCcRequest,
+} from "../src/utils/ptyBackend.ts";
 
 const createBackend = () => {
   const calls: string[] = [];
+  const spawnRequests: SpawnPtyRequest[] = [];
+  const tmuxRequests: SpawnTmuxCcRequest[] = [];
   const backend: Pick<PtyBackend, "spawn" | "spawnTmuxCc"> = {
-    spawn: async () => {
+    spawn: async (request) => {
       calls.push("spawn");
+      spawnRequests.push(request);
       return 1;
     },
-    spawnTmuxCc: async () => {
+    spawnTmuxCc: async (request) => {
       calls.push("spawnTmuxCc");
+      tmuxRequests.push(request);
       return 2;
     },
   };
-  return { backend, calls };
+  return { backend, calls, spawnRequests, tmuxRequests };
 };
 
 const baseRequest = {
@@ -58,4 +67,25 @@ test("PTY backend spawn helper falls back to plain PTY when tmux session has no 
     1,
   );
   assert.deepEqual(calls, ["spawn"]);
+});
+
+test("PTY backend spawn helper forwards cwd only to plain PTY spawns", async () => {
+  const { backend, spawnRequests, tmuxRequests } = createBackend();
+  await spawnTerminalPty(backend, {
+    ...baseRequest,
+    cwd: "/home/me/project",
+    enableCwdReporting: true,
+  });
+  assert.equal(spawnRequests[0].cwd, "/home/me/project");
+  assert.equal(spawnRequests[0].enableCwdReporting, true);
+
+  await spawnTerminalPty(backend, {
+    ...baseRequest,
+    spawnCommand: "ssh me@host",
+    tmuxSession: "wmux-host",
+    cwd: "/home/me/project",
+    enableCwdReporting: true,
+  });
+  assert.equal(tmuxRequests[0].sessionName, "wmux-host");
+  assert.equal(tmuxRequests.length, 1);
 });

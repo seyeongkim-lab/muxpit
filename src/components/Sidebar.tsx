@@ -40,8 +40,23 @@ const collectTerminalLeaves = (node: LayoutNode): LeafNode[] => {
 };
 
 const isSshLeaf = (leaf: LeafNode): boolean => {
-  if (leaf.tmuxSession || leaf.sshCommand) return true;
+  if (leaf.tmuxSession || leaf.sshCommand || leaf.sshConnection) return true;
   return /^\s*ssh\b/i.test(leaf.command ?? "");
+};
+
+const findLeafById = (node: LayoutNode, id: string): LeafNode | null => {
+  if (node.type === "leaf") return node.id === id ? node : null;
+  if (node.type === "split") return findLeafById(node.children[0], id) ?? findLeafById(node.children[1], id);
+  return null;
+};
+
+const getSavedLocalCwd = (workspace: Workspace): string | null => {
+  const focused = findLeafById(workspace.layout, workspace.focusedLeafId);
+  if (focused && !isSshLeaf(focused) && focused.lastCwd) return focused.lastCwd;
+  for (const leaf of collectTerminalLeaves(workspace.layout)) {
+    if (!isSshLeaf(leaf) && leaf.lastCwd) return leaf.lastCwd;
+  }
+  return null;
 };
 
 const extractSshTarget = (command: string | undefined): string | null => {
@@ -92,6 +107,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
   const sshHosts = useSshHostsStore((s) => s.hosts);
   const tmuxAttach = useTmuxSessionsStore((s) => s._attach);
   const sessionListMetadata = useSettingsStore((s) => s.sessionListMetadata);
+  const enableExperimentalCwdRestore = useSettingsStore((s) => s.enableExperimentalCwdRestore);
   const historyEntries = useHistoryStore((s) => s.entries);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
@@ -277,7 +293,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
                 pushMeta(`tmux:${tmuxAttach[ws.id].wrapperSession}`, styles.metaTmux);
               }
             } else {
-              if (sessionListMetadata.cwd && info?.cwd) pushMeta(compactPath(info.cwd), styles.metaItem, info.cwd);
+              const cwd = info?.cwd || (enableExperimentalCwdRestore ? getSavedLocalCwd(ws) : null);
+              if (sessionListMetadata.cwd && cwd) pushMeta(compactPath(cwd), styles.metaItem, cwd);
               if (sessionListMetadata.git && info?.gitBranch) {
                 pushMeta(`${info.gitBranch}${info.gitDirty ? " *" : ""}`, styles.branch);
               }

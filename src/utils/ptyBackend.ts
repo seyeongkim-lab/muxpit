@@ -22,6 +22,8 @@ export interface SpawnPtyRequest {
   cols: number;
   command: string | null;
   commandArgv: string[] | null;
+  cwd: string | null;
+  enableCwdReporting: boolean;
   workspaceId: string;
   surfaceId: string;
 }
@@ -66,6 +68,8 @@ export interface SpawnTerminalPtyRequest {
   spawnCommandArgv: string[] | null;
   spawnSshConnection: SshConnection | null;
   tmuxSession?: string;
+  cwd?: string | null;
+  enableCwdReporting?: boolean;
   workspaceId: string;
   leafId: string;
 }
@@ -91,6 +95,8 @@ export const spawnTerminalPty = (
     cols: request.cols,
     command: request.spawnCommand,
     commandArgv: request.spawnCommandArgv,
+    cwd: request.cwd ?? null,
+    enableCwdReporting: request.enableCwdReporting ?? false,
     workspaceId: request.workspaceId,
     surfaceId: request.leafId,
   });
