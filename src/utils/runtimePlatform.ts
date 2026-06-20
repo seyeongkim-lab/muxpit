@@ -21,6 +21,9 @@ export const isLinuxPlatform = (platform = currentNavigator()?.platform ?? ""): 
 export const isWindowsPlatform = (platform = currentNavigator()?.platform ?? ""): boolean =>
   getRuntimePlatform(platform) === "windows";
 
+export const isMacOsPlatform = (platform = currentNavigator()?.platform ?? ""): boolean =>
+  getRuntimePlatform(platform) === "macos";
+
 export const isLinuxWebKitRuntime = (nav = currentNavigator()): boolean => {
   if (!nav) return false;
   const platform = nav.platform ?? "";

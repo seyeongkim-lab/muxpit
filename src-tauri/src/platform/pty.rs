@@ -20,9 +20,14 @@ pub fn apply_wmux_env(
     #[cfg(windows)]
     cmd.env("WMUX_PIPE_NAME", super::paths::ipc_pipe_name());
 
-    if let Ok(cli_path) = std::env::var("WMUX_BUNDLED_CLI_PATH") {
-        if !cli_path.is_empty() {
+    match std::env::var("WMUX_BUNDLED_CLI_PATH") {
+        Ok(cli_path) if !cli_path.is_empty() => {
             cmd.env("WMUX_BUNDLED_CLI_PATH", cli_path);
+        }
+        _ => {
+            if let Some(cli_path) = super::cli::bundled_cli_path() {
+                cmd.env("WMUX_BUNDLED_CLI_PATH", cli_path);
+            }
         }
     }
 }
