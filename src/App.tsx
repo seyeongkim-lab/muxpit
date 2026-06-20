@@ -27,8 +27,6 @@ import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspac
 import { applyThemeVars, getResolvedTheme } from "./themes";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { LayoutNode, LeafNode } from "./stores/workspace";
 import {
   findNeighbor,
@@ -49,6 +47,7 @@ import {
   parseSshCommandLine,
   type SshConnection,
 } from "./utils/sshConnection";
+import { tryGetCurrentWebview, tryGetCurrentWindow } from "./utils/tauriWindow";
 
 const APP_SHORTCUT_PLATFORM = getRuntimePlatform();
 
@@ -141,9 +140,9 @@ export const App = () => {
   // left top/right gaps. Page zoom, by contrast, scales the viewport itself so all
   // measurements stay consistent. Baseline: fontSize=14 → zoom=1.0.
   useEffect(() => {
-    getCurrentWebview()
-      .setZoom(uiFontSize / 14)
-      .catch((err) => console.error("[wmux] setZoom failed:", err));
+    const webview = tryGetCurrentWebview();
+    if (!webview) return;
+    webview.setZoom(uiFontSize / 14).catch((err) => console.error("[wmux] setZoom failed:", err));
   }, [uiFontSize]);
 
   // Poll workspace metadata (git, ports) every 5 seconds
@@ -315,12 +314,12 @@ export const App = () => {
 
   // Confirm before closing, then save session (Tauri close-requested + beforeunload fallback)
   useEffect(() => {
-    const appWindow = getCurrentWindow();
-    const unlistenPromise = appWindow.onCloseRequested((event) => {
-      if (closingRef.current) return;
-      event.preventDefault();
-      setCloseConfirmOpen(true);
-    });
+    const appWindow = tryGetCurrentWindow();
+    const unlistenPromise = appWindow?.onCloseRequested((event) => {
+        if (closingRef.current) return;
+        event.preventDefault();
+        setCloseConfirmOpen(true);
+      });
 
     const handleBeforeUnload = () => {
       useWorkspaceStore.getState().saveSession();
@@ -337,7 +336,7 @@ export const App = () => {
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("visibilitychange", handleVisibility);
-      unlistenPromise.then((fn) => fn());
+      unlistenPromise?.then((fn) => fn());
     };
   }, []);
 
@@ -735,15 +734,15 @@ export const App = () => {
   }, [sidebarMonitor]);
 
   const handleWindowMinimize = useCallback(() => {
-    getCurrentWindow().minimize().catch((err) => console.error("[wmux] minimize failed:", err));
+    tryGetCurrentWindow()?.minimize().catch((err) => console.error("[wmux] minimize failed:", err));
   }, []);
 
   const handleWindowMaximize = useCallback(() => {
-    getCurrentWindow().toggleMaximize().catch((err) => console.error("[wmux] toggleMaximize failed:", err));
+    tryGetCurrentWindow()?.toggleMaximize().catch((err) => console.error("[wmux] toggleMaximize failed:", err));
   }, []);
 
   const handleWindowClose = useCallback(() => {
-    getCurrentWindow().close().catch((err) => console.error("[wmux] close failed:", err));
+    tryGetCurrentWindow()?.close().catch((err) => console.error("[wmux] close failed:", err));
   }, []);
 
   const handleCloseConfirm = useCallback(async () => {
@@ -751,7 +750,7 @@ export const App = () => {
     setCloseConfirmOpen(false);
     useWorkspaceStore.getState().saveSession();
     try {
-      await getCurrentWindow().destroy();
+      await tryGetCurrentWindow()?.destroy();
     } catch (err) {
       console.error("[wmux] destroy failed:", err);
       closingRef.current = false;

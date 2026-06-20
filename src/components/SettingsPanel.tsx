@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSettingsStore, PREFIX_KEY_CHOICES, SESSION_LIST_METADATA_OPTIONS, type PrefixKey } from "../stores/settings";
+import { useWorkspaceStore } from "../stores/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
@@ -77,6 +78,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     enableNotifications,
     enableNotificationSound,
     notificationSoundName,
+    enableExperimentalCwdRestore,
     sessionListMetadata,
     setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
     setEnableWebglRenderer,
@@ -84,6 +86,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     setEnableNotificationSound,
     setNotificationSound,
     resetNotificationSound,
+    setEnableExperimentalCwdRestore,
     setSessionListMetadata,
   } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
@@ -109,11 +112,34 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     [themeName, resetSingleColor],
   );
 
+  const handleExperimentalCwdRestoreChange = useCallback(
+    (enabled: boolean) => {
+      setEnableExperimentalCwdRestore(enabled);
+      if (!enabled) {
+        useWorkspaceStore.getState().clearSavedCwd();
+      }
+    },
+    [setEnableExperimentalCwdRestore],
+  );
+
   useEffect(() => {
     if (open && allFonts.length === 0) {
       invoke<string[]>("list_fonts").then(setAllFonts).catch(() => {});
     }
   }, [open, allFonts.length]);
+
+  const installCli = useCallback(async () => {
+    setCliInstalling(true);
+    setCliInstallStatus(null);
+    try {
+      const path = await invoke<string>("install_cli_symlink");
+      setCliInstallStatus(`Installed at ${path}`);
+    } catch (error) {
+      setCliInstallStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCliInstalling(false);
+    }
+  }, []);
 
   if (!open) return null;
 
@@ -143,19 +169,6 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     };
     reader.readAsDataURL(file);
   };
-
-  const installCli = useCallback(async () => {
-    setCliInstalling(true);
-    setCliInstallStatus(null);
-    try {
-      const path = await invoke<string>("install_cli_symlink");
-      setCliInstallStatus(`Installed at ${path}`);
-    } catch (error) {
-      setCliInstallStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setCliInstalling(false);
-    }
-  }, []);
 
   return (
     <div style={styles.overlay} onClick={onClose}>
@@ -284,6 +297,22 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               ))}
             </div>
             <div style={styles.hint}>SSH sessions show only local routing metadata such as target, panes, and tmux session.</div>
+          </div>
+
+          {/* Experimental */}
+          <div style={styles.section}>
+            <label style={styles.label}>Experimental</label>
+            <label style={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={enableExperimentalCwdRestore}
+                onChange={(e) => handleExperimentalCwdRestoreChange(e.target.checked)}
+              />
+              Restore local session CWD
+            </label>
+            <div style={styles.hint}>
+              Stores local pane directories and reopens them there. SSH and tmux panes are excluded.
+            </div>
           </div>
 
           {/* Prefix Key (tmux-style) */}

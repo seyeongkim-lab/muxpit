@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { sanitizeTmuxSessionName } from "../utils/tmuxSession";
-import { pickActiveSession, reconcileActiveSession } from "../utils/tmuxSessionState";
-import type { SshConnection } from "../utils/sshConnection";
+import { sanitizeTmuxSessionName } from "../utils/tmuxSession.ts";
+import { pickActiveSession, reconcileActiveSession } from "../utils/tmuxSessionState.ts";
+import type { SshConnection } from "../utils/sshConnection.ts";
 
 export interface TmuxSession {
   id: string;          // "$0"

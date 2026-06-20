@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
+import { useSettingsStore } from "../stores/settings";
 
 const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
   if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") && node.id === id) return node;
@@ -75,6 +76,14 @@ const findFirstTerminalLeaf = (node: LayoutNode): LeafNode | null => {
   return null;
 };
 
+const collectTerminalLeaves = (node: LayoutNode): LeafNode[] => {
+  if (node.type === "leaf") return [node];
+  if (node.type === "split") {
+    return [...collectTerminalLeaves(node.children[0]), ...collectTerminalLeaves(node.children[1])];
+  }
+  return [];
+};
+
 const findRepresentativeLeaf = (workspace: Workspace): LeafNode | null => {
   const focused = findLeafInLayout(workspace.layout, workspace.focusedLeafId);
   if (focused?.type === "leaf") return focused;
@@ -121,6 +130,22 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
       // Read the live list each tick so the effect doesn't need to re-subscribe
       // on every workspace mutation (which would reset the interval).
       const wsList = useWorkspaceStore.getState().workspaces;
+      const cwdRestoreEnabled = useSettingsStore.getState().enableExperimentalCwdRestore;
+      const pollLeafCwd = async (workspaceId: string, leaf: LeafNode) => {
+        if (!cwdRestoreEnabled || !leaf.ptyId || isSshLeaf(leaf)) return;
+        try {
+          const metadata = await invoke<SessionMetadata>("get_session_metadata", {
+            id: leaf.ptyId,
+            cwd: leaf.lastCwd ?? null,
+          });
+          if (active) {
+            useWorkspaceStore.getState().setLeafCwd(workspaceId, leaf.id, metadata.cwd);
+          }
+        } catch {
+          // Silently ignore polling errors
+        }
+      };
+
       // Poll all workspaces in parallel
       await Promise.all(
         wsList.map(async (ws) => {
@@ -130,11 +155,23 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
           const workspace = state.workspaces.find((w) => w.id === ws.id);
           if (!workspace) return;
           const leaf = findRepresentativeLeaf(workspace);
-          if (!leaf?.ptyId) return;
+          if (!leaf?.ptyId) {
+            await Promise.all(
+              collectTerminalLeaves(workspace.layout).map((candidate) =>
+                pollLeafCwd(ws.id, candidate),
+              ),
+            );
+            return;
+          }
 
           if (isSshLeaf(leaf)) {
             const prev = useWorkspaceInfoStore.getState().info[ws.id];
             setInfo(ws.id, { ...emptyInfo(prev), agent: "ssh" });
+            await Promise.all(
+              collectTerminalLeaves(workspace.layout)
+                .filter((candidate) => candidate.id !== leaf.id)
+                .map((candidate) => pollLeafCwd(ws.id, candidate)),
+            );
             return;
           }
 
@@ -159,6 +196,14 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
               terminalTitle: prev?.terminalTitle ?? null,
             };
             setInfo(ws.id, nextInfo);
+            if (cwdRestoreEnabled) {
+              useWorkspaceStore.getState().setLeafCwd(ws.id, leaf.id, metadata.cwd);
+              await Promise.all(
+                collectTerminalLeaves(workspace.layout)
+                  .filter((candidate) => candidate.id !== leaf.id)
+                  .map((candidate) => pollLeafCwd(ws.id, candidate)),
+              );
+            }
 
             const autoName = buildAutoWorkspaceName(nextInfo);
             if (autoName) {

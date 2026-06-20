@@ -5,6 +5,7 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -65,9 +66,21 @@ impl PtyManager {
         cols: u16,
         command: Option<String>,
         command_argv: Option<Vec<String>>,
+        cwd: Option<String>,
+        enable_cwd_reporting: bool,
         wmux_context: WmuxPtyContext,
     ) -> Result<u32, String> {
-        self.spawn_internal(app, rows, cols, command, command_argv, false, wmux_context)
+        self.spawn_internal(
+            app,
+            rows,
+            cols,
+            command,
+            command_argv,
+            cwd,
+            enable_cwd_reporting,
+            false,
+            wmux_context,
+        )
     }
 
     /// Spawn an SSH connection that wraps the remote shell in `tmux new-session -A -s SESSION`.
@@ -138,7 +151,17 @@ impl PtyManager {
         let argv = ssh.argv_with_extra_options(&["-t"], Some(&tmux_inner));
         // tmux_cc=false: we no longer use control mode. Keep the parser module for a future
         // re-introduction of real pane mapping (see TODO Phase 10 Step 1: pane mapping policy).
-        self.spawn_internal(app, rows, cols, None, Some(argv), false, wmux_context)
+        self.spawn_internal(
+            app,
+            rows,
+            cols,
+            None,
+            Some(argv),
+            None,
+            false,
+            false,
+            wmux_context,
+        )
     }
 
     fn spawn_internal(
@@ -148,6 +171,8 @@ impl PtyManager {
         cols: u16,
         command: Option<String>,
         command_argv: Option<Vec<String>>,
+        cwd: Option<String>,
+        enable_cwd_reporting: bool,
         tmux_cc: bool,
         wmux_context: WmuxPtyContext,
     ) -> Result<u32, String> {
@@ -172,8 +197,11 @@ impl PtyManager {
             }
             command_builder_from_argv(&parts)?
         } else {
-            platform_pty::default_shell_command()
+            platform_pty::default_shell_command(enable_cwd_reporting)
         };
+        if let Some(cwd) = valid_spawn_cwd(cwd) {
+            cmd.cwd(cwd.as_os_str());
+        }
         cmd.env("TERM", "xterm-256color");
         platform_pty::apply_wmux_env(
             &mut cmd,
@@ -546,6 +574,15 @@ fn handle_tmux_event(
 unsafe impl Send for PtyManager {}
 unsafe impl Sync for PtyManager {}
 
+fn valid_spawn_cwd(cwd: Option<String>) -> Option<PathBuf> {
+    let raw = cwd?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(raw);
+    path.is_dir().then_some(path)
+}
+
 /// Simple shell-like word splitting that respects quotes
 fn shell_words_parse(s: &str) -> Vec<String> {
     split_command_line(s)
@@ -560,4 +597,21 @@ fn command_builder_from_argv(argv: &[String]) -> Result<CommandBuilder, String> 
         cb.arg(arg);
     }
     Ok(cb)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_spawn_cwd;
+
+    #[test]
+    fn spawn_cwd_uses_existing_directories_only() {
+        let current = std::env::current_dir().unwrap();
+        assert_eq!(
+            valid_spawn_cwd(Some(current.to_string_lossy().into_owned())),
+            Some(current)
+        );
+        assert!(valid_spawn_cwd(Some(String::new())).is_none());
+        assert!(valid_spawn_cwd(Some("__wmux_missing_directory__".to_string())).is_none());
+        assert!(valid_spawn_cwd(None).is_none());
+    }
 }

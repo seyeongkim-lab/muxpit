@@ -8,6 +8,7 @@ import {
   findTerminalLeaf,
   findTerminalSpawnSpec,
   findTerminalTmuxSession,
+  isLocalTerminalLeaf,
   terminalLeafExists,
   terminalSpawnSpecFromLeaf,
 } from "../src/utils/terminalSessionLayout.ts";
@@ -35,6 +36,29 @@ test("terminal spawn spec preserves parsed SSH tty mode", () => {
     ttyMode: "force",
   });
   assert.deepEqual(spec.commandArgv, ["ssh", "-tt", "user@example.com", "claude"]);
+  assert.equal(spec.cwd, undefined);
+  assert.equal(isLocalTerminalLeaf(leaf), false);
+});
+
+test("terminal spawn spec keeps cwd for local leaves only", () => {
+  const localLeaf: LeafNode = {
+    type: "leaf",
+    id: "local",
+    ptyId: null,
+    lastCwd: "/home/me/project",
+  };
+  const sshLeaf: LeafNode = {
+    type: "leaf",
+    id: "ssh",
+    ptyId: null,
+    command: "ssh me@example.com",
+    lastCwd: "/home/me/project",
+  };
+
+  assert.equal(isLocalTerminalLeaf(localLeaf), true);
+  assert.equal(terminalSpawnSpecFromLeaf(localLeaf).cwd, "/home/me/project");
+  assert.equal(isLocalTerminalLeaf(sshLeaf), false);
+  assert.equal(terminalSpawnSpecFromLeaf(sshLeaf).cwd, undefined);
 });
 
 test("terminal session layout selectors only target terminal leaves", () => {

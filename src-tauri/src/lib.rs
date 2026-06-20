@@ -28,6 +28,8 @@ fn spawn_pty(
     cols: u16,
     command: Option<String>,
     command_argv: Option<Vec<String>>,
+    cwd: Option<String>,
+    enable_cwd_reporting: bool,
     workspace_id: Option<String>,
     surface_id: Option<String>,
 ) -> Result<u32, String> {
@@ -37,6 +39,8 @@ fn spawn_pty(
         cols,
         command,
         command_argv,
+        cwd,
+        enable_cwd_reporting,
         WmuxPtyContext {
             workspace_id,
             surface_id,

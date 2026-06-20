@@ -9,7 +9,13 @@ export interface TerminalSpawnSpec {
   command?: string;
   commandArgv?: string[];
   sshConnection?: SshConnection;
+  cwd?: string;
 }
+
+export const isLocalTerminalLeaf = (node: LeafNode): boolean => {
+  if (node.tmuxSession || node.sshCommand || node.sshConnection) return false;
+  return !parseSshCommandLine(node.command);
+};
 
 export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => {
   const parsed = parseSshCommandLine(node.command ?? node.sshCommand);
@@ -27,6 +33,7 @@ export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => 
         })
       : undefined,
     sshConnection,
+    cwd: isLocalTerminalLeaf(node) ? node.lastCwd : undefined,
   };
 };
 

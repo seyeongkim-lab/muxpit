@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { CustomColors, ThemeColorKey } from "../themes";
-import { shouldEnableWebglRendererByDefault } from "../utils/runtimePlatform";
+import { shouldEnableWebglRendererByDefault } from "../utils/runtimePlatform.ts";
 
 export type PrefixKey = "off" | "ctrl+b" | "ctrl+shift+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
 export type SessionListMetadataKey =
@@ -65,6 +65,7 @@ interface SettingsState {
   enableNotificationSound: boolean;
   notificationSoundDataUrl: string | null;
   notificationSoundName: string | null;
+  enableExperimentalCwdRestore: boolean;
   sessionListMetadata: SessionListMetadataSettings;
 
   increaseFontSize: () => void;
@@ -81,6 +82,7 @@ interface SettingsState {
   setEnableNotificationSound: (enabled: boolean) => void;
   setNotificationSound: (name: string, dataUrl: string) => void;
   resetNotificationSound: () => void;
+  setEnableExperimentalCwdRestore: (enabled: boolean) => void;
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => void;
 }
 
@@ -153,6 +155,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     typeof saved.notificationSoundDataUrl === "string" ? saved.notificationSoundDataUrl : null,
   notificationSoundName:
     typeof saved.notificationSoundName === "string" ? saved.notificationSoundName : null,
+  enableExperimentalCwdRestore: saved.enableExperimentalCwdRestore ?? false,
   sessionListMetadata: initialSessionListMetadata,
 
   increaseFontSize: () => {
@@ -244,6 +247,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     saveSettings(get());
   },
 
+  setEnableExperimentalCwdRestore: (enabled: boolean) => {
+    set({ enableExperimentalCwdRestore: enabled });
+    saveSettings(get());
+  },
+
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => {
     set((state) => ({
       sessionListMetadata: { ...state.sessionListMetadata, [key]: enabled },
@@ -267,6 +275,7 @@ const saveSettings = (state: SettingsState) => {
         enableNotificationSound: state.enableNotificationSound,
         notificationSoundDataUrl: state.notificationSoundDataUrl,
         notificationSoundName: state.notificationSoundName,
+        enableExperimentalCwdRestore: state.enableExperimentalCwdRestore,
         sessionListMetadata: state.sessionListMetadata,
       }),
     );

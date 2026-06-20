@@ -1,13 +1,14 @@
 import { create } from "zustand";
-import { useTmuxSessionsStore } from "./tmuxSessions";
-import { getRuntimePlatform, type RuntimePlatform } from "../utils/runtimePlatform";
-import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession";
+import { useTmuxSessionsStore } from "./tmuxSessions.ts";
+import { useSettingsStore } from "./settings.ts";
+import { getRuntimePlatform, type RuntimePlatform } from "../utils/runtimePlatform.ts";
+import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession.ts";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
   parseSshCommandLine,
   sshConnectionToCommandLine,
   type SshConnection,
-} from "../utils/sshConnection";
+} from "../utils/sshConnection.ts";
 
 // Split tree types
 export type SplitDirection = "horizontal" | "vertical";
@@ -44,6 +45,7 @@ export interface LeafNode {
   // user@host string and is what AI availability is keyed by.
   aiKind?: AiKind;
   aiSshTarget?: string;
+  lastCwd?: string;
 }
 
 export interface BrowserNode {
@@ -103,6 +105,7 @@ interface SavedLeaf {
   tmuxSession?: string;
   aiKind?: AiKind;
   aiSshTarget?: string;
+  lastCwd?: string;
 }
 
 interface SavedBrowser {
@@ -193,6 +196,7 @@ interface WorkspaceState {
   ) => string;
   closeLeaf: (workspaceId: string, leafId: string) => void;
   setFocusedLeaf: (workspaceId: string, leafId: string) => void;
+  setLeafCwd: (workspaceId: string, leafId: string, cwd: string) => void;
   setSplitRatio: (workspaceId: string, splitId: string, ratio: number) => void;
   toggleZoom: (workspaceId: string) => void;
   cycleLayout: (workspaceId: string) => void;
@@ -219,6 +223,7 @@ interface WorkspaceState {
   // Session persistence
   saveSession: () => void;
   restoreSession: () => boolean;
+  clearSavedCwd: () => void;
 }
 
 let counter = 0;
@@ -243,6 +248,69 @@ const isSessionPlatformCompatible = (
   sourcePlatform === "unknown" ||
   currentPlatform === "unknown" ||
   sourcePlatform === currentPlatform;
+
+const isLocalRestorableLeaf = (leaf: Pick<LeafNode, "command" | "sshCommand" | "sshConnection" | "tmuxSession">): boolean => {
+  if (leaf.tmuxSession || leaf.sshCommand || leaf.sshConnection) return false;
+  return !parseSshCommandLine(leaf.command);
+};
+
+const clearCwdFromLayout = (node: LayoutNode): LayoutNode => {
+  if (node.type === "leaf") {
+    if (node.lastCwd === undefined) return node;
+    const next = { ...node };
+    delete next.lastCwd;
+    return next;
+  }
+  if (node.type === "split") {
+    const left = clearCwdFromLayout(node.children[0]);
+    const right = clearCwdFromLayout(node.children[1]);
+    if (left === node.children[0] && right === node.children[1]) return node;
+    return { ...node, children: [left, right] as [LayoutNode, LayoutNode] };
+  }
+  return node;
+};
+
+const clearCwdFromSavedLayout = (node: SavedLayout): SavedLayout => {
+  if (node.type === "leaf") {
+    if (node.lastCwd === undefined) return node;
+    const next = { ...node };
+    delete next.lastCwd;
+    return next;
+  }
+  if (node.type === "split") {
+    return {
+      ...node,
+      children: [
+        clearCwdFromSavedLayout(node.children[0]),
+        clearCwdFromSavedLayout(node.children[1]),
+      ],
+    };
+  }
+  return node;
+};
+
+const clearCwdFromStoredSessions = () => {
+  const keys = [
+    SESSION_STORAGE_KEY,
+    ...SESSION_PLATFORMS.map((platform) => platformSessionKey(platform)),
+  ];
+  for (const key of keys) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const session: SavedSession = JSON.parse(raw);
+      if (!Array.isArray(session.workspaces)) continue;
+      const nextSession: SavedSession = {
+        ...session,
+        workspaces: session.workspaces.map((workspace) => ({
+          ...workspace,
+          layout: clearCwdFromSavedLayout(workspace.layout),
+        })),
+      };
+      localStorage.setItem(key, JSON.stringify(nextSession));
+    } catch {}
+  }
+};
 
 const isDefaultWorkspaceName = (name: string | undefined): boolean =>
   !name || /^Shell \d+$/.test(name);
@@ -676,6 +744,47 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }));
   },
 
+  setLeafCwd: (workspaceId: string, leafId: string, cwd: string) => {
+    if (!cwd || !useSettingsStore.getState().enableExperimentalCwdRestore) return;
+    set((s) => {
+      let changed = false;
+      const workspaces = s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const update = (node: LayoutNode): LayoutNode => {
+          if (node.type === "leaf" && node.id === leafId) {
+            if (!isLocalRestorableLeaf(node) || node.lastCwd === cwd) return node;
+            changed = true;
+            return { ...node, lastCwd: cwd };
+          }
+          if (node.type === "split") {
+            const left = update(node.children[0]);
+            const right = update(node.children[1]);
+            if (left === node.children[0] && right === node.children[1]) return node;
+            return { ...node, children: [left, right] as [LayoutNode, LayoutNode] };
+          }
+          return node;
+        };
+        const layout = update(w.layout);
+        return layout === w.layout ? w : { ...w, layout };
+      });
+      return changed ? { workspaces } : s;
+    });
+  },
+
+  clearSavedCwd: () => {
+    set((s) => {
+      let changed = false;
+      const workspaces = s.workspaces.map((w) => {
+        const layout = clearCwdFromLayout(w.layout);
+        if (layout === w.layout) return w;
+        changed = true;
+        return { ...w, layout };
+      });
+      return changed ? { workspaces } : s;
+    });
+    clearCwdFromStoredSessions();
+  },
+
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => {
     set((s) => ({
       workspaces: s.workspaces.map((w) => {
@@ -694,8 +803,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   saveSession: () => {
     const state = get();
+    const preserveCwd = useSettingsStore.getState().enableExperimentalCwdRestore;
     const stripPty = (node: LayoutNode): SavedLayout => {
-      if (node.type === "leaf") return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget };
+      if (node.type === "leaf") {
+        const lastCwd = preserveCwd && isLocalRestorableLeaf(node) ? node.lastCwd : undefined;
+        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd };
+      }
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, sshCommand: node.sshCommand, sshConnection: node.sshConnection, monitorId: node.monitorId };
       if (node.type === "claudeSession") return { type: "claudeSession", id: node.id, sshTarget: node.sshTarget, sshConnection: node.sshConnection, project: node.project, projectPath: node.projectPath, sessionId: node.sessionId, monitorId: node.monitorId };
@@ -744,6 +857,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         sourcePlatform,
         currentPlatform,
       );
+      const restoreCwd =
+        useSettingsStore.getState().enableExperimentalCwdRestore &&
+        restorePlatformBoundCommands;
       saveToPlatformSpecificSessionKey =
         !!platformRaw || sourcePlatform === "unknown" || !restorePlatformBoundCommands;
 
@@ -759,6 +875,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           // command string. Try to infer kind+target so the toolbar still works
           // and `hasAiPane` checks aren't fooled into adding a duplicate.
           const inferred = node.aiKind ? undefined : inferAiMetaFromCommand(command);
+          const candidate = {
+            command,
+            sshCommand,
+            sshConnection,
+            tmuxSession,
+          };
           return {
             type: "leaf",
             id: node.id,
@@ -770,6 +892,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             tmuxSession,
             aiKind: restorePlatformBoundCommands ? node.aiKind ?? inferred?.aiKind : undefined,
             aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
+            lastCwd: restoreCwd && isLocalRestorableLeaf(candidate) ? node.lastCwd : undefined,
           };
         }
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
