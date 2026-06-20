@@ -1,4 +1,5 @@
 import type { AiKind, LeafNode, LayoutNode, Workspace } from "../stores/workspace.ts";
+import { detectRestorableAgentCommand } from "./agentSession.ts";
 import {
   parseSshCommandLine,
   sshConnectionToArgv,
@@ -17,6 +18,15 @@ export const isLocalTerminalLeaf = (node: LeafNode): boolean => {
   if (node.tmuxSession || node.sshCommand || node.sshConnection) return false;
   return !parseSshCommandLine(node.command);
 };
+
+export const isLocalAgentSessionReportingSpawnSpec = (
+  spec: Pick<TerminalSpawnSpec, "command" | "commandArgv" | "sshConnection">,
+  tmuxSession?: string,
+): boolean =>
+  !tmuxSession &&
+  !spec.sshConnection &&
+  !spec.commandArgv &&
+  (!spec.command || detectRestorableAgentCommand(spec.command) !== undefined);
 
 export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => {
   const parsed = parseSshCommandLine(node.command ?? node.sshCommand);

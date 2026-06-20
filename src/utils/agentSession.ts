@@ -5,6 +5,11 @@ export type RestorableAgentKind = "codex" | "claude";
 export interface AgentSessionBinding {
   kind: RestorableAgentKind;
   sessionId: string;
+  /**
+   * Command to fall back to when generated resume commands are stripped.
+   * Undefined means the pane originally came from the default local shell.
+   */
+  baseCommand?: string;
   cwd?: string;
   event?: string;
   updatedAt: number;
