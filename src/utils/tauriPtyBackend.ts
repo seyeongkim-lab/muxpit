@@ -20,6 +20,8 @@ export const tauriPtyBackend: PtyBackend = {
       cols: request.cols,
       command: request.command,
       commandArgv: request.commandArgv,
+      cwd: request.cwd,
+      enableCwdReporting: request.enableCwdReporting,
       workspaceId: request.workspaceId,
       surfaceId: request.surfaceId,
     }),

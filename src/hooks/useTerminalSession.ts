@@ -38,7 +38,7 @@ import {
   findTerminalTmuxSession,
   terminalLeafExists,
 } from "../utils/terminalSessionLayout";
-import { parseTerminalOutputEvents, type TerminalOutputEvent } from "../utils/terminalOutput";
+import { TerminalOutputParser, type TerminalOutputEvent } from "../utils/terminalOutput";
 import { terminalInstances } from "../components/terminalRegistry";
 import { createTerminalSurface, type TerminalSurface } from "../components/terminalSurface";
 
@@ -60,6 +60,9 @@ const handleTerminalOutputEvent = (event: TerminalOutputEvent, workspaceId: stri
   switch (event.type) {
     case "cwd":
       patchInfo(workspaceId, { cwd: event.cwd });
+      if (useSettingsStore.getState().enableExperimentalCwdRestore) {
+        useWorkspaceStore.getState().setLeafCwd(workspaceId, leafId, event.cwd);
+      }
       return;
     case "title":
       patchInfo(workspaceId, { terminalTitle: event.title });
@@ -195,14 +198,13 @@ export const useTerminalSession = ({
     const reconnectOutput: PtyOutput[] = [];
     const reconnectExit: PtyExit[] = [];
     const tmuxSession = findTerminalTmuxSession(getWorkspaces(), workspaceId, leafId);
+    const outputParser = new TerminalOutputParser({ platform: TERMINAL_INPUT_PLATFORM });
 
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
       surface.write(data);
-      if (data.includes("\x1b]")) {
-        for (const event of parseTerminalOutputEvents(data)) {
-          handleTerminalOutputEvent(event, workspaceId, leafId);
-        }
+      for (const event of outputParser.parse(data)) {
+        handleTerminalOutputEvent(event, workspaceId, leafId);
       }
     };
 
@@ -326,6 +328,14 @@ export const useTerminalSession = ({
 
     const cloneFromPtyId = findTerminalCloneFromPtyId(getWorkspaces(), workspaceId, leafId);
     const savedSpec = findTerminalSpawnSpec(getWorkspaces(), workspaceId, leafId);
+    const cwdRestoreEnabled = useSettingsStore.getState().enableExperimentalCwdRestore;
+    const spawnCwd = cwdRestoreEnabled ? savedSpec.cwd ?? null : null;
+    const enableCwdReporting =
+      cwdRestoreEnabled &&
+      !savedSpec.command &&
+      !savedSpec.commandArgv &&
+      !tmuxSession &&
+      !findTerminalAiKind(getWorkspaces(), workspaceId, leafId);
     if (savedSpec.command || savedSpec.commandArgv) {
       spawnCommand = savedSpec.command ?? null;
       spawnCommandArgv = savedSpec.commandArgv ?? null;
@@ -357,6 +367,8 @@ export const useTerminalSession = ({
         spawnCommandArgv,
         spawnSshConnection,
         tmuxSession,
+        cwd: spawnCwd,
+        enableCwdReporting,
         workspaceId,
         leafId,
       });
@@ -371,6 +383,8 @@ export const useTerminalSession = ({
             cols: Math.max(surface.cols, 1),
             command: null,
             commandArgv: null,
+            cwd: spawnCwd,
+            enableCwdReporting,
             workspaceId,
             surfaceId: leafId,
           });
