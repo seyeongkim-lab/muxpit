@@ -79,6 +79,8 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     enableNotificationSound,
     notificationSoundName,
     enableExperimentalCwdRestore,
+    enableExperimentalAgentSessionRestore,
+    enableExperimentalAgentDangerousResume,
     sessionListMetadata,
     setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
     setEnableWebglRenderer,
@@ -87,6 +89,8 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     setNotificationSound,
     resetNotificationSound,
     setEnableExperimentalCwdRestore,
+    setEnableExperimentalAgentSessionRestore,
+    setEnableExperimentalAgentDangerousResume,
     setSessionListMetadata,
   } = useSettingsStore();
   const [allFonts, setAllFonts] = useState<string[]>([]);
@@ -120,6 +124,17 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
       }
     },
     [setEnableExperimentalCwdRestore],
+  );
+
+  const handleExperimentalAgentSessionRestoreChange = useCallback(
+    (enabled: boolean) => {
+      setEnableExperimentalAgentSessionRestore(enabled);
+      if (!enabled) {
+        setEnableExperimentalAgentDangerousResume(false);
+        useWorkspaceStore.getState().clearSavedAgentSessions();
+      }
+    },
+    [setEnableExperimentalAgentDangerousResume, setEnableExperimentalAgentSessionRestore],
   );
 
   useEffect(() => {
@@ -312,6 +327,29 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
             </label>
             <div style={styles.hint}>
               Stores local pane directories and reopens them there. SSH and tmux panes are excluded.
+            </div>
+            <label style={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={enableExperimentalAgentSessionRestore}
+                onChange={(e) => handleExperimentalAgentSessionRestoreChange(e.target.checked)}
+              />
+              Restore Codex and Claude sessions
+            </label>
+            <div style={styles.hint}>
+              Stores wmux-launched Codex and Claude session IDs and resumes them after restart.
+            </div>
+            <label style={{ ...styles.checkLabel, opacity: enableExperimentalAgentSessionRestore ? 1 : 0.5 }}>
+              <input
+                type="checkbox"
+                checked={enableExperimentalAgentDangerousResume}
+                disabled={!enableExperimentalAgentSessionRestore}
+                onChange={(e) => setEnableExperimentalAgentDangerousResume(e.target.checked)}
+              />
+              Resume agents without approvals or sandbox
+            </label>
+            <div style={styles.hint}>
+              Uses Codex and Claude dangerous bypass flags only when restoring saved agent sessions.
             </div>
           </div>
 

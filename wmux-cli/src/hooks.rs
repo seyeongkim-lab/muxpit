@@ -140,6 +140,8 @@ const CLAUDE_HOOK_EVENTS: &[AgentHookEvent] = &[
 ];
 
 const CLAUDE_INSTALLED_HOOK_EVENTS: &[AgentHookEvent] = &[
+    AgentHookEvent::SessionStart,
+    AgentHookEvent::UserPromptSubmit,
     AgentHookEvent::Stop,
     AgentHookEvent::PermissionRequest,
     AgentHookEvent::Notification,
@@ -220,9 +222,6 @@ impl AgentHookAdapter for ClaudeHookAdapter {
 
     fn install(&self, yes: bool) -> Result<(), String> {
         install_agent_config(Agent::Claude, self.installed_events(), yes)?;
-        println!(
-            "Claude Code resume hooks are not implemented yet; installed notification hooks only."
-        );
         Ok(())
     }
 
@@ -322,7 +321,7 @@ Usage:
 Codex events:
   {codex_events}
 
-Claude resume hooks are not implemented yet; notification hooks are installed for Stop.
+Claude session and notification hooks are installed for supported events.
 Known Claude events:
   {claude_events}
 
@@ -503,6 +502,10 @@ fn run_agent_hook(agent: Agent, event: AgentHookEvent) -> Result<(), String> {
     let outcome = agent_adapter(agent).handle_event(event, &payload);
 
     if env::var_os("WMUX_SURFACE_ID").is_some() {
+        if let Some(params) = hook_session_params(agent, event, &payload) {
+            let _ = crate::send_request_value("agent-session", Value::Object(params));
+        }
+
         if let Some(notification) = outcome.notification {
             let mut params = Map::new();
             params.insert("title".to_string(), json!(notification.title));
@@ -518,6 +521,62 @@ fn run_agent_hook(agent: Agent, event: AgentHookEvent) -> Result<(), String> {
 
     println!("{{}}");
     Ok(())
+}
+
+fn hook_session_params(
+    agent: Agent,
+    event: AgentHookEvent,
+    payload: &Value,
+) -> Option<Map<String, Value>> {
+    if !records_agent_session(agent, event) {
+        return None;
+    }
+
+    let session_id = payload_string(
+        payload,
+        &[
+            "session_id",
+            "sessionId",
+            "conversation_id",
+            "conversationId",
+        ],
+    )?;
+
+    let mut params = Map::new();
+    params.insert("source".to_string(), json!(agent.name()));
+    params.insert("event".to_string(), json!(event.name()));
+    params.insert("session_id".to_string(), json!(session_id));
+    if let Some(cwd) = payload_string(
+        payload,
+        &[
+            "cwd",
+            "working_directory",
+            "workingDirectory",
+            "project_dir",
+            "projectDir",
+            "project_path",
+            "projectPath",
+            "workspacePaths",
+        ],
+    ) {
+        params.insert("cwd".to_string(), json!(cwd));
+    }
+    if let Some(transcript_path) = payload_string(payload, &["transcript_path", "transcriptPath"]) {
+        params.insert("transcript_path".to_string(), json!(transcript_path));
+    }
+    insert_env(&mut params, "workspace_id", "WMUX_WORKSPACE_ID");
+    insert_env(&mut params, "surface_id", "WMUX_SURFACE_ID");
+    Some(params)
+}
+
+fn records_agent_session(agent: Agent, event: AgentHookEvent) -> bool {
+    matches!(
+        event,
+        AgentHookEvent::SessionStart | AgentHookEvent::UserPromptSubmit | AgentHookEvent::Stop
+    ) || matches!(
+        (agent, event),
+        (Agent::Claude, AgentHookEvent::Notification)
+    )
 }
 
 fn insert_env(map: &mut Map<String, Value>, key: &str, env_key: &str) {
@@ -546,6 +605,13 @@ fn payload_string(payload: &Value, keys: &[&str]) -> Option<String> {
         };
         if let Some(text) = value.as_str().filter(|text| !text.trim().is_empty()) {
             return Some(text.trim().to_string());
+        }
+        if let Some(items) = value.as_array() {
+            for item in items {
+                if let Some(text) = item.as_str().filter(|text| !text.trim().is_empty()) {
+                    return Some(text.trim().to_string());
+                }
+            }
         }
     }
     None
@@ -875,7 +941,13 @@ mod tests {
         );
         assert_eq!(
             names(CLAUDE_ADAPTER.installed_events()),
-            vec!["Stop", "PermissionRequest", "Notification"]
+            vec![
+                "SessionStart",
+                "UserPromptSubmit",
+                "Stop",
+                "PermissionRequest",
+                "Notification",
+            ]
         );
     }
 
@@ -953,5 +1025,83 @@ mod tests {
             claude_notification.notification.as_ref().unwrap().body,
             "Waiting for input"
         );
+    }
+
+    #[test]
+    fn hook_session_params_extracts_agent_session_binding() {
+        let params = hook_session_params(
+            Agent::Codex,
+            AgentHookEvent::SessionStart,
+            &json!({
+                "session_id": "11111111-2222-3333-4444-555555555555",
+                "cwd": "/home/me/codex-project",
+                "transcript_path": "/home/me/.codex/sessions/rollout.jsonl"
+            }),
+        )
+        .expect("session params");
+
+        assert_eq!(params.get("source").and_then(Value::as_str), Some("codex"));
+        assert_eq!(
+            params.get("event").and_then(Value::as_str),
+            Some("SessionStart")
+        );
+        assert_eq!(
+            params.get("session_id").and_then(Value::as_str),
+            Some("11111111-2222-3333-4444-555555555555")
+        );
+        assert_eq!(
+            params.get("cwd").and_then(Value::as_str),
+            Some("/home/me/codex-project")
+        );
+        assert_eq!(
+            params.get("transcript_path").and_then(Value::as_str),
+            Some("/home/me/.codex/sessions/rollout.jsonl")
+        );
+    }
+
+    #[test]
+    fn hook_session_params_extracts_claude_workspace_path_and_ignores_tool_events() {
+        let params = hook_session_params(
+            Agent::Claude,
+            AgentHookEvent::UserPromptSubmit,
+            &json!({
+                "sessionId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "workspacePaths": ["/home/me/claude-project"],
+                "transcriptPath": "/home/me/.claude/projects/session.jsonl"
+            }),
+        )
+        .expect("session params");
+
+        assert_eq!(params.get("source").and_then(Value::as_str), Some("claude"));
+        assert_eq!(
+            params.get("event").and_then(Value::as_str),
+            Some("UserPromptSubmit")
+        );
+        assert_eq!(
+            params.get("session_id").and_then(Value::as_str),
+            Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        );
+        assert_eq!(
+            params.get("cwd").and_then(Value::as_str),
+            Some("/home/me/claude-project")
+        );
+        assert_eq!(
+            params.get("transcript_path").and_then(Value::as_str),
+            Some("/home/me/.claude/projects/session.jsonl")
+        );
+
+        assert!(hook_session_params(
+            Agent::Claude,
+            AgentHookEvent::PreToolUse,
+            &json!({ "session_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }),
+        )
+        .is_none());
+
+        assert!(hook_session_params(
+            Agent::Codex,
+            AgentHookEvent::Notification,
+            &json!({ "session_id": "11111111-2222-3333-4444-555555555555" }),
+        )
+        .is_none());
     }
 }

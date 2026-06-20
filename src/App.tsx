@@ -411,6 +411,40 @@ export const App = () => {
     };
   }, [activeId]);
 
+  // Listen for agent hook session bindings from wmux-cli.
+  useEffect(() => {
+    const unlisten = listen<{
+      source?: string;
+      event?: string;
+      workspace_id?: string;
+      surface_id?: string;
+      session_id?: string;
+      cwd?: string;
+      transcript_path?: string;
+    }>(
+      "wmux-agent-session",
+      (event) => {
+        const { source, workspace_id, surface_id, session_id } = event.payload;
+        if ((source !== "codex" && source !== "claude") || !workspace_id || !surface_id || !session_id) {
+          return;
+        }
+
+        useWorkspaceStore.getState().setLeafAgentSession(workspace_id, surface_id, {
+          kind: source,
+          sessionId: session_id,
+          cwd: event.payload.cwd,
+          transcriptPath: event.payload.transcript_path,
+          event: event.payload.event,
+          updatedAt: Date.now(),
+        });
+      },
+    );
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Prefix mode timeouts (module-scoped via refs so handler closure stays stable)
   const prefixTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const paneNumberTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);

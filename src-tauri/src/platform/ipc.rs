@@ -108,6 +108,32 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
                 error: None,
             }
         }
+        "agent-session" => {
+            let workspace_id = req.params.get("workspace_id").and_then(|v| v.as_str());
+            let surface_id = req.params.get("surface_id").and_then(|v| v.as_str());
+            let source = req.params.get("source").and_then(|v| v.as_str());
+            let event = req.params.get("event").and_then(|v| v.as_str());
+            let session_id = req.params.get("session_id").and_then(|v| v.as_str());
+            let cwd = req.params.get("cwd").and_then(|v| v.as_str());
+            let transcript_path = req.params.get("transcript_path").and_then(|v| v.as_str());
+
+            let mut payload = serde_json::Map::new();
+            insert_optional_string(&mut payload, "workspace_id", workspace_id);
+            insert_optional_string(&mut payload, "surface_id", surface_id);
+            insert_optional_string(&mut payload, "source", source);
+            insert_optional_string(&mut payload, "event", event);
+            insert_optional_string(&mut payload, "session_id", session_id);
+            insert_optional_string(&mut payload, "cwd", cwd);
+            insert_optional_string(&mut payload, "transcript_path", transcript_path);
+
+            let _ = app.emit("wmux-agent-session", serde_json::Value::Object(payload));
+
+            IpcResponse {
+                ok: true,
+                data: None,
+                error: None,
+            }
+        }
         "list-workspaces" => {
             use tauri::Manager;
             let registry = app.state::<crate::WorkspaceRegistry>();

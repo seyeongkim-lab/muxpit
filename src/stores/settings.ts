@@ -66,6 +66,8 @@ interface SettingsState {
   notificationSoundDataUrl: string | null;
   notificationSoundName: string | null;
   enableExperimentalCwdRestore: boolean;
+  enableExperimentalAgentSessionRestore: boolean;
+  enableExperimentalAgentDangerousResume: boolean;
   sessionListMetadata: SessionListMetadataSettings;
 
   increaseFontSize: () => void;
@@ -83,6 +85,8 @@ interface SettingsState {
   setNotificationSound: (name: string, dataUrl: string) => void;
   resetNotificationSound: () => void;
   setEnableExperimentalCwdRestore: (enabled: boolean) => void;
+  setEnableExperimentalAgentSessionRestore: (enabled: boolean) => void;
+  setEnableExperimentalAgentDangerousResume: (enabled: boolean) => void;
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => void;
 }
 
@@ -156,6 +160,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   notificationSoundName:
     typeof saved.notificationSoundName === "string" ? saved.notificationSoundName : null,
   enableExperimentalCwdRestore: saved.enableExperimentalCwdRestore ?? false,
+  enableExperimentalAgentSessionRestore: saved.enableExperimentalAgentSessionRestore ?? false,
+  enableExperimentalAgentDangerousResume: saved.enableExperimentalAgentDangerousResume ?? false,
   sessionListMetadata: initialSessionListMetadata,
 
   increaseFontSize: () => {
@@ -252,6 +258,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     saveSettings(get());
   },
 
+  setEnableExperimentalAgentSessionRestore: (enabled: boolean) => {
+    set({ enableExperimentalAgentSessionRestore: enabled });
+    saveSettings(get());
+  },
+
+  setEnableExperimentalAgentDangerousResume: (enabled: boolean) => {
+    set({ enableExperimentalAgentDangerousResume: enabled });
+    saveSettings(get());
+  },
+
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => {
     set((state) => ({
       sessionListMetadata: { ...state.sessionListMetadata, [key]: enabled },
@@ -276,6 +292,8 @@ const saveSettings = (state: SettingsState) => {
         notificationSoundDataUrl: state.notificationSoundDataUrl,
         notificationSoundName: state.notificationSoundName,
         enableExperimentalCwdRestore: state.enableExperimentalCwdRestore,
+        enableExperimentalAgentSessionRestore: state.enableExperimentalAgentSessionRestore,
+        enableExperimentalAgentDangerousResume: state.enableExperimentalAgentDangerousResume,
         sessionListMetadata: state.sessionListMetadata,
       }),
     );

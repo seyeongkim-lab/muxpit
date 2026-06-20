@@ -2,6 +2,11 @@ import { create } from "zustand";
 import { useTmuxSessionsStore } from "./tmuxSessions.ts";
 import { useSettingsStore } from "./settings.ts";
 import { getRuntimePlatform, type RuntimePlatform } from "../utils/runtimePlatform.ts";
+import {
+  buildAgentResumeCommand,
+  isRestorableAgentKind,
+  type AgentSessionBinding,
+} from "../utils/agentSession.ts";
 import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession.ts";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
@@ -46,6 +51,7 @@ export interface LeafNode {
   aiKind?: AiKind;
   aiSshTarget?: string;
   lastCwd?: string;
+  agentSession?: AgentSessionBinding;
 }
 
 export interface BrowserNode {
@@ -106,6 +112,7 @@ interface SavedLeaf {
   aiKind?: AiKind;
   aiSshTarget?: string;
   lastCwd?: string;
+  agentSession?: AgentSessionBinding;
 }
 
 interface SavedBrowser {
@@ -207,6 +214,7 @@ interface WorkspaceState {
   reorderWorkspaces: (fromIdx: number, toIdx: number) => void;
 
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => void;
+  setLeafAgentSession: (workspaceId: string, leafId: string, binding: AgentSessionBinding) => void;
 
   openMonitor: (workspaceId: string, leafId: string, sshTarget: string, sshCommand?: string, sshConnection?: SshConnection) => string;
   openClaudeSession: (
@@ -224,6 +232,7 @@ interface WorkspaceState {
   saveSession: () => void;
   restoreSession: () => boolean;
   clearSavedCwd: () => void;
+  clearSavedAgentSessions: () => void;
 }
 
 let counter = 0;
@@ -310,6 +319,89 @@ const clearCwdFromStoredSessions = () => {
       localStorage.setItem(key, JSON.stringify(nextSession));
     } catch {}
   }
+};
+
+const clearAgentSessionFromLayout = (node: LayoutNode): LayoutNode => {
+  if (node.type === "leaf") {
+    if (node.agentSession === undefined) return node;
+    const next = { ...node };
+    delete next.agentSession;
+    return next;
+  }
+  if (node.type === "split") {
+    const left = clearAgentSessionFromLayout(node.children[0]);
+    const right = clearAgentSessionFromLayout(node.children[1]);
+    if (left === node.children[0] && right === node.children[1]) return node;
+    return { ...node, children: [left, right] as [LayoutNode, LayoutNode] };
+  }
+  return node;
+};
+
+const clearAgentSessionFromSavedLayout = (node: SavedLayout): SavedLayout => {
+  if (node.type === "leaf") {
+    if (node.agentSession === undefined) return node;
+    const next = { ...node };
+    delete next.agentSession;
+    return next;
+  }
+  if (node.type === "split") {
+    return {
+      ...node,
+      children: [
+        clearAgentSessionFromSavedLayout(node.children[0]),
+        clearAgentSessionFromSavedLayout(node.children[1]),
+      ],
+    };
+  }
+  return node;
+};
+
+const clearAgentSessionsFromStoredSessions = () => {
+  const keys = [
+    SESSION_STORAGE_KEY,
+    ...SESSION_PLATFORMS.map((platform) => platformSessionKey(platform)),
+  ];
+  for (const key of keys) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const session: SavedSession = JSON.parse(raw);
+      if (!Array.isArray(session.workspaces)) continue;
+      const nextSession: SavedSession = {
+        ...session,
+        workspaces: session.workspaces.map((workspace) => ({
+          ...workspace,
+          layout: clearAgentSessionFromSavedLayout(workspace.layout),
+        })),
+      };
+      localStorage.setItem(key, JSON.stringify(nextSession));
+    } catch {}
+  }
+};
+
+const normalizeAgentSession = (value: unknown): AgentSessionBinding | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<AgentSessionBinding>;
+  if (!isRestorableAgentKind(raw.kind)) return undefined;
+  if (typeof raw.sessionId !== "string" || raw.sessionId.trim() === "") return undefined;
+  return {
+    kind: raw.kind,
+    sessionId: raw.sessionId,
+    cwd: typeof raw.cwd === "string" && raw.cwd.trim() !== "" ? raw.cwd : undefined,
+    transcriptPath:
+      typeof raw.transcriptPath === "string" && raw.transcriptPath.trim() !== ""
+        ? raw.transcriptPath
+        : undefined,
+    event: typeof raw.event === "string" && raw.event.trim() !== "" ? raw.event : undefined,
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
+  };
+};
+
+const isLocalAgentSessionLeaf = (
+  leaf: Pick<LeafNode, "command" | "sshCommand" | "sshConnection" | "tmuxSession">,
+): boolean => {
+  if (leaf.tmuxSession || leaf.sshCommand || leaf.sshConnection) return false;
+  return !parseSshCommandLine(leaf.command);
 };
 
 const isDefaultWorkspaceName = (name: string | undefined): boolean =>
@@ -771,6 +863,48 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  setLeafAgentSession: (workspaceId: string, leafId: string, binding: AgentSessionBinding) => {
+    if (!useSettingsStore.getState().enableExperimentalAgentSessionRestore) return;
+    const normalized = normalizeAgentSession(binding);
+    if (!normalized) return;
+    set((s) => {
+      let changed = false;
+      const workspaces = s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const update = (node: LayoutNode): LayoutNode => {
+          if (node.type === "leaf" && node.id === leafId) {
+            if (!isLocalAgentSessionLeaf(node)) return node;
+            if (
+              node.agentSession?.kind === normalized.kind &&
+              node.agentSession.sessionId === normalized.sessionId &&
+              node.agentSession.cwd === normalized.cwd &&
+              node.agentSession.transcriptPath === normalized.transcriptPath &&
+              node.agentSession.event === normalized.event
+            ) {
+              return node;
+            }
+            changed = true;
+            return {
+              ...node,
+              agentSession: normalized,
+              aiKind: normalized.kind,
+            };
+          }
+          if (node.type === "split") {
+            const left = update(node.children[0]);
+            const right = update(node.children[1]);
+            if (left === node.children[0] && right === node.children[1]) return node;
+            return { ...node, children: [left, right] as [LayoutNode, LayoutNode] };
+          }
+          return node;
+        };
+        const layout = update(w.layout);
+        return layout === w.layout ? w : { ...w, layout };
+      });
+      return changed ? { workspaces } : s;
+    });
+  },
+
   clearSavedCwd: () => {
     set((s) => {
       let changed = false;
@@ -783,6 +917,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return changed ? { workspaces } : s;
     });
     clearCwdFromStoredSessions();
+  },
+
+  clearSavedAgentSessions: () => {
+    set((s) => {
+      let changed = false;
+      const workspaces = s.workspaces.map((w) => {
+        const layout = clearAgentSessionFromLayout(w.layout);
+        if (layout === w.layout) return w;
+        changed = true;
+        return { ...w, layout };
+      });
+      return changed ? { workspaces } : s;
+    });
+    clearAgentSessionsFromStoredSessions();
   },
 
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => {
@@ -803,11 +951,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   saveSession: () => {
     const state = get();
-    const preserveCwd = useSettingsStore.getState().enableExperimentalCwdRestore;
+    const settings = useSettingsStore.getState();
+    const preserveCwd = settings.enableExperimentalCwdRestore;
+    const preserveAgentSession = settings.enableExperimentalAgentSessionRestore;
     const stripPty = (node: LayoutNode): SavedLayout => {
       if (node.type === "leaf") {
         const lastCwd = preserveCwd && isLocalRestorableLeaf(node) ? node.lastCwd : undefined;
-        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd };
+        const agentSession =
+          preserveAgentSession && isLocalAgentSessionLeaf(node)
+            ? normalizeAgentSession(node.agentSession)
+            : undefined;
+        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd, agentSession };
       }
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, sshCommand: node.sshCommand, sshConnection: node.sshConnection, monitorId: node.monitorId };
@@ -860,17 +1014,41 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const restoreCwd =
         useSettingsStore.getState().enableExperimentalCwdRestore &&
         restorePlatformBoundCommands;
+      const restoreAgentSession =
+        useSettingsStore.getState().enableExperimentalAgentSessionRestore &&
+        restorePlatformBoundCommands;
+      const resumeAgentDangerously =
+        useSettingsStore.getState().enableExperimentalAgentDangerousResume;
       saveToPlatformSpecificSessionKey =
         !!platformRaw || sourcePlatform === "unknown" || !restorePlatformBoundCommands;
 
       const restoreLayout = (node: SavedLayout): LayoutNode => {
         if (node.type === "leaf") {
-          const command = restorePlatformBoundCommands ? node.command : undefined;
+          const savedCommand = restorePlatformBoundCommands ? node.command : undefined;
           const sshCommand = restorePlatformBoundCommands ? node.sshCommand : undefined;
           const tmuxSession = restorePlatformBoundCommands ? node.tmuxSession : undefined;
-          const parsedSsh = parseSshCommandLine(command ?? sshCommand);
+          const parsedSsh = parseSshCommandLine(savedCommand ?? sshCommand);
           const sshConnection = restorePlatformBoundCommands ? node.sshConnection ?? parsedSsh?.connection : undefined;
           const sshRemoteCommand = restorePlatformBoundCommands ? node.sshRemoteCommand ?? parsedSsh?.remoteCommand : undefined;
+          const savedAgentSession = normalizeAgentSession(node.agentSession);
+          const agentSession =
+            restoreAgentSession &&
+            savedAgentSession &&
+            isLocalAgentSessionLeaf({
+              command: savedCommand,
+              sshCommand,
+              sshConnection,
+              tmuxSession,
+            })
+              ? savedAgentSession
+              : undefined;
+          const command = agentSession
+            ? buildAgentResumeCommand(
+                agentSession.kind,
+                agentSession.sessionId,
+                resumeAgentDangerously,
+              )
+            : savedCommand;
           // Migration: leaves saved by builds before aiKind existed have only the
           // command string. Try to infer kind+target so the toolbar still works
           // and `hasAiPane` checks aren't fooled into adding a duplicate.
@@ -890,9 +1068,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             sshConnection,
             sshRemoteCommand,
             tmuxSession,
-            aiKind: restorePlatformBoundCommands ? node.aiKind ?? inferred?.aiKind : undefined,
+            aiKind: restorePlatformBoundCommands ? agentSession?.kind ?? node.aiKind ?? inferred?.aiKind : undefined,
             aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
             lastCwd: restoreCwd && isLocalRestorableLeaf(candidate) ? node.lastCwd : undefined,
+            agentSession,
           };
         }
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };

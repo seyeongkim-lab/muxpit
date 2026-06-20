@@ -328,8 +328,12 @@ export const useTerminalSession = ({
 
     const cloneFromPtyId = findTerminalCloneFromPtyId(getWorkspaces(), workspaceId, leafId);
     const savedSpec = findTerminalSpawnSpec(getWorkspaces(), workspaceId, leafId);
-    const cwdRestoreEnabled = useSettingsStore.getState().enableExperimentalCwdRestore;
-    const spawnCwd = cwdRestoreEnabled ? savedSpec.cwd ?? null : null;
+    const settings = useSettingsStore.getState();
+    const cwdRestoreEnabled = settings.enableExperimentalCwdRestore;
+    const agentSessionRestoreEnabled = settings.enableExperimentalAgentSessionRestore;
+    const spawnCwd = savedSpec.cwdSource === "agent"
+      ? agentSessionRestoreEnabled ? savedSpec.cwd ?? null : null
+      : cwdRestoreEnabled ? savedSpec.cwd ?? null : null;
     const enableCwdReporting =
       cwdRestoreEnabled &&
       !savedSpec.command &&

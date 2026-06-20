@@ -56,9 +56,37 @@ test("terminal spawn spec keeps cwd for local leaves only", () => {
   };
 
   assert.equal(isLocalTerminalLeaf(localLeaf), true);
-  assert.equal(terminalSpawnSpecFromLeaf(localLeaf).cwd, "/home/me/project");
+  assert.deepEqual(
+    {
+      cwd: terminalSpawnSpecFromLeaf(localLeaf).cwd,
+      cwdSource: terminalSpawnSpecFromLeaf(localLeaf).cwdSource,
+    },
+    { cwd: "/home/me/project", cwdSource: "local" },
+  );
   assert.equal(isLocalTerminalLeaf(sshLeaf), false);
   assert.equal(terminalSpawnSpecFromLeaf(sshLeaf).cwd, undefined);
+  assert.equal(terminalSpawnSpecFromLeaf(sshLeaf).cwdSource, undefined);
+});
+
+test("terminal spawn spec prefers agent session cwd over local cwd", () => {
+  const leaf: LeafNode = {
+    type: "leaf",
+    id: "agent",
+    ptyId: null,
+    command: "codex resume 11111111-2222-3333-4444-555555555555",
+    lastCwd: "/home/me/shell",
+    agentSession: {
+      kind: "codex",
+      sessionId: "11111111-2222-3333-4444-555555555555",
+      cwd: "/home/me/codex-project",
+      updatedAt: 10,
+    },
+  };
+
+  const spec = terminalSpawnSpecFromLeaf(leaf);
+
+  assert.equal(spec.cwd, "/home/me/codex-project");
+  assert.equal(spec.cwdSource, "agent");
 });
 
 test("terminal session layout selectors only target terminal leaves", () => {

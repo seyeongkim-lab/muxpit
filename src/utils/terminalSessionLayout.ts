@@ -10,6 +10,7 @@ export interface TerminalSpawnSpec {
   commandArgv?: string[];
   sshConnection?: SshConnection;
   cwd?: string;
+  cwdSource?: "local" | "agent";
 }
 
 export const isLocalTerminalLeaf = (node: LeafNode): boolean => {
@@ -33,7 +34,8 @@ export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => 
         })
       : undefined,
     sshConnection,
-    cwd: isLocalTerminalLeaf(node) ? node.lastCwd : undefined,
+    cwd: node.agentSession?.cwd ?? (isLocalTerminalLeaf(node) ? node.lastCwd : undefined),
+    cwdSource: node.agentSession?.cwd ? "agent" : isLocalTerminalLeaf(node) && node.lastCwd ? "local" : undefined,
   };
 };
 
