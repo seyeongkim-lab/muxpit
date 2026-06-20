@@ -28,13 +28,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "linux": {
-      "deb": {
-        "files": {
-          "/usr/bin/wmux-cli": "../wmux-cli/target/release/wmux-cli"
-        }
-      }
-    },
+    "externalBin": [
+      "../target/sidecars/wmux-cli"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

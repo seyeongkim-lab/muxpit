@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:cli": "cargo build --manifest-path wmux-cli/Cargo.toml --release",
+    "build:cli": "node scripts/build-cli-sidecars.mjs",
     "test:ts": "node --test tests/*.test.ts",
     "preview": "vite preview",
     "tauri:dev:isolated": "node scripts/tauri-isolated-dev.mjs",

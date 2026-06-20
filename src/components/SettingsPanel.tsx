@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
 import { playNotificationSound } from "../utils/notificationSound";
+import { isMacOsPlatform } from "../utils/runtimePlatform";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -89,6 +90,8 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   const [monoOnly, setMonoOnly] = useState(true);
   const [search, setSearch] = useState("");
   const [colorOpen, setColorOpen] = useState(false);
+  const [cliInstallStatus, setCliInstallStatus] = useState<string | null>(null);
+  const [cliInstalling, setCliInstalling] = useState(false);
   const soundInputRef = useRef<HTMLInputElement | null>(null);
 
   const baseTheme = getThemeByName(themeName).theme;
@@ -141,6 +144,19 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     reader.readAsDataURL(file);
   };
 
+  const installCli = useCallback(async () => {
+    setCliInstalling(true);
+    setCliInstallStatus(null);
+    try {
+      const path = await invoke<string>("install_cli_symlink");
+      setCliInstallStatus(`Installed at ${path}`);
+    } catch (error) {
+      setCliInstallStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCliInstalling(false);
+    }
+  }, []);
+
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
@@ -150,6 +166,25 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
         </div>
 
         <div style={styles.content}>
+          {isMacOsPlatform() && (
+            <div style={styles.section}>
+              <label style={styles.label}>Command Line</label>
+              <div style={styles.row}>
+                <button
+                  onClick={installCli}
+                  style={styles.btn}
+                  disabled={cliInstalling}
+                >
+                  {cliInstalling ? "Installing..." : "Install CLI"}
+                </button>
+                {cliInstallStatus && (
+                  <span style={styles.inlineStatus}>{cliInstallStatus}</span>
+                )}
+              </div>
+              <div style={styles.hint}>Creates ~/.local/bin/wmux-cli for terminal use.</div>
+            </div>
+          )}
+
           {/* Font Size */}
           <div style={styles.section}>
             <label style={styles.label}>Font Size</label>
@@ -512,6 +547,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   value: { color: "#cdd6f4", fontSize: 16, fontWeight: 600, minWidth: 48, textAlign: "center" as const, fontFamily: "monospace" },
   hint: { color: "#585b70", fontSize: 11, marginTop: 4 },
+  inlineStatus: {
+    color: "#89b4fa", fontSize: 11, overflow: "hidden",
+    textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
+  },
   soundControls: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" as const },
   soundName: {
     color: "#89b4fa", fontSize: 11, marginTop: 6,

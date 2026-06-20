@@ -435,6 +435,11 @@ fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), 
         .map_err(|e| format!("Notification error: {e}"))
 }
 
+#[tauri::command]
+fn install_cli_symlink() -> Result<String, String> {
+    platform::cli::install_cli_symlink().map(|path| path.display().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -462,6 +467,7 @@ pub fn run() {
             tmux_new_session,
             tmux_kill_session,
             send_notification,
+            install_cli_symlink,
             set_workspace_list,
             request_session_content,
             start_monitor,
