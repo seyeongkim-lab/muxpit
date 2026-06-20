@@ -22,6 +22,7 @@ export const tauriPtyBackend: PtyBackend = {
       commandArgv: request.commandArgv,
       cwd: request.cwd,
       enableCwdReporting: request.enableCwdReporting,
+      enableAgentSessionReporting: request.enableAgentSessionReporting,
       workspaceId: request.workspaceId,
       surfaceId: request.surfaceId,
     }),

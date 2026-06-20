@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(unix)]
 use super::ipc_unix as imp;
@@ -115,7 +115,26 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             let event = req.params.get("event").and_then(|v| v.as_str());
             let session_id = req.params.get("session_id").and_then(|v| v.as_str());
             let cwd = req.params.get("cwd").and_then(|v| v.as_str());
-            let transcript_path = req.params.get("transcript_path").and_then(|v| v.as_str());
+            let token = req
+                .params
+                .get("agent_session_token")
+                .and_then(|v| v.as_str());
+
+            let authorized = workspace_id
+                .zip(surface_id)
+                .zip(token)
+                .map(|((workspace_id, surface_id), token)| {
+                    app.state::<crate::pty::PtyManager>()
+                        .agent_session_token_matches(workspace_id, surface_id, token)
+                })
+                .unwrap_or(false);
+            if !authorized {
+                return IpcResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("Unauthorized agent-session request".to_string()),
+                };
+            }
 
             let mut payload = serde_json::Map::new();
             insert_optional_string(&mut payload, "workspace_id", workspace_id);
@@ -124,7 +143,6 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             insert_optional_string(&mut payload, "event", event);
             insert_optional_string(&mut payload, "session_id", session_id);
             insert_optional_string(&mut payload, "cwd", cwd);
-            insert_optional_string(&mut payload, "transcript_path", transcript_path);
 
             let _ = app.emit("wmux-agent-session", serde_json::Value::Object(payload));
 
@@ -135,7 +153,6 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             }
         }
         "list-workspaces" => {
-            use tauri::Manager;
             let registry = app.state::<crate::WorkspaceRegistry>();
             let list = registry.0.lock().unwrap().clone();
             match serde_json::to_value(&list) {

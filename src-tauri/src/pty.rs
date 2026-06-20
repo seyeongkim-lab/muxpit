@@ -1,6 +1,7 @@
 use crate::platform::pty as platform_pty;
 use crate::ssh_command::{resolve_ssh_command, split_command_line, SshCommand};
 use crate::tmux_cc::{shell_single_quote, TmuxCcParser, TmuxEvent};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -38,12 +39,16 @@ struct PtyInstance {
     _master: Box<dyn MasterPty + Send>,
     child_pid: Option<u32>,
     tmux_state: Option<Arc<Mutex<TmuxCcState>>>,
+    workspace_id: Option<String>,
+    surface_id: Option<String>,
+    agent_session_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct WmuxPtyContext {
     pub workspace_id: Option<String>,
     pub surface_id: Option<String>,
+    pub enable_agent_session_reporting: bool,
 }
 
 pub struct PtyManager {
@@ -202,11 +207,17 @@ impl PtyManager {
         if let Some(cwd) = valid_spawn_cwd(cwd) {
             cmd.cwd(cwd.as_os_str());
         }
+        let agent_session_token = if wmux_context.enable_agent_session_reporting {
+            generate_agent_session_token()?
+        } else {
+            None
+        };
         cmd.env("TERM", "xterm-256color");
         platform_pty::apply_wmux_env(
             &mut cmd,
             wmux_context.workspace_id.as_deref(),
             wmux_context.surface_id.as_deref(),
+            agent_session_token.as_deref(),
         );
 
         let mut child = pair
@@ -329,6 +340,9 @@ impl PtyManager {
                     _master: pair.master,
                     child_pid,
                     tmux_state,
+                    workspace_id: wmux_context.workspace_id,
+                    surface_id: wmux_context.surface_id,
+                    agent_session_token,
                 },
             );
         }
@@ -402,6 +416,23 @@ impl PtyManager {
             .get(&id)
             .ok_or_else(|| format!("PTY {id} not found"))?;
         Ok(instance.child_pid)
+    }
+
+    pub fn agent_session_token_matches(
+        &self,
+        workspace_id: &str,
+        surface_id: &str,
+        token: &str,
+    ) -> bool {
+        if workspace_id.is_empty() || surface_id.is_empty() || token.is_empty() {
+            return false;
+        }
+        let instances = self.instances.lock().unwrap();
+        instances.values().any(|instance| {
+            instance.workspace_id.as_deref() == Some(workspace_id)
+                && instance.surface_id.as_deref() == Some(surface_id)
+                && instance.agent_session_token.as_deref() == Some(token)
+        })
     }
 }
 
@@ -597,6 +628,12 @@ fn command_builder_from_argv(argv: &[String]) -> Result<CommandBuilder, String> 
         cb.arg(arg);
     }
     Ok(cb)
+}
+
+fn generate_agent_session_token() -> Result<Option<String>, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|e| format!("Random token error: {e}"))?;
+    Ok(Some(URL_SAFE_NO_PAD.encode(bytes)))
 }
 
 #[cfg(test)]

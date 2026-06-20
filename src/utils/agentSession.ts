@@ -1,4 +1,4 @@
-import { buildCommandLine } from "./sshConnection.ts";
+import { buildCommandLine, splitCommandLine } from "./sshConnection.ts";
 
 export type RestorableAgentKind = "codex" | "claude";
 
@@ -6,7 +6,6 @@ export interface AgentSessionBinding {
   kind: RestorableAgentKind;
   sessionId: string;
   cwd?: string;
-  transcriptPath?: string;
   event?: string;
   updatedAt: number;
 }
@@ -34,4 +33,22 @@ export const buildAgentResumeCommand = (
     "--resume",
     sessionId,
   ]);
+};
+
+export const buildAgentBaseCommand = (kind: RestorableAgentKind): string => kind;
+
+export const isAgentResumeCommandForBinding = (
+  command: string | undefined,
+  binding: Pick<AgentSessionBinding, "kind" | "sessionId">,
+): boolean =>
+  command === buildAgentResumeCommand(binding.kind, binding.sessionId, false) ||
+  command === buildAgentResumeCommand(binding.kind, binding.sessionId, true);
+
+export const detectRestorableAgentCommand = (
+  command: string | undefined,
+): RestorableAgentKind | undefined => {
+  if (!command) return undefined;
+  const [program] = splitCommandLine(command);
+  const normalized = program?.replace(/\\/g, "/").split("/").pop();
+  return isRestorableAgentKind(normalized) ? normalized : undefined;
 };

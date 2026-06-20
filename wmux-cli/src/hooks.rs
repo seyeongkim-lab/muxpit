@@ -561,11 +561,13 @@ fn hook_session_params(
     ) {
         params.insert("cwd".to_string(), json!(cwd));
     }
-    if let Some(transcript_path) = payload_string(payload, &["transcript_path", "transcriptPath"]) {
-        params.insert("transcript_path".to_string(), json!(transcript_path));
-    }
     insert_env(&mut params, "workspace_id", "WMUX_WORKSPACE_ID");
     insert_env(&mut params, "surface_id", "WMUX_SURFACE_ID");
+    insert_env(
+        &mut params,
+        "agent_session_token",
+        "WMUX_AGENT_SESSION_TOKEN",
+    );
     Some(params)
 }
 
@@ -1053,10 +1055,7 @@ mod tests {
             params.get("cwd").and_then(Value::as_str),
             Some("/home/me/codex-project")
         );
-        assert_eq!(
-            params.get("transcript_path").and_then(Value::as_str),
-            Some("/home/me/.codex/sessions/rollout.jsonl")
-        );
+        assert_eq!(params.get("transcript_path"), None);
     }
 
     #[test]
@@ -1085,10 +1084,7 @@ mod tests {
             params.get("cwd").and_then(Value::as_str),
             Some("/home/me/claude-project")
         );
-        assert_eq!(
-            params.get("transcript_path").and_then(Value::as_str),
-            Some("/home/me/.claude/projects/session.jsonl")
-        );
+        assert_eq!(params.get("transcript_path"), None);
 
         assert!(hook_session_params(
             Agent::Claude,

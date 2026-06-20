@@ -8,6 +8,7 @@ import { useSettingsStore } from "../stores/settings";
 import { useWorkspaceStore } from "../stores/workspace";
 import { getResolvedTheme } from "../themes";
 import { useWorkspaceInfoStore } from "./useWorkspaceInfo";
+import { detectRestorableAgentCommand } from "../utils/agentSession";
 import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
 import { playNotificationSound } from "../utils/notificationSound";
 import { matchesPrefixKey } from "../utils/prefixKey";
@@ -340,6 +341,11 @@ export const useTerminalSession = ({
       !savedSpec.commandArgv &&
       !tmuxSession &&
       !findTerminalAiKind(getWorkspaces(), workspaceId, leafId);
+    const enableAgentSessionReporting =
+      agentSessionRestoreEnabled &&
+      !savedSpec.sshConnection &&
+      !tmuxSession &&
+      detectRestorableAgentCommand(savedSpec.command) !== undefined;
     if (savedSpec.command || savedSpec.commandArgv) {
       spawnCommand = savedSpec.command ?? null;
       spawnCommandArgv = savedSpec.commandArgv ?? null;
@@ -373,6 +379,7 @@ export const useTerminalSession = ({
         tmuxSession,
         cwd: spawnCwd,
         enableCwdReporting,
+        enableAgentSessionReporting,
         workspaceId,
         leafId,
       });
@@ -389,6 +396,7 @@ export const useTerminalSession = ({
             commandArgv: null,
             cwd: spawnCwd,
             enableCwdReporting,
+            enableAgentSessionReporting: false,
             workspaceId,
             surfaceId: leafId,
           });

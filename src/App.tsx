@@ -420,7 +420,6 @@ export const App = () => {
       surface_id?: string;
       session_id?: string;
       cwd?: string;
-      transcript_path?: string;
     }>(
       "wmux-agent-session",
       (event) => {
@@ -433,7 +432,6 @@ export const App = () => {
           kind: source,
           sessionId: session_id,
           cwd: event.payload.cwd,
-          transcriptPath: event.payload.transcript_path,
           event: event.payload.event,
           updatedAt: Date.now(),
         });

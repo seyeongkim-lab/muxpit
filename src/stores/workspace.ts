@@ -3,7 +3,10 @@ import { useTmuxSessionsStore } from "./tmuxSessions.ts";
 import { useSettingsStore } from "./settings.ts";
 import { getRuntimePlatform, type RuntimePlatform } from "../utils/runtimePlatform.ts";
 import {
+  buildAgentBaseCommand,
   buildAgentResumeCommand,
+  detectRestorableAgentCommand,
+  isAgentResumeCommandForBinding,
   isRestorableAgentKind,
   type AgentSessionBinding,
 } from "../utils/agentSession.ts";
@@ -324,7 +327,14 @@ const clearCwdFromStoredSessions = () => {
 const clearAgentSessionFromLayout = (node: LayoutNode): LayoutNode => {
   if (node.type === "leaf") {
     if (node.agentSession === undefined) return node;
+    const binding = normalizeAgentSession(node.agentSession);
     const next = { ...node };
+    if (binding && isAgentResumeCommandForBinding(next.command, binding)) {
+      next.command = buildAgentBaseCommand(binding.kind);
+    }
+    if (binding && next.aiKind === binding.kind && !next.aiSshTarget) {
+      delete next.aiKind;
+    }
     delete next.agentSession;
     return next;
   }
@@ -340,7 +350,14 @@ const clearAgentSessionFromLayout = (node: LayoutNode): LayoutNode => {
 const clearAgentSessionFromSavedLayout = (node: SavedLayout): SavedLayout => {
   if (node.type === "leaf") {
     if (node.agentSession === undefined) return node;
+    const binding = normalizeAgentSession(node.agentSession);
     const next = { ...node };
+    if (binding && isAgentResumeCommandForBinding(next.command, binding)) {
+      next.command = buildAgentBaseCommand(binding.kind);
+    }
+    if (binding && next.aiKind === binding.kind && !next.aiSshTarget) {
+      delete next.aiKind;
+    }
     delete next.agentSession;
     return next;
   }
@@ -388,10 +405,6 @@ const normalizeAgentSession = (value: unknown): AgentSessionBinding | undefined 
     kind: raw.kind,
     sessionId: raw.sessionId,
     cwd: typeof raw.cwd === "string" && raw.cwd.trim() !== "" ? raw.cwd : undefined,
-    transcriptPath:
-      typeof raw.transcriptPath === "string" && raw.transcriptPath.trim() !== ""
-        ? raw.transcriptPath
-        : undefined,
     event: typeof raw.event === "string" && raw.event.trim() !== "" ? raw.event : undefined,
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
   };
@@ -401,7 +414,7 @@ const isLocalAgentSessionLeaf = (
   leaf: Pick<LeafNode, "command" | "sshCommand" | "sshConnection" | "tmuxSession">,
 ): boolean => {
   if (leaf.tmuxSession || leaf.sshCommand || leaf.sshConnection) return false;
-  return !parseSshCommandLine(leaf.command);
+  return !parseSshCommandLine(leaf.command) && detectRestorableAgentCommand(leaf.command) !== undefined;
 };
 
 const isDefaultWorkspaceName = (name: string | undefined): boolean =>
@@ -874,20 +887,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const update = (node: LayoutNode): LayoutNode => {
           if (node.type === "leaf" && node.id === leafId) {
             if (!isLocalAgentSessionLeaf(node)) return node;
+            if (detectRestorableAgentCommand(node.command) !== normalized.kind) return node;
+            const previous = node.agentSession;
+            const merged =
+              previous?.kind === normalized.kind && previous.sessionId === normalized.sessionId
+                ? {
+                    ...normalized,
+                    cwd: normalized.cwd ?? previous.cwd,
+                    event: normalized.event ?? previous.event,
+                  }
+                : normalized;
             if (
-              node.agentSession?.kind === normalized.kind &&
-              node.agentSession.sessionId === normalized.sessionId &&
-              node.agentSession.cwd === normalized.cwd &&
-              node.agentSession.transcriptPath === normalized.transcriptPath &&
-              node.agentSession.event === normalized.event
+              node.agentSession?.kind === merged.kind &&
+              node.agentSession.sessionId === merged.sessionId &&
+              node.agentSession.cwd === merged.cwd &&
+              node.agentSession.event === merged.event
             ) {
               return node;
             }
             changed = true;
             return {
               ...node,
-              agentSession: normalized,
-              aiKind: normalized.kind,
+              agentSession: merged,
             };
           }
           if (node.type === "split") {
@@ -961,7 +982,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           preserveAgentSession && isLocalAgentSessionLeaf(node)
             ? normalizeAgentSession(node.agentSession)
             : undefined;
-        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command: node.command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd, agentSession };
+        const command =
+          agentSession && isAgentResumeCommandForBinding(node.command, agentSession)
+            ? buildAgentBaseCommand(agentSession.kind)
+            : node.command;
+        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd, agentSession };
       }
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, sshCommand: node.sshCommand, sshConnection: node.sshConnection, monitorId: node.monitorId };
@@ -1048,7 +1073,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
                 agentSession.sessionId,
                 resumeAgentDangerously,
               )
-            : savedCommand;
+            : savedAgentSession && isAgentResumeCommandForBinding(savedCommand, savedAgentSession)
+              ? buildAgentBaseCommand(savedAgentSession.kind)
+              : savedCommand;
           // Migration: leaves saved by builds before aiKind existed have only the
           // command string. Try to infer kind+target so the toolbar still works
           // and `hasAiPane` checks aren't fooled into adding a duplicate.
@@ -1068,7 +1095,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             sshConnection,
             sshRemoteCommand,
             tmuxSession,
-            aiKind: restorePlatformBoundCommands ? agentSession?.kind ?? node.aiKind ?? inferred?.aiKind : undefined,
+            aiKind: restorePlatformBoundCommands ? node.aiKind ?? inferred?.aiKind : undefined,
             aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
             lastCwd: restoreCwd && isLocalRestorableLeaf(candidate) ? node.lastCwd : undefined,
             agentSession,

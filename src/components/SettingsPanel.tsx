@@ -337,7 +337,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               Restore Codex and Claude sessions
             </label>
             <div style={styles.hint}>
-              Stores wmux-launched Codex and Claude session IDs and resumes them after restart.
+              Stores wmux-launched Codex and Claude session IDs and directories in local app storage.
             </div>
             <label style={{ ...styles.checkLabel, opacity: enableExperimentalAgentSessionRestore ? 1 : 0.5 }}>
               <input
