@@ -162,7 +162,12 @@ impl PtyManager {
         );
         let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
             .ok_or_else(|| "Invalid SSH command".to_string())?;
-        let argv = ssh.argv_with_extra_options(&["-t"], Some(&tmux_inner));
+        // Force tty allocation with `-tt`, not `-t`. A single `-t` only requests a
+        // remote pty when the ssh client itself has a local tty; the Windows ConPTY
+        // that wmux runs ssh.exe under is not detected as one, so `-t` silently skips
+        // allocation and the remote `tmux attach` dies with "open terminal failed: not
+        // a terminal", spinning the reconnect loop. `-tt` forces it on every platform.
+        let argv = ssh.argv_with_extra_options(&["-tt"], Some(&tmux_inner));
         // tmux_cc=false: we no longer use control mode. Keep the parser module for a future
         // re-introduction of real pane mapping (see TODO Phase 10 Step 1: pane mapping policy).
         self.spawn_internal(
