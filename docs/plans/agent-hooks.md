@@ -96,8 +96,13 @@ wmux 소유 hook만 제거한 뒤 현재 버전의 hook을 다시 추가한다.
 hook command는 `WMUX_SURFACE_ID`, `WMUX_WORKSPACE_ID`, `WMUX_AGENT_SESSION_TOKEN`이
 있을 때만 wmux로 세션 binding IPC를 보낸다. backend는 token이 현재 live PTY의
 workspace/surface에 발급된 값인지 확인한 뒤에만 renderer event를 emit한다.
-따라서 wmux가 agent command로 띄운 로컬 Codex/Claude Code pane만 복원 대상이다.
-일반 shell, SSH/tmux pane은 로컬 session id/cwd로 오인하지 않도록 제외한다.
+복원 대상은 wmux가 agent command로 띄운 로컬 Codex/Claude Code pane과, wmux의
+로컬 shell pane 안에서 실행된 Codex/Claude Code 세션이다. SSH/tmux pane은 로컬
+session id/cwd로 오인하지 않도록 제외한다.
+
+`WMUX_AGENT_SESSION_TOKEN`은 local shell의 descendant process가 상속하므로,
+experimental restore를 켠 local shell pane에서는 그 pane 안에서 실행한 프로세스를
+동일 trust boundary로 본다. 이 범위가 부담스러운 경우 agent 전용 pane에서만 사용한다.
 
 `Restore Codex and Claude sessions` experimental 옵션이 켜져 있으면 저장된
 session id를 사용해 재시작 시 다음 명령으로 복원한다.

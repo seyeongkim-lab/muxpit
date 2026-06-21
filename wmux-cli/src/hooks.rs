@@ -541,6 +541,9 @@ fn hook_session_params(
             "conversationId",
         ],
     )?;
+    if !is_valid_agent_session_id(&session_id) {
+        return None;
+    }
 
     let mut params = Map::new();
     params.insert("source".to_string(), json!(agent.name()));
@@ -569,6 +572,14 @@ fn hook_session_params(
         "WMUX_AGENT_SESSION_TOKEN",
     );
     Some(params)
+}
+
+fn is_valid_agent_session_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed.len() <= 512
+        && !trimmed.starts_with('-')
+        && !trimmed.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 fn records_agent_session(agent: Agent, event: AgentHookEvent) -> bool {
@@ -1056,6 +1067,22 @@ mod tests {
             Some("/home/me/codex-project")
         );
         assert_eq!(params.get("transcript_path"), None);
+    }
+
+    #[test]
+    fn hook_session_params_rejects_option_shaped_session_ids() {
+        assert!(hook_session_params(
+            Agent::Codex,
+            AgentHookEvent::SessionStart,
+            &json!({ "session_id": "--dangerously-bypass-approvals-and-sandbox" }),
+        )
+        .is_none());
+        assert!(hook_session_params(
+            Agent::Claude,
+            AgentHookEvent::UserPromptSubmit,
+            &json!({ "sessionId": "session with spaces" }),
+        )
+        .is_none());
     }
 
     #[test]

@@ -121,6 +121,7 @@ const loadSaved = () => {
 
 const saved = loadSaved();
 const defaultEnableWebglRenderer = shouldEnableWebglRendererByDefault();
+const initialExperimentalAgentSessionRestore = saved.enableExperimentalAgentSessionRestore ?? false;
 
 // Resolve the ordered font family list. Prefer the new array model; otherwise
 // start from defaults (Sarasa-led CJK). Legacy `fontFamily` stack strings are not
@@ -160,8 +161,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   notificationSoundName:
     typeof saved.notificationSoundName === "string" ? saved.notificationSoundName : null,
   enableExperimentalCwdRestore: saved.enableExperimentalCwdRestore ?? false,
-  enableExperimentalAgentSessionRestore: saved.enableExperimentalAgentSessionRestore ?? false,
-  enableExperimentalAgentDangerousResume: saved.enableExperimentalAgentDangerousResume ?? false,
+  enableExperimentalAgentSessionRestore: initialExperimentalAgentSessionRestore,
+  enableExperimentalAgentDangerousResume: initialExperimentalAgentSessionRestore
+    ? saved.enableExperimentalAgentDangerousResume ?? false
+    : false,
   sessionListMetadata: initialSessionListMetadata,
 
   increaseFontSize: () => {
@@ -259,12 +262,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setEnableExperimentalAgentSessionRestore: (enabled: boolean) => {
-    set({ enableExperimentalAgentSessionRestore: enabled });
+    set({
+      enableExperimentalAgentSessionRestore: enabled,
+      enableExperimentalAgentDangerousResume: enabled
+        ? get().enableExperimentalAgentDangerousResume
+        : false,
+    });
     saveSettings(get());
   },
 
   setEnableExperimentalAgentDangerousResume: (enabled: boolean) => {
-    set({ enableExperimentalAgentDangerousResume: enabled });
+    set({
+      enableExperimentalAgentDangerousResume:
+        get().enableExperimentalAgentSessionRestore && enabled,
+    });
     saveSettings(get());
   },
 

@@ -74,7 +74,7 @@ test("terminal spawn spec prefers agent session cwd over local cwd", () => {
     type: "leaf",
     id: "agent",
     ptyId: null,
-    command: "codex resume 11111111-2222-3333-4444-555555555555",
+    initialInput: "codex resume 11111111-2222-3333-4444-555555555555\r",
     lastCwd: "/home/me/shell",
     agentSession: {
       kind: "codex",
@@ -88,6 +88,8 @@ test("terminal spawn spec prefers agent session cwd over local cwd", () => {
 
   assert.equal(spec.cwd, "/home/me/codex-project");
   assert.equal(spec.cwdSource, "agent");
+  assert.equal(spec.command, undefined);
+  assert.equal(spec.initialInput, "codex resume 11111111-2222-3333-4444-555555555555\r");
 });
 
 test("agent session reporting spawn spec is limited to local shell and direct agent commands", () => {
@@ -98,6 +100,14 @@ test("agent session reporting spawn spec is limited to local shell and direct ag
   );
   assert.equal(
     isLocalAgentSessionReportingSpawnSpec({ command: "claude" }, undefined),
+    true,
+  );
+  assert.equal(
+    isLocalAgentSessionReportingSpawnSpec({ command: "C:\\Tools\\codex.exe resume abc" }, undefined),
+    true,
+  );
+  assert.equal(
+    isLocalAgentSessionReportingSpawnSpec({ command: "\"C:\\Program Files\\Claude\\claude.cmd\"" }, undefined),
     true,
   );
   assert.equal(

@@ -6,6 +6,8 @@ import {
   buildAgentBaseCommand,
   buildAgentResumeCommand,
   detectRestorableAgentCommand,
+  fallbackCommandForGeneratedAgentResume,
+  normalizeAgentSessionId,
   isAgentResumeCommandForBinding,
   isRestorableAgentKind,
   type AgentSessionBinding,
@@ -55,6 +57,11 @@ export interface LeafNode {
   aiSshTarget?: string;
   lastCwd?: string;
   agentSession?: AgentSessionBinding;
+  /**
+   * Transient input written once after spawning the PTY. Used for shell-origin
+   * agent resumes so the user's shell resolves PATH and startup wrappers.
+   */
+  initialInput?: string;
 }
 
 export interface BrowserNode {
@@ -408,7 +415,11 @@ const agentBaseCommandFromCommand = (
   command: string | undefined,
   kind: AgentSessionBinding["kind"],
 ): string | undefined =>
-  detectRestorableAgentCommand(command) === kind ? buildAgentBaseCommand(kind) : undefined;
+  fallbackCommandForGeneratedAgentResume(command) === buildAgentBaseCommand(kind)
+    ? undefined
+    : detectRestorableAgentCommand(command) === kind
+      ? command
+      : undefined;
 
 const normalizeAgentSession = (
   value: unknown,
@@ -417,13 +428,14 @@ const normalizeAgentSession = (
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Partial<AgentSessionBinding>;
   if (!isRestorableAgentKind(raw.kind)) return undefined;
-  if (typeof raw.sessionId !== "string" || raw.sessionId.trim() === "") return undefined;
+  const sessionId = normalizeAgentSessionId(raw.sessionId);
+  if (!sessionId) return undefined;
   const normalizedBaseCommand =
     agentBaseCommandFromCommand(raw.baseCommand, raw.kind) ??
     agentBaseCommandFromCommand(baseCommand, raw.kind);
   return {
     kind: raw.kind,
-    sessionId: raw.sessionId,
+    sessionId,
     baseCommand: normalizedBaseCommand,
     cwd: typeof raw.cwd === "string" && raw.cwd.trim() !== "" ? raw.cwd : undefined,
     event: typeof raw.event === "string" && raw.event.trim() !== "" ? raw.event : undefined,
@@ -920,6 +932,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               ...normalized,
               baseCommand: normalized.baseCommand ?? baseCommand,
             };
+            const switchesSession =
+              previous !== undefined &&
+              (previous.kind !== incoming.kind || previous.sessionId !== incoming.sessionId);
+            if (switchesSession && incoming.event !== "SessionStart") {
+              return node;
+            }
             const merged =
               previous?.kind === incoming.kind && previous.sessionId === incoming.sessionId
                 ? {
@@ -1108,18 +1126,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               sshCommand,
               sshConnection,
               tmuxSession,
-            })
+              })
               ? savedAgentSession
               : undefined;
-          const command = agentSession
+          const resumeCommand = agentSession
             ? buildAgentResumeCommand(
                 agentSession.kind,
                 agentSession.sessionId,
                 resumeAgentDangerously,
+                agentSession.baseCommand,
               )
+            : undefined;
+          const command = agentSession
+            ? agentSession.baseCommand
+              ? resumeCommand
+              : undefined
             : savedAgentSession && isAgentResumeCommandForBinding(savedCommand, savedAgentSession)
               ? savedAgentSession.baseCommand ?? buildAgentBaseCommand(savedAgentSession.kind)
-              : savedCommand;
+              : fallbackCommandForGeneratedAgentResume(savedCommand) ?? savedCommand;
           // Migration: leaves saved by builds before aiKind existed have only the
           // command string. Try to infer kind+target so the toolbar still works
           // and `hasAiPane` checks aren't fooled into adding a duplicate.
@@ -1143,6 +1167,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
             lastCwd: restoreCwd && isLocalRestorableLeaf(candidate) ? node.lastCwd : undefined,
             agentSession,
+            initialInput: agentSession && !agentSession.baseCommand && resumeCommand
+              ? `${resumeCommand}\r`
+              : undefined,
           };
         }
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };

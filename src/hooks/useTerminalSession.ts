@@ -381,6 +381,9 @@ export const useTerminalSession = ({
         workspaceId,
         leafId,
       });
+      if (savedSpec.initialInput) {
+        tauriPtyBackend.write(ptyId, savedSpec.initialInput).catch(console.error);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       surface.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
