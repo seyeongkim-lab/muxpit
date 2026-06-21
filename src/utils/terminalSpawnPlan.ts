@@ -85,6 +85,7 @@ export const buildTerminalSpawnPlan = ({
         agentSession.sessionId,
         settings.enableAgentDangerousResume,
         agentSession.baseCommand,
+        agentSession.baseCommandArgv,
       )
     : undefined;
   const agentResumeCommand = agentSession
@@ -93,6 +94,7 @@ export const buildTerminalSpawnPlan = ({
         agentSession.sessionId,
         settings.enableAgentDangerousResume,
         agentSession.baseCommand,
+        agentSession.baseCommandArgv,
       )
     : undefined;
   const shellResumeInput =

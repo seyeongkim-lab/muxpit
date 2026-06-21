@@ -80,6 +80,35 @@ test("terminal spawn plan uses current dangerous setting and strips saved danger
   );
 });
 
+test("terminal spawn plan prefers sanitized base argv when spawning direct agents", () => {
+  const plan = buildTerminalSpawnPlan({
+    spec: {
+      command: "'/tools/my codex/codex' --profile work",
+      agentSession: {
+        kind: "codex",
+        sessionId: "11111111-2222-3333-4444-555555555555",
+        baseCommand: "'/tools/my codex/codex' --profile work",
+        baseCommandArgv: ["/tools/my codex/codex", "--profile", "work"],
+        updatedAt: 10,
+      },
+    },
+    resolved: {
+      command: "'/tools/my codex/codex' --profile work",
+      commandArgv: null,
+      sshConnection: null,
+    },
+    settings: baseSettings,
+  });
+
+  assert.deepEqual(plan.spawnCommandArgv, [
+    "/tools/my codex/codex",
+    "--profile",
+    "work",
+    "resume",
+    "11111111-2222-3333-4444-555555555555",
+  ]);
+});
+
 test("terminal spawn plan restores shell-origin agents as post-spawn shell input", () => {
   const plan = buildTerminalSpawnPlan({
     spec: {

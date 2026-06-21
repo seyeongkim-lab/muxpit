@@ -121,7 +121,9 @@ const loadSaved = () => {
 
 const saved = loadSaved();
 const defaultEnableWebglRenderer = shouldEnableWebglRendererByDefault();
-const initialExperimentalAgentSessionRestore = saved.enableExperimentalAgentSessionRestore ?? false;
+export const storedBoolean = (value: unknown): boolean => value === true;
+const initialExperimentalAgentSessionRestore =
+  storedBoolean(saved.enableExperimentalAgentSessionRestore);
 
 // Resolve the ordered font family list. Prefer the new array model; otherwise
 // start from defaults (Sarasa-led CJK). Legacy `fontFamily` stack strings are not
@@ -160,10 +162,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     typeof saved.notificationSoundDataUrl === "string" ? saved.notificationSoundDataUrl : null,
   notificationSoundName:
     typeof saved.notificationSoundName === "string" ? saved.notificationSoundName : null,
-  enableExperimentalCwdRestore: saved.enableExperimentalCwdRestore ?? false,
+  enableExperimentalCwdRestore: storedBoolean(saved.enableExperimentalCwdRestore),
   enableExperimentalAgentSessionRestore: initialExperimentalAgentSessionRestore,
   enableExperimentalAgentDangerousResume: initialExperimentalAgentSessionRestore
-    ? saved.enableExperimentalAgentDangerousResume ?? false
+    ? storedBoolean(saved.enableExperimentalAgentDangerousResume)
     : false,
   sessionListMetadata: initialSessionListMetadata,
 
