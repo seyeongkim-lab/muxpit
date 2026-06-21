@@ -453,6 +453,34 @@ test("setLeafAgentSession ignores stale non-start events for a different session
   assert.equal(switched?.agentSession?.sessionId, "33333333-4444-5555-6666-777777777777");
 });
 
+test("clearLeafAgentSession only removes the matching live agent session", () => {
+  resetStores();
+  useSettingsStore.setState({ enableExperimentalAgentSessionRestore: true });
+  useWorkspaceStore.setState({ workspaces: [workspaceWithAgentAndShell()], activeId: "ws" });
+
+  useWorkspaceStore.getState().setLeafAgentSession("ws", "shell", {
+    kind: "codex",
+    sessionId: "22222222-3333-4444-5555-666666666666",
+    event: "SessionStart",
+    updatedAt: 20,
+  });
+
+  useWorkspaceStore.getState().clearLeafAgentSession("ws", "shell", {
+    kind: "codex",
+    sessionId: "11111111-2222-3333-4444-555555555555",
+  });
+  const stale = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "shell");
+  assert.equal(stale?.agentSession?.sessionId, "22222222-3333-4444-5555-666666666666");
+
+  useWorkspaceStore.getState().clearLeafAgentSession("ws", "shell", {
+    kind: "codex",
+    sessionId: "22222222-3333-4444-5555-666666666666",
+  });
+  const cleared = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "shell");
+  assert.equal(cleared?.agentSession, undefined);
+  assert.equal(cleared?.command, undefined);
+});
+
 test("workspace session stores base command instead of generated resume command", () => {
   resetStores();
   useSettingsStore.setState({

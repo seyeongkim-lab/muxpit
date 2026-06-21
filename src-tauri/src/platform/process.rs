@@ -386,6 +386,23 @@ pub fn collect_session_metadata(pid: u32, fallback_cwd: Option<String>) -> Sessi
     }
 }
 
+pub fn process_tree_contains_agent(pid: u32, agent: &str) -> bool {
+    let agent = match normalize_process_name(agent).as_str() {
+        "codex" => "codex",
+        "claude" => "claude",
+        _ => return false,
+    };
+    let system = shared_process_system();
+    collect_sysinfo_descendant_pids(&system, pid)
+        .iter()
+        .filter_map(|p| system.process(sysinfo_crate::Pid::from_u32(*p)))
+        .any(|process| {
+            let name = process_display_name(process).unwrap_or_default();
+            let command = command_line(process);
+            detect_agent(&name, command.as_deref()) == Some(agent)
+        })
+}
+
 fn new_process_system() -> sysinfo_crate::System {
     let mut system = sysinfo_crate::System::new();
     system.refresh_processes_specifics(
@@ -897,6 +914,19 @@ mod tests {
             parse_linux_cmdline(raw),
             "ssh -i '/home/me/work key' me@host"
         );
+    }
+
+    #[test]
+    fn detect_agent_matches_codex_binary_and_node_wrapper_commands() {
+        assert_eq!(detect_agent("codex", None), Some("codex"));
+        assert_eq!(
+            detect_agent(
+                "node",
+                Some("/home/me/.nvm/versions/node/bin/node /home/me/.npm/bin/codex.js")
+            ),
+            Some("codex")
+        );
+        assert_eq!(detect_agent("bash", Some("echo codec")), None);
     }
 
     #[test]

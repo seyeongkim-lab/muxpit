@@ -106,6 +106,11 @@ export interface Workspace {
   layoutMode?: LayoutMode;
 }
 
+export interface AgentSessionClearMatch {
+  kind?: AgentSessionBinding["kind"];
+  sessionId?: string;
+}
+
 // Session save/restore types
 interface SavedLeaf {
   type: "leaf";
@@ -221,6 +226,7 @@ interface WorkspaceState {
 
   setSshCommand: (workspaceId: string, leafId: string, cmd: string | undefined) => void;
   setLeafAgentSession: (workspaceId: string, leafId: string, binding: AgentSessionBinding) => void;
+  clearLeafAgentSession: (workspaceId: string, leafId: string, match?: AgentSessionClearMatch) => void;
 
   openMonitor: (workspaceId: string, leafId: string, sshTarget: string, sshCommand?: string, sshConnection?: SshConnection) => string;
   openClaudeSession: (
@@ -329,21 +335,7 @@ const clearCwdFromStoredSessions = () => {
 
 const clearAgentSessionFromLayout = (node: LayoutNode): LayoutNode => {
   if (node.type === "leaf") {
-    if (node.agentSession === undefined) return node;
-    const binding = normalizeAgentSession(node.agentSession);
-    const next = { ...node };
-    if (binding && isAgentResumeCommandForBinding(next.command, binding)) {
-      if (binding.baseCommand) {
-        next.command = binding.baseCommand;
-      } else {
-        delete next.command;
-      }
-    }
-    if (binding && next.aiKind === binding.kind && !next.aiSshTarget) {
-      delete next.aiKind;
-    }
-    delete next.agentSession;
-    return next;
+    return clearAgentSessionFromLeaf(node);
   }
   if (node.type === "split") {
     const left = clearAgentSessionFromLayout(node.children[0]);
@@ -352,6 +344,41 @@ const clearAgentSessionFromLayout = (node: LayoutNode): LayoutNode => {
     return { ...node, children: [left, right] as [LayoutNode, LayoutNode] };
   }
   return node;
+};
+
+const agentSessionMatchesClear = (
+  binding: AgentSessionBinding | undefined,
+  match?: AgentSessionClearMatch,
+): boolean => {
+  if (!binding) return false;
+  if (match?.kind && binding.kind !== match.kind) return false;
+  if (match?.sessionId) {
+    const sessionId = normalizeAgentSessionId(match.sessionId);
+    if (!sessionId || binding.sessionId !== sessionId) return false;
+  }
+  return true;
+};
+
+const clearAgentSessionFromLeaf = (
+  node: LeafNode,
+  match?: AgentSessionClearMatch,
+): LeafNode => {
+  if (node.agentSession === undefined) return node;
+  const binding = normalizeAgentSession(node.agentSession);
+  if (match && !agentSessionMatchesClear(binding, match)) return node;
+  const next = { ...node };
+  if (binding && isAgentResumeCommandForBinding(next.command, binding)) {
+    if (binding.baseCommand) {
+      next.command = binding.baseCommand;
+    } else {
+      delete next.command;
+    }
+  }
+  if (binding && next.aiKind === binding.kind && !next.aiSshTarget) {
+    delete next.aiKind;
+  }
+  delete next.agentSession;
+  return next;
 };
 
 const clearAgentSessionFromSavedLayout = (node: SavedLayout): SavedLayout => {
@@ -979,6 +1006,32 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               ...node,
               agentSession: merged,
             };
+          }
+          if (node.type === "split") {
+            const left = update(node.children[0]);
+            const right = update(node.children[1]);
+            if (left === node.children[0] && right === node.children[1]) return node;
+            return { ...node, children: [left, right] as [LayoutNode, LayoutNode] };
+          }
+          return node;
+        };
+        const layout = update(w.layout);
+        return layout === w.layout ? w : { ...w, layout };
+      });
+      return changed ? { workspaces } : s;
+    });
+  },
+
+  clearLeafAgentSession: (workspaceId: string, leafId: string, match?: AgentSessionClearMatch) => {
+    set((s) => {
+      let changed = false;
+      const workspaces = s.workspaces.map((w) => {
+        if (w.id !== workspaceId) return w;
+        const update = (node: LayoutNode): LayoutNode => {
+          if (node.type === "leaf" && node.id === leafId) {
+            const next = clearAgentSessionFromLeaf(node, match);
+            if (next !== node) changed = true;
+            return next;
           }
           if (node.type === "split") {
             const left = update(node.children[0]);

@@ -29,6 +29,13 @@ export interface AgentSessionBinding {
 export const isRestorableAgentKind = (value: unknown): value is RestorableAgentKind =>
   value === "codex" || value === "claude";
 
+export const isAgentSessionEndEvent = (value: unknown): boolean => {
+  if (typeof value !== "string") return false;
+  return ["sessionend", "session-end", "session_end"].includes(
+    value.trim().toLowerCase(),
+  );
+};
+
 const AGENT_EXECUTABLE_SUFFIX_RE = /\.(?:exe|cmd|bat|ps1)$/i;
 const AGENT_SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,512}$/;
 const AGENT_DANGEROUS_FLAGS: Record<RestorableAgentKind, string> = {

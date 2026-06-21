@@ -8,6 +8,7 @@ import {
   fallbackCommandForGeneratedAgentResume,
   normalizeAgentSessionId,
   isAgentResumeCommandForBinding,
+  isAgentSessionEndEvent,
   sanitizeAgentBaseCommand,
   sanitizeAgentBaseArgv,
   stripAgentDangerousFlags,
@@ -152,6 +153,14 @@ test("agent session ids reject option-shaped or shell-split values", () => {
   assert.equal(normalizeAgentSessionId("abc&calc"), undefined);
   assert.equal(normalizeAgentSessionId("abc;rm"), undefined);
   assert.equal(normalizeAgentSessionId("abc'quote"), undefined);
+});
+
+test("agent session end event detection accepts known spellings", () => {
+  assert.equal(isAgentSessionEndEvent("SessionEnd"), true);
+  assert.equal(isAgentSessionEndEvent("session-end"), true);
+  assert.equal(isAgentSessionEndEvent("session_end"), true);
+  assert.equal(isAgentSessionEndEvent("Stop"), false);
+  assert.equal(isAgentSessionEndEvent(undefined), false);
 });
 
 test("isAgentResumeCommandForBinding matches generated safe and dangerous commands", () => {

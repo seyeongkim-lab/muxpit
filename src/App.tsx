@@ -24,6 +24,7 @@ import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegistry";
 import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspaceInfo";
+import { useAgentSessionProcessMonitor } from "./hooks/useAgentSessionProcessMonitor";
 import { applyThemeVars, getResolvedTheme } from "./themes";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -41,6 +42,7 @@ import { matchesPrefixKey } from "./utils/prefixKey";
 import { getRuntimePlatform } from "./utils/runtimePlatform";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
+import { isAgentSessionEndEvent } from "./utils/agentSession";
 import { decideAppShortcut } from "./utils/appShortcuts";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
@@ -149,6 +151,9 @@ export const App = () => {
   useWorkspaceInfoPoller(5000);
   // SSH context caching every 30 seconds (for session restore)
   useSshContextPoller(30000);
+  // Codex has no native SessionEnd hook, so clear local resume bindings when
+  // the Codex process disappears from the pane's PTY process tree.
+  useAgentSessionProcessMonitor(2000);
 
   // Auto-detect SSH on focused pane and show sidebar monitor (poll every 5s)
   const monitorTargetRef = useRef<string | null>(null);
@@ -425,6 +430,14 @@ export const App = () => {
       (event) => {
         const { source, workspace_id, surface_id, session_id } = event.payload;
         if ((source !== "codex" && source !== "claude") || !workspace_id || !surface_id || !session_id) {
+          return;
+        }
+
+        if (isAgentSessionEndEvent(event.payload.event)) {
+          useWorkspaceStore.getState().clearLeafAgentSession(workspace_id, surface_id, {
+            kind: source,
+            sessionId: session_id,
+          });
           return;
         }
 

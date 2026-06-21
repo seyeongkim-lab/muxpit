@@ -58,6 +58,7 @@ export interface PtyBackend {
   resize(id: number, rows: number, cols: number): Promise<void>;
   kill(id: number): Promise<void>;
   getShellContext(id: number): Promise<ShellContext>;
+  hasAgentProcess(id: number, agent: "codex" | "claude"): Promise<boolean>;
   saveImageLocally(request: SaveImageLocallyRequest): Promise<string>;
   pushImageToRemote(request: PushImageToRemoteRequest): Promise<string>;
 }

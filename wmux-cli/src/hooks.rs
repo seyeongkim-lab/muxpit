@@ -145,6 +145,7 @@ const CLAUDE_INSTALLED_HOOK_EVENTS: &[AgentHookEvent] = &[
     AgentHookEvent::Stop,
     AgentHookEvent::PermissionRequest,
     AgentHookEvent::Notification,
+    AgentHookEvent::SessionEnd,
 ];
 
 trait AgentHookAdapter: Sync {
@@ -590,7 +591,10 @@ fn records_agent_session(agent: Agent, event: AgentHookEvent) -> bool {
         AgentHookEvent::SessionStart | AgentHookEvent::UserPromptSubmit | AgentHookEvent::Stop
     ) || matches!(
         (agent, event),
-        (Agent::Claude, AgentHookEvent::Notification)
+        (
+            Agent::Claude,
+            AgentHookEvent::Notification | AgentHookEvent::SessionEnd
+        )
     )
 }
 
@@ -962,6 +966,7 @@ mod tests {
                 "Stop",
                 "PermissionRequest",
                 "Notification",
+                "SessionEnd",
             ]
         );
     }
@@ -1137,6 +1142,36 @@ mod tests {
         assert!(hook_session_params(
             Agent::Codex,
             AgentHookEvent::Notification,
+            &json!({ "session_id": "11111111-2222-3333-4444-555555555555" }),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn hook_session_params_records_claude_session_end_for_cleanup() {
+        let params = hook_session_params(
+            Agent::Claude,
+            AgentHookEvent::SessionEnd,
+            &json!({
+                "session_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "cwd": "/home/me/claude-project"
+            }),
+        )
+        .expect("session end params");
+
+        assert_eq!(params.get("source").and_then(Value::as_str), Some("claude"));
+        assert_eq!(
+            params.get("event").and_then(Value::as_str),
+            Some("SessionEnd")
+        );
+        assert_eq!(
+            params.get("session_id").and_then(Value::as_str),
+            Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        );
+
+        assert!(hook_session_params(
+            Agent::Codex,
+            AgentHookEvent::SessionEnd,
             &json!({ "session_id": "11111111-2222-3333-4444-555555555555" }),
         )
         .is_none());
