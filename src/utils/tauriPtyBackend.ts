@@ -22,6 +22,7 @@ export const tauriPtyBackend: PtyBackend = {
       commandArgv: request.commandArgv,
       cwd: request.cwd,
       enableCwdReporting: request.enableCwdReporting,
+      enableAgentSessionReporting: request.enableAgentSessionReporting,
       workspaceId: request.workspaceId,
       surfaceId: request.surfaceId,
     }),
@@ -39,6 +40,7 @@ export const tauriPtyBackend: PtyBackend = {
   resize: (id, rows, cols) => invoke("resize_pty", { id, rows, cols }),
   kill: (id) => invoke("kill_pty", { id }),
   getShellContext: (id) => invoke<ShellContext>("get_shell_ctx", { id }),
+  hasAgentProcess: (id, agent) => invoke<boolean>("pty_has_agent_process", { id, agent }),
   saveImageLocally: (request: SaveImageLocallyRequest) =>
     invoke<string>("save_image_locally", {
       imageBase64: request.imageBase64,
