@@ -89,3 +89,14 @@ test("PTY backend spawn helper forwards cwd only to plain PTY spawns", async () 
   assert.equal(tmuxRequests[0].sessionName, "wmux-host");
   assert.equal(tmuxRequests.length, 1);
 });
+
+test("PTY backend spawn helper forwards agent session reporting only to plain PTY spawns", async () => {
+  const { backend, spawnRequests } = createBackend();
+  await spawnTerminalPty(backend, {
+    ...baseRequest,
+    spawnCommand: "codex",
+    enableAgentSessionReporting: true,
+  });
+
+  assert.equal(spawnRequests[0].enableAgentSessionReporting, true);
+});

@@ -1,6 +1,7 @@
 use crate::platform::pty as platform_pty;
 use crate::ssh_command::{resolve_ssh_command, split_command_line, SshCommand};
 use crate::tmux_cc::{shell_single_quote, TmuxCcParser, TmuxEvent};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -38,16 +39,28 @@ struct PtyInstance {
     _master: Box<dyn MasterPty + Send>,
     child_pid: Option<u32>,
     tmux_state: Option<Arc<Mutex<TmuxCcState>>>,
+    workspace_id: Option<String>,
+    surface_id: Option<String>,
+    agent_session_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingAgentSessionToken {
+    workspace_id: String,
+    surface_id: String,
+    token: String,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct WmuxPtyContext {
     pub workspace_id: Option<String>,
     pub surface_id: Option<String>,
+    pub enable_agent_session_reporting: bool,
 }
 
 pub struct PtyManager {
     instances: Mutex<HashMap<u32, PtyInstance>>,
+    pending_agent_session_tokens: Mutex<Vec<PendingAgentSessionToken>>,
     next_id: Mutex<u32>,
 }
 
@@ -55,6 +68,7 @@ impl PtyManager {
     pub fn new() -> Self {
         Self {
             instances: Mutex::new(HashMap::new()),
+            pending_agent_session_tokens: Mutex::new(Vec::new()),
             next_id: Mutex::new(1),
         }
     }
@@ -202,11 +216,28 @@ impl PtyManager {
         if let Some(cwd) = valid_spawn_cwd(cwd) {
             cmd.cwd(cwd.as_os_str());
         }
+        let agent_session_token = if wmux_context.enable_agent_session_reporting
+            && wmux_context
+                .workspace_id
+                .as_deref()
+                .is_some_and(|value| !value.is_empty())
+            && wmux_context
+                .surface_id
+                .as_deref()
+                .is_some_and(|value| !value.is_empty())
+        {
+            Some(generate_agent_session_token()?)
+        } else {
+            None
+        };
+        let mut pending_agent_session_token = self
+            .register_pending_agent_session_token(&wmux_context, agent_session_token.as_deref());
         cmd.env("TERM", "xterm-256color");
         platform_pty::apply_wmux_env(
             &mut cmd,
             wmux_context.workspace_id.as_deref(),
             wmux_context.surface_id.as_deref(),
+            agent_session_token.as_deref(),
         );
 
         let mut child = pair
@@ -329,9 +360,13 @@ impl PtyManager {
                     _master: pair.master,
                     child_pid,
                     tmux_state,
+                    workspace_id: wmux_context.workspace_id,
+                    surface_id: wmux_context.surface_id,
+                    agent_session_token,
                 },
             );
         }
+        pending_agent_session_token.finish();
 
         Ok(id)
     }
@@ -402,6 +437,103 @@ impl PtyManager {
             .get(&id)
             .ok_or_else(|| format!("PTY {id} not found"))?;
         Ok(instance.child_pid)
+    }
+
+    pub fn agent_session_token_matches(
+        &self,
+        workspace_id: &str,
+        surface_id: &str,
+        token: &str,
+    ) -> bool {
+        if workspace_id.is_empty() || surface_id.is_empty() || token.is_empty() {
+            return false;
+        }
+        let instances = self.instances.lock().unwrap();
+        if instances.values().any(|instance| {
+            instance.workspace_id.as_deref() == Some(workspace_id)
+                && instance.surface_id.as_deref() == Some(surface_id)
+                && instance.agent_session_token.as_deref() == Some(token)
+        }) {
+            return true;
+        }
+        drop(instances);
+
+        let pending = self.pending_agent_session_tokens.lock().unwrap();
+        pending.iter().any(|entry| {
+            entry.workspace_id == workspace_id
+                && entry.surface_id == surface_id
+                && entry.token == token
+        })
+    }
+
+    fn register_pending_agent_session_token<'a>(
+        &'a self,
+        context: &WmuxPtyContext,
+        token: Option<&str>,
+    ) -> PendingAgentSessionTokenGuard<'a> {
+        let Some(token) = token.filter(|value| !value.is_empty()) else {
+            return PendingAgentSessionTokenGuard::empty(self);
+        };
+        let Some(workspace_id) = context
+            .workspace_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        else {
+            return PendingAgentSessionTokenGuard::empty(self);
+        };
+        let Some(surface_id) = context
+            .surface_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        else {
+            return PendingAgentSessionTokenGuard::empty(self);
+        };
+        let entry = PendingAgentSessionToken {
+            workspace_id: workspace_id.to_string(),
+            surface_id: surface_id.to_string(),
+            token: token.to_string(),
+        };
+        self.pending_agent_session_tokens
+            .lock()
+            .unwrap()
+            .push(entry.clone());
+        PendingAgentSessionTokenGuard {
+            manager: self,
+            entry: Some(entry),
+        }
+    }
+
+    fn remove_pending_agent_session_token(&self, entry: &PendingAgentSessionToken) {
+        let mut pending = self.pending_agent_session_tokens.lock().unwrap();
+        pending.retain(|candidate| candidate != entry);
+    }
+}
+
+struct PendingAgentSessionTokenGuard<'a> {
+    manager: &'a PtyManager,
+    entry: Option<PendingAgentSessionToken>,
+}
+
+impl<'a> PendingAgentSessionTokenGuard<'a> {
+    fn empty(manager: &'a PtyManager) -> Self {
+        Self {
+            manager,
+            entry: None,
+        }
+    }
+
+    fn finish(&mut self) {
+        if let Some(entry) = self.entry.take() {
+            self.manager.remove_pending_agent_session_token(&entry);
+        }
+    }
+}
+
+impl Drop for PendingAgentSessionTokenGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(entry) = self.entry.take() {
+            self.manager.remove_pending_agent_session_token(&entry);
+        }
     }
 }
 
@@ -599,9 +731,15 @@ fn command_builder_from_argv(argv: &[String]) -> Result<CommandBuilder, String> 
     Ok(cb)
 }
 
+fn generate_agent_session_token() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|e| format!("Random token error: {e}"))?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::valid_spawn_cwd;
+    use super::*;
 
     #[test]
     fn spawn_cwd_uses_existing_directories_only() {
@@ -613,5 +751,23 @@ mod tests {
         assert!(valid_spawn_cwd(Some(String::new())).is_none());
         assert!(valid_spawn_cwd(Some("__wmux_missing_directory__".to_string())).is_none());
         assert!(valid_spawn_cwd(None).is_none());
+    }
+
+    #[test]
+    fn pending_agent_session_token_authorizes_before_instance_registration() {
+        let manager = PtyManager::new();
+        let context = WmuxPtyContext {
+            workspace_id: Some("ws".to_string()),
+            surface_id: Some("leaf".to_string()),
+            enable_agent_session_reporting: true,
+        };
+
+        {
+            let _pending = manager.register_pending_agent_session_token(&context, Some("token"));
+            assert!(manager.agent_session_token_matches("ws", "leaf", "token"));
+            assert!(!manager.agent_session_token_matches("ws", "leaf", "wrong"));
+        }
+
+        assert!(!manager.agent_session_token_matches("ws", "leaf", "token"));
     }
 }

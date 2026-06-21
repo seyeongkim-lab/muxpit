@@ -49,8 +49,9 @@ SSH 호스트 연결 시 원격 서버에 `claude` CLI가 설치되어 있으면
 
 Codex와 Claude Code hook 이벤트를 wmux의 agent별 adapter로 분리한다. 현재는
 `Stop`, `PermissionRequest`, Claude `Notification`을 알림으로 처리하고,
-Codex의 `SessionStart`, `UserPromptSubmit`, `PreToolUse`는 향후 resume/context
-주입을 위한 설치 지점으로만 둔다.
+`SessionStart`, `UserPromptSubmit`, `Stop` 기반 session id/cwd 저장으로
+experimental agent session resume을 지원한다. `PreToolUse`는 향후 정책 검사나
+context 주입을 위한 설치 지점으로만 둔다.
 
 ---
 

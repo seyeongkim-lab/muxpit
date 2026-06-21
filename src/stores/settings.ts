@@ -66,6 +66,8 @@ interface SettingsState {
   notificationSoundDataUrl: string | null;
   notificationSoundName: string | null;
   enableExperimentalCwdRestore: boolean;
+  enableExperimentalAgentSessionRestore: boolean;
+  enableExperimentalAgentDangerousResume: boolean;
   sessionListMetadata: SessionListMetadataSettings;
 
   increaseFontSize: () => void;
@@ -83,6 +85,8 @@ interface SettingsState {
   setNotificationSound: (name: string, dataUrl: string) => void;
   resetNotificationSound: () => void;
   setEnableExperimentalCwdRestore: (enabled: boolean) => void;
+  setEnableExperimentalAgentSessionRestore: (enabled: boolean) => void;
+  setEnableExperimentalAgentDangerousResume: (enabled: boolean) => void;
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => void;
 }
 
@@ -117,6 +121,9 @@ const loadSaved = () => {
 
 const saved = loadSaved();
 const defaultEnableWebglRenderer = shouldEnableWebglRendererByDefault();
+export const storedBoolean = (value: unknown): boolean => value === true;
+const initialExperimentalAgentSessionRestore =
+  storedBoolean(saved.enableExperimentalAgentSessionRestore);
 
 // Resolve the ordered font family list. Prefer the new array model; otherwise
 // start from defaults (Sarasa-led CJK). Legacy `fontFamily` stack strings are not
@@ -155,7 +162,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     typeof saved.notificationSoundDataUrl === "string" ? saved.notificationSoundDataUrl : null,
   notificationSoundName:
     typeof saved.notificationSoundName === "string" ? saved.notificationSoundName : null,
-  enableExperimentalCwdRestore: saved.enableExperimentalCwdRestore ?? false,
+  enableExperimentalCwdRestore: storedBoolean(saved.enableExperimentalCwdRestore),
+  enableExperimentalAgentSessionRestore: initialExperimentalAgentSessionRestore,
+  enableExperimentalAgentDangerousResume: initialExperimentalAgentSessionRestore
+    ? storedBoolean(saved.enableExperimentalAgentDangerousResume)
+    : false,
   sessionListMetadata: initialSessionListMetadata,
 
   increaseFontSize: () => {
@@ -252,6 +263,24 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     saveSettings(get());
   },
 
+  setEnableExperimentalAgentSessionRestore: (enabled: boolean) => {
+    set({
+      enableExperimentalAgentSessionRestore: enabled,
+      enableExperimentalAgentDangerousResume: enabled
+        ? get().enableExperimentalAgentDangerousResume
+        : false,
+    });
+    saveSettings(get());
+  },
+
+  setEnableExperimentalAgentDangerousResume: (enabled: boolean) => {
+    set({
+      enableExperimentalAgentDangerousResume:
+        get().enableExperimentalAgentSessionRestore && enabled,
+    });
+    saveSettings(get());
+  },
+
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => {
     set((state) => ({
       sessionListMetadata: { ...state.sessionListMetadata, [key]: enabled },
@@ -276,6 +305,8 @@ const saveSettings = (state: SettingsState) => {
         notificationSoundDataUrl: state.notificationSoundDataUrl,
         notificationSoundName: state.notificationSoundName,
         enableExperimentalCwdRestore: state.enableExperimentalCwdRestore,
+        enableExperimentalAgentSessionRestore: state.enableExperimentalAgentSessionRestore,
+        enableExperimentalAgentDangerousResume: state.enableExperimentalAgentDangerousResume,
         sessionListMetadata: state.sessionListMetadata,
       }),
     );

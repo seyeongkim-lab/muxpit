@@ -12,7 +12,7 @@ use pasted_image::{push_image_to_remote_sync, save_image_locally_sync};
 use platform::command::silent_command;
 use platform::process::{
     collect_session_metadata, gather_workspace_info, get_listening_ports, get_shell_context,
-    SessionMetadata, ShellContext, WorkspaceInfo,
+    process_tree_contains_agent, SessionMetadata, ShellContext, WorkspaceInfo,
 };
 use pty::{PtyManager, WmuxPtyContext};
 use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
@@ -30,6 +30,7 @@ fn spawn_pty(
     command_argv: Option<Vec<String>>,
     cwd: Option<String>,
     enable_cwd_reporting: bool,
+    enable_agent_session_reporting: bool,
     workspace_id: Option<String>,
     surface_id: Option<String>,
 ) -> Result<u32, String> {
@@ -44,6 +45,7 @@ fn spawn_pty(
         WmuxPtyContext {
             workspace_id,
             surface_id,
+            enable_agent_session_reporting,
         },
     )
 }
@@ -70,6 +72,7 @@ fn spawn_pty_tmux_cc(
         WmuxPtyContext {
             workspace_id,
             surface_id,
+            enable_agent_session_reporting: false,
         },
     )
 }
@@ -131,6 +134,23 @@ async fn get_session_metadata(
             .await
             .map_err(|e| format!("Task join error: {e}")),
         None => Ok(SessionMetadata::default()),
+    }
+}
+
+#[tauri::command]
+async fn pty_has_agent_process(
+    state: State<'_, PtyManager>,
+    id: u32,
+    agent: String,
+) -> Result<bool, String> {
+    let pid = state.get_child_pid(id)?;
+    match pid {
+        Some(p) => tauri::async_runtime::spawn_blocking(move || {
+            process_tree_contains_agent(p, &agent)
+        })
+        .await
+        .map_err(|e| format!("Task join error: {e}")),
+        None => Ok(false),
     }
 }
 
@@ -461,6 +481,7 @@ pub fn run() {
             get_pty_pid,
             get_shell_ctx,
             get_session_metadata,
+            pty_has_agent_process,
             list_fonts,
             check_remote_clis,
             check_remote_tmux,

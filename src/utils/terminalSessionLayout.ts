@@ -1,4 +1,5 @@
 import type { AiKind, LeafNode, LayoutNode, Workspace } from "../stores/workspace.ts";
+import type { AgentSessionBinding } from "./agentSession.ts";
 import {
   parseSshCommandLine,
   sshConnectionToArgv,
@@ -10,6 +11,8 @@ export interface TerminalSpawnSpec {
   commandArgv?: string[];
   sshConnection?: SshConnection;
   cwd?: string;
+  cwdSource?: "local" | "agent";
+  agentSession?: AgentSessionBinding;
 }
 
 export const isLocalTerminalLeaf = (node: LeafNode): boolean => {
@@ -33,7 +36,9 @@ export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => 
         })
       : undefined,
     sshConnection,
-    cwd: isLocalTerminalLeaf(node) ? node.lastCwd : undefined,
+    cwd: node.agentSession?.cwd ?? (isLocalTerminalLeaf(node) ? node.lastCwd : undefined),
+    cwdSource: node.agentSession?.cwd ? "agent" : isLocalTerminalLeaf(node) && node.lastCwd ? "local" : undefined,
+    agentSession: node.agentSession,
   };
 };
 

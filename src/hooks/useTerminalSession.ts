@@ -38,6 +38,7 @@ import {
   findTerminalTmuxSession,
   terminalLeafExists,
 } from "../utils/terminalSessionLayout";
+import { buildTerminalSpawnPlan } from "../utils/terminalSpawnPlan";
 import { TerminalOutputParser, type TerminalOutputEvent } from "../utils/terminalOutput";
 import { terminalInstances } from "../components/terminalRegistry";
 import { createTerminalSurface, type TerminalSurface } from "../components/terminalSurface";
@@ -328,14 +329,7 @@ export const useTerminalSession = ({
 
     const cloneFromPtyId = findTerminalCloneFromPtyId(getWorkspaces(), workspaceId, leafId);
     const savedSpec = findTerminalSpawnSpec(getWorkspaces(), workspaceId, leafId);
-    const cwdRestoreEnabled = useSettingsStore.getState().enableExperimentalCwdRestore;
-    const spawnCwd = cwdRestoreEnabled ? savedSpec.cwd ?? null : null;
-    const enableCwdReporting =
-      cwdRestoreEnabled &&
-      !savedSpec.command &&
-      !savedSpec.commandArgv &&
-      !tmuxSession &&
-      !findTerminalAiKind(getWorkspaces(), workspaceId, leafId);
+    const settings = useSettingsStore.getState();
     if (savedSpec.command || savedSpec.commandArgv) {
       spawnCommand = savedSpec.command ?? null;
       spawnCommandArgv = savedSpec.commandArgv ?? null;
@@ -358,6 +352,25 @@ export const useTerminalSession = ({
         // Silently ignore context fetch errors.
       }
     }
+    const aiKind = findTerminalAiKind(getWorkspaces(), workspaceId, leafId);
+    const spawnPlan = buildTerminalSpawnPlan({
+      spec: savedSpec,
+      resolved: {
+        command: spawnCommand,
+        commandArgv: spawnCommandArgv,
+        sshConnection: spawnSshConnection,
+      },
+      tmuxSession,
+      aiKind,
+      settings: {
+        enableCwdRestore: settings.enableExperimentalCwdRestore,
+        enableAgentSessionRestore: settings.enableExperimentalAgentSessionRestore,
+        enableAgentDangerousResume: settings.enableExperimentalAgentDangerousResume,
+      },
+    });
+    spawnCommand = spawnPlan.spawnCommand;
+    spawnCommandArgv = spawnPlan.spawnCommandArgv;
+    spawnSshConnection = spawnPlan.spawnSshConnection;
 
     try {
       ptyId = await spawnTerminalPty(tauriPtyBackend, {
@@ -367,11 +380,15 @@ export const useTerminalSession = ({
         spawnCommandArgv,
         spawnSshConnection,
         tmuxSession,
-        cwd: spawnCwd,
-        enableCwdReporting,
+        cwd: spawnPlan.cwd,
+        enableCwdReporting: spawnPlan.enableCwdReporting,
+        enableAgentSessionReporting: spawnPlan.enableAgentSessionReporting,
         workspaceId,
         leafId,
       });
+      if (spawnPlan.postSpawnInput) {
+        tauriPtyBackend.write(ptyId, spawnPlan.postSpawnInput).catch(console.error);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       surface.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
@@ -383,11 +400,15 @@ export const useTerminalSession = ({
             cols: Math.max(surface.cols, 1),
             command: null,
             commandArgv: null,
-            cwd: spawnCwd,
-            enableCwdReporting,
+            cwd: spawnPlan.cwd,
+            enableCwdReporting: spawnPlan.enableCwdReporting,
+            enableAgentSessionReporting: spawnPlan.enableAgentSessionReporting,
             workspaceId,
             surfaceId: leafId,
           });
+          if (spawnPlan.fallbackPostSpawnInput) {
+            tauriPtyBackend.write(ptyId, spawnPlan.fallbackPostSpawnInput).catch(console.error);
+          }
         } catch (err2) {
           const msg2 = err2 instanceof Error ? err2.message : String(err2);
           surface.write(`\r\n\x1b[31m[default shell also failed: ${msg2}]\x1b[0m\r\n`);
@@ -434,7 +455,7 @@ export const useTerminalSession = ({
 
     setPtyId(workspaceId, leafId, ptyId);
 
-    if (cloneFromPtyId && !spawnCommand) {
+    if (cloneFromPtyId && !spawnCommand && !spawnPlan.postSpawnInput) {
       try {
         const ctx = await tauriPtyBackend.getShellContext(cloneFromPtyId);
         if (ctx.cwd) {
@@ -455,7 +476,8 @@ export const useTerminalSession = ({
           tmuxSession,
           TERMINAL_INPUT_PLATFORM,
         ),
-      )
+      ) &&
+      !spawnPlan.suppressShellHistoryHook
     ) {
       setTimeout(() => {
         tauriPtyBackend.write(ptyId, SHELL_HISTORY_HOOK).catch(() => {});

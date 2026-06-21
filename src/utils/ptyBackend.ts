@@ -24,6 +24,7 @@ export interface SpawnPtyRequest {
   commandArgv: string[] | null;
   cwd: string | null;
   enableCwdReporting: boolean;
+  enableAgentSessionReporting: boolean;
   workspaceId: string;
   surfaceId: string;
 }
@@ -57,6 +58,7 @@ export interface PtyBackend {
   resize(id: number, rows: number, cols: number): Promise<void>;
   kill(id: number): Promise<void>;
   getShellContext(id: number): Promise<ShellContext>;
+  hasAgentProcess(id: number, agent: "codex" | "claude"): Promise<boolean>;
   saveImageLocally(request: SaveImageLocallyRequest): Promise<string>;
   pushImageToRemote(request: PushImageToRemoteRequest): Promise<string>;
 }
@@ -70,6 +72,7 @@ export interface SpawnTerminalPtyRequest {
   tmuxSession?: string;
   cwd?: string | null;
   enableCwdReporting?: boolean;
+  enableAgentSessionReporting?: boolean;
   workspaceId: string;
   leafId: string;
 }
@@ -97,6 +100,7 @@ export const spawnTerminalPty = (
     commandArgv: request.spawnCommandArgv,
     cwd: request.cwd ?? null,
     enableCwdReporting: request.enableCwdReporting ?? false,
+    enableAgentSessionReporting: request.enableAgentSessionReporting ?? false,
     workspaceId: request.workspaceId,
     surfaceId: request.leafId,
   });
