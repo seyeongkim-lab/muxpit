@@ -8,7 +8,6 @@ import {
   findTerminalLeaf,
   findTerminalSpawnSpec,
   findTerminalTmuxSession,
-  isLocalAgentSessionReportingSpawnSpec,
   isLocalTerminalLeaf,
   terminalLeafExists,
   terminalSpawnSpecFromLeaf,
@@ -74,7 +73,6 @@ test("terminal spawn spec prefers agent session cwd over local cwd", () => {
     type: "leaf",
     id: "agent",
     ptyId: null,
-    initialInput: "codex resume 11111111-2222-3333-4444-555555555555\r",
     lastCwd: "/home/me/shell",
     agentSession: {
       kind: "codex",
@@ -89,47 +87,7 @@ test("terminal spawn spec prefers agent session cwd over local cwd", () => {
   assert.equal(spec.cwd, "/home/me/codex-project");
   assert.equal(spec.cwdSource, "agent");
   assert.equal(spec.command, undefined);
-  assert.equal(spec.initialInput, "codex resume 11111111-2222-3333-4444-555555555555\r");
-});
-
-test("agent session reporting spawn spec is limited to local shell and direct agent commands", () => {
-  assert.equal(isLocalAgentSessionReportingSpawnSpec({}, undefined), true);
-  assert.equal(
-    isLocalAgentSessionReportingSpawnSpec({ command: "codex resume abc" }, undefined),
-    true,
-  );
-  assert.equal(
-    isLocalAgentSessionReportingSpawnSpec({ command: "claude" }, undefined),
-    true,
-  );
-  assert.equal(
-    isLocalAgentSessionReportingSpawnSpec({ command: "C:\\Tools\\codex.exe resume abc" }, undefined),
-    true,
-  );
-  assert.equal(
-    isLocalAgentSessionReportingSpawnSpec({ command: "\"C:\\Program Files\\Claude\\claude.cmd\"" }, undefined),
-    true,
-  );
-  assert.equal(
-    isLocalAgentSessionReportingSpawnSpec({ command: "npm test" }, undefined),
-    false,
-  );
-  assert.equal(
-    isLocalAgentSessionReportingSpawnSpec(
-      {
-        command: "ssh me@example.com",
-        commandArgv: ["ssh", "me@example.com"],
-        sshConnection: {
-          program: "ssh",
-          options: [],
-          target: "me@example.com",
-        },
-      },
-      undefined,
-    ),
-    false,
-  );
-  assert.equal(isLocalAgentSessionReportingSpawnSpec({}, "wmux-host"), false);
+  assert.equal(spec.agentSession?.sessionId, "11111111-2222-3333-4444-555555555555");
 });
 
 test("terminal session layout selectors only target terminal leaves", () => {

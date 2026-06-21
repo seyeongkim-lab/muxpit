@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   buildAgentResumeCommand,
+  buildAgentResumeCommandParts,
   detectRestorableAgentCommand,
   fallbackCommandForGeneratedAgentResume,
   normalizeAgentSessionId,
   isAgentResumeCommandForBinding,
+  stripAgentDangerousFlags,
 } from "../src/utils/agentSession.ts";
 
 test("buildAgentResumeCommand builds Codex and Claude resume commands", () => {
@@ -35,6 +37,35 @@ test("buildAgentResumeCommand adds per-agent dangerous resume flags", () => {
   );
 });
 
+test("buildAgentResumeCommand strips dangerous flags from saved base commands", () => {
+  assert.equal(
+    buildAgentResumeCommand(
+      "codex",
+      "11111111-2222-3333-4444-555555555555",
+      false,
+      "codex --dangerously-bypass-approvals-and-sandbox --profile work",
+    ),
+    "codex --profile work resume 11111111-2222-3333-4444-555555555555",
+  );
+  assert.equal(
+    buildAgentResumeCommand(
+      "claude",
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      true,
+      "claude --dangerously-skip-permissions --model sonnet",
+    ),
+    "claude --model sonnet --dangerously-skip-permissions --resume aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  );
+  assert.deepEqual(
+    buildAgentResumeCommandParts("codex", "11111111-2222-3333-4444-555555555555", false, "codex"),
+    ["codex", "resume", "11111111-2222-3333-4444-555555555555"],
+  );
+  assert.equal(
+    stripAgentDangerousFlags("codex", "codex --dangerously-bypass-approvals-and-sandbox --profile work"),
+    "codex --profile work",
+  );
+});
+
 test("detectRestorableAgentCommand recognizes direct agent commands only", () => {
   assert.equal(detectRestorableAgentCommand("codex"), "codex");
   assert.equal(detectRestorableAgentCommand("/usr/bin/claude --resume abc"), "claude");
@@ -49,6 +80,9 @@ test("agent session ids reject option-shaped or shell-split values", () => {
   assert.equal(normalizeAgentSessionId("--dangerously-bypass-approvals-and-sandbox"), undefined);
   assert.equal(normalizeAgentSessionId("--last"), undefined);
   assert.equal(normalizeAgentSessionId("session with spaces"), undefined);
+  assert.equal(normalizeAgentSessionId("abc&calc"), undefined);
+  assert.equal(normalizeAgentSessionId("abc;rm"), undefined);
+  assert.equal(normalizeAgentSessionId("abc'quote"), undefined);
 });
 
 test("isAgentResumeCommandForBinding matches generated safe and dangerous commands", () => {
@@ -79,4 +113,7 @@ test("isAgentResumeCommandForBinding matches generated safe and dangerous comman
     fallbackCommandForGeneratedAgentResume("claude --dangerously-skip-permissions --resume aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
     "claude",
   );
+  assert.equal(fallbackCommandForGeneratedAgentResume("codex resume --last"), undefined);
+  assert.equal(fallbackCommandForGeneratedAgentResume("codex resume --help"), undefined);
+  assert.equal(fallbackCommandForGeneratedAgentResume("claude --resume"), undefined);
 });

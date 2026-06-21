@@ -4,12 +4,12 @@ import { useSettingsStore } from "./settings.ts";
 import { getRuntimePlatform, type RuntimePlatform } from "../utils/runtimePlatform.ts";
 import {
   buildAgentBaseCommand,
-  buildAgentResumeCommand,
   detectRestorableAgentCommand,
   fallbackCommandForGeneratedAgentResume,
   normalizeAgentSessionId,
   isAgentResumeCommandForBinding,
   isRestorableAgentKind,
+  stripAgentDangerousFlags,
   type AgentSessionBinding,
 } from "../utils/agentSession.ts";
 import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession.ts";
@@ -57,11 +57,6 @@ export interface LeafNode {
   aiSshTarget?: string;
   lastCwd?: string;
   agentSession?: AgentSessionBinding;
-  /**
-   * Transient input written once after spawning the PTY. Used for shell-origin
-   * agent resumes so the user's shell resolves PATH and startup wrappers.
-   */
-  initialInput?: string;
 }
 
 export interface BrowserNode {
@@ -418,7 +413,7 @@ const agentBaseCommandFromCommand = (
   fallbackCommandForGeneratedAgentResume(command) === buildAgentBaseCommand(kind)
     ? undefined
     : detectRestorableAgentCommand(command) === kind
-      ? command
+      ? stripAgentDangerousFlags(kind, command)
       : undefined;
 
 const normalizeAgentSession = (
@@ -1045,7 +1040,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               }
             : undefined;
         const command =
-          agentSession && isAgentResumeCommandForBinding(node.command, agentSession)
+          agentSession
             ? agentSession.baseCommand
             : node.command;
         return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd, agentSession };
@@ -1104,8 +1099,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const restoreAgentSession =
         useSettingsStore.getState().enableExperimentalAgentSessionRestore &&
         restorePlatformBoundCommands;
-      const resumeAgentDangerously =
-        useSettingsStore.getState().enableExperimentalAgentDangerousResume;
       saveToPlatformSpecificSessionKey =
         !!platformRaw || sourcePlatform === "unknown" || !restorePlatformBoundCommands;
 
@@ -1129,18 +1122,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               })
               ? savedAgentSession
               : undefined;
-          const resumeCommand = agentSession
-            ? buildAgentResumeCommand(
-                agentSession.kind,
-                agentSession.sessionId,
-                resumeAgentDangerously,
-                agentSession.baseCommand,
-              )
-            : undefined;
           const command = agentSession
             ? agentSession.baseCommand
-              ? resumeCommand
-              : undefined
             : savedAgentSession && isAgentResumeCommandForBinding(savedCommand, savedAgentSession)
               ? savedAgentSession.baseCommand ?? buildAgentBaseCommand(savedAgentSession.kind)
               : fallbackCommandForGeneratedAgentResume(savedCommand) ?? savedCommand;
@@ -1167,9 +1150,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
             lastCwd: restoreCwd && isLocalRestorableLeaf(candidate) ? node.lastCwd : undefined,
             agentSession,
-            initialInput: agentSession && !agentSession.baseCommand && resumeCommand
-              ? `${resumeCommand}\r`
-              : undefined,
           };
         }
         if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };

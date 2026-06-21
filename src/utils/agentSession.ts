@@ -4,7 +4,7 @@ export type RestorableAgentKind = "codex" | "claude";
 
 export interface GeneratedAgentResumeCommand {
   kind: RestorableAgentKind;
-  sessionId?: string;
+  sessionId: string;
   dangerouslyBypass: boolean;
 }
 
@@ -25,6 +25,11 @@ export const isRestorableAgentKind = (value: unknown): value is RestorableAgentK
   value === "codex" || value === "claude";
 
 const AGENT_EXECUTABLE_SUFFIX_RE = /\.(?:exe|cmd|bat|ps1)$/i;
+const AGENT_SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,512}$/;
+const AGENT_DANGEROUS_FLAGS: Record<RestorableAgentKind, string> = {
+  codex: "--dangerously-bypass-approvals-and-sandbox",
+  claude: "--dangerously-skip-permissions",
+};
 
 const normalizeAgentProgramName = (program: string | undefined): string | undefined => {
   const basename = program?.replace(/\\/g, "/").split("/").pop();
@@ -34,11 +39,24 @@ const normalizeAgentProgramName = (program: string | undefined): string | undefi
 export const normalizeAgentSessionId = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined;
   const sessionId = value.trim();
-  if (sessionId === "" || sessionId.length > 512 || sessionId.startsWith("-")) {
-    return undefined;
-  }
-  if (/\s|[\u0000-\u001f\u007f]/.test(sessionId)) return undefined;
+  if (!AGENT_SESSION_ID_RE.test(sessionId) || sessionId.startsWith("-")) return undefined;
   return sessionId;
+};
+
+const stripAgentDangerousFlagParts = (
+  kind: RestorableAgentKind,
+  parts: string[],
+): string[] =>
+  parts.filter((part) => part !== AGENT_DANGEROUS_FLAGS[kind]);
+
+export const stripAgentDangerousFlags = (
+  kind: RestorableAgentKind,
+  command: string | undefined,
+): string | undefined => {
+  if (!command) return undefined;
+  const parts = splitCommandLine(command);
+  if (detectRestorableAgentCommand(command) !== kind) return command;
+  return buildCommandLine(stripAgentDangerousFlagParts(kind, parts));
 };
 
 const agentCommandParts = (
@@ -49,7 +67,35 @@ const agentCommandParts = (
     return undefined;
   }
   const parts = splitCommandLine(command);
-  return detectRestorableAgentCommand(command) === kind ? parts : undefined;
+  return detectRestorableAgentCommand(command) === kind
+    ? stripAgentDangerousFlagParts(kind, parts)
+    : undefined;
+};
+
+export const buildAgentResumeCommandParts = (
+  kind: RestorableAgentKind,
+  sessionId: string,
+  dangerouslyBypass: boolean,
+  baseCommand?: string,
+): string[] => {
+  const normalizedSessionId = normalizeAgentSessionId(sessionId);
+  if (!normalizedSessionId) return [buildAgentBaseCommand(kind)];
+  const baseParts = agentCommandParts(baseCommand, kind) ?? [kind];
+  if (kind === "codex") {
+    return [
+      ...baseParts,
+      "resume",
+      ...(dangerouslyBypass ? [AGENT_DANGEROUS_FLAGS.codex] : []),
+      normalizedSessionId,
+    ];
+  }
+
+  return [
+    ...baseParts,
+    ...(dangerouslyBypass ? [AGENT_DANGEROUS_FLAGS.claude] : []),
+    "--resume",
+    normalizedSessionId,
+  ];
 };
 
 export const buildAgentResumeCommand = (
@@ -57,26 +103,7 @@ export const buildAgentResumeCommand = (
   sessionId: string,
   dangerouslyBypass: boolean,
   baseCommand?: string,
-): string => {
-  const normalizedSessionId = normalizeAgentSessionId(sessionId);
-  if (!normalizedSessionId) return buildAgentBaseCommand(kind);
-  const baseParts = agentCommandParts(baseCommand, kind) ?? [kind];
-  if (kind === "codex") {
-    return buildCommandLine([
-      ...baseParts,
-      "resume",
-      ...(dangerouslyBypass ? ["--dangerously-bypass-approvals-and-sandbox"] : []),
-      normalizedSessionId,
-    ]);
-  }
-
-  return buildCommandLine([
-    ...baseParts,
-    ...(dangerouslyBypass ? ["--dangerously-skip-permissions"] : []),
-    "--resume",
-    normalizedSessionId,
-  ]);
-};
+): string => buildCommandLine(buildAgentResumeCommandParts(kind, sessionId, dangerouslyBypass, baseCommand));
 
 export const buildAgentBaseCommand = (kind: RestorableAgentKind): string => kind;
 
@@ -96,15 +123,18 @@ export const detectGeneratedAgentResumeCommand = (
     const sessionId = normalizeAgentSessionId(
       args.find((part) => part !== "--dangerously-bypass-approvals-and-sandbox" && !part.startsWith("-")),
     );
+    if (!sessionId) return undefined;
     return { kind, sessionId, dangerouslyBypass };
   }
 
   const resumeIndex = parts.indexOf("--resume", 1);
   if (resumeIndex < 0) return undefined;
   const dangerouslyBypass = parts.includes("--dangerously-skip-permissions");
+  const sessionId = normalizeAgentSessionId(parts[resumeIndex + 1]);
+  if (!sessionId) return undefined;
   return {
     kind,
-    sessionId: normalizeAgentSessionId(parts[resumeIndex + 1]),
+    sessionId,
     dangerouslyBypass,
   };
 };

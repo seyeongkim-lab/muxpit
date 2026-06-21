@@ -1,5 +1,5 @@
 import type { AiKind, LeafNode, LayoutNode, Workspace } from "../stores/workspace.ts";
-import { detectRestorableAgentCommand } from "./agentSession.ts";
+import type { AgentSessionBinding } from "./agentSession.ts";
 import {
   parseSshCommandLine,
   sshConnectionToArgv,
@@ -12,22 +12,13 @@ export interface TerminalSpawnSpec {
   sshConnection?: SshConnection;
   cwd?: string;
   cwdSource?: "local" | "agent";
-  initialInput?: string;
+  agentSession?: AgentSessionBinding;
 }
 
 export const isLocalTerminalLeaf = (node: LeafNode): boolean => {
   if (node.tmuxSession || node.sshCommand || node.sshConnection) return false;
   return !parseSshCommandLine(node.command);
 };
-
-export const isLocalAgentSessionReportingSpawnSpec = (
-  spec: Pick<TerminalSpawnSpec, "command" | "commandArgv" | "sshConnection">,
-  tmuxSession?: string,
-): boolean =>
-  !tmuxSession &&
-  !spec.sshConnection &&
-  !spec.commandArgv &&
-  (!spec.command || detectRestorableAgentCommand(spec.command) !== undefined);
 
 export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => {
   const parsed = parseSshCommandLine(node.command ?? node.sshCommand);
@@ -47,7 +38,7 @@ export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => 
     sshConnection,
     cwd: node.agentSession?.cwd ?? (isLocalTerminalLeaf(node) ? node.lastCwd : undefined),
     cwdSource: node.agentSession?.cwd ? "agent" : isLocalTerminalLeaf(node) && node.lastCwd ? "local" : undefined,
-    initialInput: node.initialInput,
+    agentSession: node.agentSession,
   };
 };
 

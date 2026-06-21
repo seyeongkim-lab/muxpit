@@ -579,7 +579,9 @@ fn is_valid_agent_session_id(value: &str) -> bool {
     !trimmed.is_empty()
         && trimmed.len() <= 512
         && !trimmed.starts_with('-')
-        && !trimmed.chars().any(|c| c.is_whitespace() || c.is_control())
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
 }
 
 fn records_agent_session(agent: Agent, event: AgentHookEvent) -> bool {
@@ -1081,6 +1083,18 @@ mod tests {
             Agent::Claude,
             AgentHookEvent::UserPromptSubmit,
             &json!({ "sessionId": "session with spaces" }),
+        )
+        .is_none());
+        assert!(hook_session_params(
+            Agent::Codex,
+            AgentHookEvent::SessionStart,
+            &json!({ "session_id": "abc&calc" }),
+        )
+        .is_none());
+        assert!(hook_session_params(
+            Agent::Claude,
+            AgentHookEvent::UserPromptSubmit,
+            &json!({ "sessionId": "abc'quote" }),
         )
         .is_none());
     }

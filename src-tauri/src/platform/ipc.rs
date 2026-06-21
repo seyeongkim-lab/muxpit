@@ -135,13 +135,21 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
                     error: Some("Unauthorized agent-session request".to_string()),
                 };
             }
+            let Some(session_id) = session_id.filter(|value| is_valid_agent_session_id(value))
+            else {
+                return IpcResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("Invalid agent session id".to_string()),
+                };
+            };
 
             let mut payload = serde_json::Map::new();
             insert_optional_string(&mut payload, "workspace_id", workspace_id);
             insert_optional_string(&mut payload, "surface_id", surface_id);
             insert_optional_string(&mut payload, "source", source);
             insert_optional_string(&mut payload, "event", event);
-            insert_optional_string(&mut payload, "session_id", session_id);
+            insert_optional_string(&mut payload, "session_id", Some(session_id));
             insert_optional_string(&mut payload, "cwd", cwd);
 
             let _ = app.emit("wmux-agent-session", serde_json::Value::Object(payload));
@@ -176,6 +184,16 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
     }
 }
 
+fn is_valid_agent_session_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed.len() <= 512
+        && !trimmed.starts_with('-')
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+}
+
 fn insert_optional_string(
     map: &mut serde_json::Map<String, serde_json::Value>,
     key: &str,
@@ -185,5 +203,23 @@ fn insert_optional_string(
         if !value.is_empty() {
             map.insert(key.to_string(), serde_json::json!(value));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_session_id_uses_shell_safe_allowlist() {
+        assert!(is_valid_agent_session_id(
+            "11111111-2222-3333-4444-555555555555"
+        ));
+        assert!(is_valid_agent_session_id("abc.DEF_123:456"));
+        assert!(!is_valid_agent_session_id(""));
+        assert!(!is_valid_agent_session_id("--last"));
+        assert!(!is_valid_agent_session_id("session with spaces"));
+        assert!(!is_valid_agent_session_id("abc&calc"));
+        assert!(!is_valid_agent_session_id("abc'quote"));
     }
 }

@@ -221,7 +221,7 @@ test("workspace session stores and restores Codex agent sessions when experiment
 
   const restored = useWorkspaceStore.getState().workspaces[0];
   const leaf = findLeaf(restored.layout, "agent");
-  assert.equal(leaf?.command, "codex resume 11111111-2222-3333-4444-555555555555");
+  assert.equal(leaf?.command, "codex");
   assert.equal(leaf?.agentSession?.cwd, "/home/me/codex-project");
   assert.equal(leaf?.aiKind, undefined);
 });
@@ -239,10 +239,8 @@ test("workspace session can restore agent sessions with dangerous resume flags",
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
 
   const leaf = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");
-  assert.equal(
-    leaf?.command,
-    "codex resume --dangerously-bypass-approvals-and-sandbox 11111111-2222-3333-4444-555555555555",
-  );
+  assert.equal(leaf?.command, "codex");
+  assert.equal(leaf?.agentSession?.sessionId, "11111111-2222-3333-4444-555555555555");
 });
 
 test("workspace session omits and ignores agent sessions when experimental feature is disabled", () => {
@@ -447,10 +445,6 @@ test("workspace session restores shell-origin agent sessions without changing fa
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
 
   const restoredShell = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "shell");
-  assert.equal(
-    restoredShell?.initialInput,
-    "codex resume --dangerously-bypass-approvals-and-sandbox 22222222-3333-4444-5555-666666666666\r",
-  );
   assert.equal(restoredShell?.command, undefined);
   assert.equal(restoredShell?.agentSession?.cwd, "/home/me/shell-codex");
   assert.equal(restoredShell?.agentSession?.baseCommand, undefined);
@@ -459,7 +453,6 @@ test("workspace session restores shell-origin agent sessions without changing fa
   const savedAgain = JSON.parse(storage.getItem("wmux-session") ?? "{}");
   const savedAgainShell = savedAgain.workspaces[0].layout.children[1];
   assert.equal(savedAgainShell.command, undefined);
-  assert.equal(savedAgainShell.initialInput, undefined);
   assert.equal(savedAgainShell.agentSession.sessionId, "22222222-3333-4444-5555-666666666666");
 });
 
@@ -498,10 +491,48 @@ test("workspace session preserves direct agent base command flags and paths", ()
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
 
   const restored = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");
-  assert.equal(
-    restored?.command,
-    "/opt/bin/codex --profile work resume 33333333-4444-5555-6666-777777777777",
-  );
+  assert.equal(restored?.command, "/opt/bin/codex --profile work");
+  assert.equal(restored?.agentSession?.baseCommand, "/opt/bin/codex --profile work");
+});
+
+test("workspace session strips dangerous flags from stored direct agent base commands", () => {
+  resetStores();
+  useSettingsStore.setState({ enableExperimentalAgentSessionRestore: true });
+  useWorkspaceStore.setState({
+    workspaces: [
+      {
+        id: "ws",
+        name: "Workspace",
+        nameSource: "manual",
+        focusedLeafId: "agent",
+        layout: {
+          type: "leaf",
+          id: "agent",
+          ptyId: null,
+          command: "codex --dangerously-bypass-approvals-and-sandbox --profile work",
+        },
+      },
+    ],
+    activeId: "ws",
+  });
+
+  useWorkspaceStore.getState().setLeafAgentSession("ws", "agent", {
+    kind: "codex",
+    sessionId: "33333333-4444-5555-6666-777777777777",
+    updatedAt: 10,
+  });
+  useWorkspaceStore.getState().saveSession();
+
+  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  assert.equal(saved.workspaces[0].layout.command, "codex --profile work");
+  assert.equal(saved.workspaces[0].layout.agentSession.baseCommand, "codex --profile work");
+
+  useWorkspaceStore.setState({ workspaces: [], activeId: null });
+  assert.equal(useWorkspaceStore.getState().restoreSession(), true);
+
+  const restored = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");
+  assert.equal(restored?.command, "codex --profile work");
+  assert.equal(restored?.agentSession?.baseCommand, "codex --profile work");
 });
 
 test("clearSavedAgentSessions removes agent sessions from live workspaces and stored sessions immediately", () => {
@@ -614,5 +645,33 @@ test("workspace restore sanitizes command-only generated resume commands", () =>
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
   const leaf = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");
   assert.equal(leaf?.command, "codex");
+  assert.equal(leaf?.agentSession, undefined);
+});
+
+test("workspace restore preserves explicit command-only resume forms without session ids", () => {
+  resetStores();
+  const saved = {
+    schemaVersion: 2,
+    sourcePlatform: "unknown",
+    activeId: "ws",
+    workspaces: [
+      {
+        id: "ws",
+        name: "Workspace",
+        nameSource: "manual",
+        focusedLeafId: "agent",
+        layout: {
+          type: "leaf",
+          id: "agent",
+          command: "codex resume --last",
+        },
+      },
+    ],
+  };
+  storage.setItem("wmux-session", JSON.stringify(saved));
+
+  assert.equal(useWorkspaceStore.getState().restoreSession(), true);
+  const leaf = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");
+  assert.equal(leaf?.command, "codex resume --last");
   assert.equal(leaf?.agentSession, undefined);
 });
