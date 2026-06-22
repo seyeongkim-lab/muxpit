@@ -61,6 +61,11 @@ export const buildAiLaunchSpec = (
 ): AiLaunchSpec => {
   const remote = AI_REMOTE_CMD[kind];
   const connection = sshConnection ?? parseSshCommandLine(rawSshCommand)?.connection;
+  if (connection && connection.program === "") {
+    // Local host (wmux-server's own host): launch the CLI directly in a local
+    // pane, no ssh wrapper.
+    return { command: remote };
+  }
   if (connection) {
     return {
       command: buildSshCommandWithRemoteCmdFromConnection(connection, remote, true),

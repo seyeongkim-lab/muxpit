@@ -43,6 +43,7 @@ import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
 import { isAgentSessionEndEvent } from "./utils/agentSession";
 import { decideAppShortcut } from "./utils/appShortcuts";
 import { appInvoke, appListen } from "./utils/appBridge";
+import { isWmuxServerRuntime } from "./utils/runtime";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
   parseSshCommandLine,
@@ -255,6 +256,25 @@ export const App = () => {
       // No SSH found in any leaf — only clear if we explicitly have no SSH leaves
       // (don't clear if leaves exist but just don't have ptyId yet)
       const hasAnyPty = allLeaves.some((l) => l.ptyId);
+
+      // wmux-server runtime: the server's own host IS "local". Surface its
+      // monitor + AI panel by default, without requiring an SSH host. An empty
+      // SshConnection tells the server to run these commands on its own host.
+      if (hasAnyPty && isWmuxServerRuntime()) {
+        const localTarget = window.location.hostname || "server";
+        if (monitorTargetRef.current !== localTarget) {
+          monitorTargetRef.current = localTarget;
+          monitorCommandRef.current = "";
+          const localConnection: SshConnection = { program: "", options: [], target: "" };
+          setSidebarMonitor((prev) => {
+            if (prev) appInvoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+            return { monitorId: `mon-${Date.now()}`, sshTarget: localTarget, sshCommand: "", sshConnection: localConnection };
+          });
+          useAiCliStore.getState().probe(localTarget, "", localConnection);
+        }
+        return;
+      }
+
       if (hasAnyPty && monitorTargetRef.current !== null) {
         // All PTYs checked, none are SSH — clear monitor
         monitorTargetRef.current = null;
