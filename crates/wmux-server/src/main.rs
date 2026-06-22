@@ -18,7 +18,8 @@ use axum::{
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::HashMap,
     io::{Read, Write as _},
@@ -29,6 +30,12 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tower_http::services::ServeDir;
+use wmux_core::{
+    remote_probe,
+    ssh_command::{resolve_ssh_command, SshCommand},
+    tmux_remote,
+    tmux_spawn::build_tmux_attach_argv,
+};
 
 #[derive(Parser)]
 #[command(name = "wmux-server")]
@@ -122,6 +129,8 @@ enum ClientMsg {
         cols: u16,
         command: Option<String>,
         command_argv: Option<Vec<String>>,
+        ssh_connection: Option<SshCommand>,
+        tmux_session: Option<String>,
         cwd: Option<String>,
     },
     Write {
@@ -139,6 +148,11 @@ enum ClientMsg {
     ReadDir {
         req_id: i64,
         path: String,
+    },
+    Invoke {
+        req_id: i64,
+        command: String,
+        args: Value,
     },
 }
 
@@ -161,6 +175,10 @@ enum ServerMsg {
         req_id: i64,
         path: String,
         entries: Vec<DirEntry>,
+    },
+    InvokeResult {
+        req_id: i64,
+        value: Value,
     },
     Error {
         req_id: Option<i64>,
@@ -219,9 +237,20 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
                 cols,
                 command,
                 command_argv,
+                ssh_connection,
+                tmux_session,
                 cwd,
             }) => {
-                if let Err(message) = ptys.spawn(id, rows, cols, command, command_argv, cwd) {
+                if let Err(message) = ptys.spawn(
+                    id,
+                    rows,
+                    cols,
+                    command,
+                    command_argv,
+                    ssh_connection,
+                    tmux_session,
+                    cwd,
+                ) {
                     send_msg(
                         &out_tx,
                         ServerMsg::Error {
@@ -264,6 +293,13 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
                     );
                 }
             }
+            Ok(ClientMsg::Invoke {
+                req_id,
+                command,
+                args,
+            }) => {
+                send_msg(&out_tx, handle_invoke(req_id, command, args).await);
+            }
             Err(e) => {
                 send_msg(
                     &out_tx,
@@ -283,6 +319,183 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
 
 fn send_msg(tx: &mpsc::UnboundedSender<ServerMsg>, msg: ServerMsg) {
     let _ = tx.send(msg);
+}
+
+// ---- Invoke RPC -------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SshArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteCliArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    names: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TmuxSwitchArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    wrapper_session: String,
+    target_session: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TmuxNewArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TmuxKillArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    session: String,
+}
+
+async fn handle_invoke(req_id: i64, command: String, args: Value) -> ServerMsg {
+    match command.as_str() {
+        "check_remote_tmux" => match ssh_from_value::<SshArgs>(args) {
+            Ok(ssh) => {
+                blocking_invoke(req_id, move || Ok(remote_probe::check_remote_tmux(&ssh))).await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "check_remote_clis" => match parse_args::<RemoteCliArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection).map(|ssh| (ssh, parsed.names))
+        }) {
+            Ok((ssh, names)) => {
+                blocking_invoke(req_id, move || {
+                    remote_probe::check_remote_clis(&ssh, &names)
+                })
+                .await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "tmux_list_sessions" => match ssh_from_value::<SshArgs>(args) {
+            Ok(ssh) => blocking_invoke(req_id, move || tmux_remote::list_sessions(&ssh)).await,
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "tmux_switch_client" => match parse_args::<TmuxSwitchArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection)
+                .map(|ssh| (ssh, parsed.wrapper_session, parsed.target_session))
+        }) {
+            Ok((ssh, wrapper_session, target_session)) => {
+                blocking_invoke(req_id, move || {
+                    tmux_remote::switch_client(&ssh, &wrapper_session, &target_session)
+                })
+                .await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "tmux_new_session" => match parse_args::<TmuxNewArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection).map(|ssh| (ssh, parsed.name))
+        }) {
+            Ok((ssh, name)) => {
+                blocking_invoke(req_id, move || {
+                    tmux_remote::new_session(&ssh, name.as_deref())
+                })
+                .await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "tmux_kill_session" => match parse_args::<TmuxKillArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection)
+                .map(|ssh| (ssh, parsed.session))
+        }) {
+            Ok((ssh, session)) => {
+                blocking_invoke(req_id, move || tmux_remote::kill_session(&ssh, &session)).await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        _ => ServerMsg::Error {
+            req_id: Some(req_id),
+            message: format!("{command} is not implemented by wmux-server"),
+        },
+    }
+}
+
+fn parse_args<T: DeserializeOwned>(args: Value) -> Result<T, String> {
+    serde_json::from_value(args).map_err(|e| format!("bad invoke args: {e}"))
+}
+
+fn ssh_from_value<T>(args: Value) -> Result<SshCommand, String>
+where
+    T: DeserializeOwned + IntoSshParts,
+{
+    let parsed = parse_args::<T>(args)?;
+    let (ssh_command, ssh_connection) = parsed.into_ssh_parts();
+    ssh_from_parts(ssh_command, ssh_connection)
+}
+
+trait IntoSshParts {
+    fn into_ssh_parts(self) -> (Option<String>, Option<SshCommand>);
+}
+
+impl IntoSshParts for SshArgs {
+    fn into_ssh_parts(self) -> (Option<String>, Option<SshCommand>) {
+        (self.ssh_command, self.ssh_connection)
+    }
+}
+
+fn ssh_from_parts(
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<SshCommand, String> {
+    resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())
+}
+
+async fn blocking_invoke<T, F>(req_id: i64, work: F) -> ServerMsg
+where
+    T: Serialize + Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(value)) => match serde_json::to_value(value) {
+            Ok(value) => ServerMsg::InvokeResult { req_id, value },
+            Err(e) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message: format!("invoke serialization error: {e}"),
+            },
+        },
+        Ok(Err(message)) => ServerMsg::Error {
+            req_id: Some(req_id),
+            message,
+        },
+        Err(e) => ServerMsg::Error {
+            req_id: Some(req_id),
+            message: format!("invoke task error: {e}"),
+        },
+    }
 }
 
 // ---- PTY --------------------------------------------------------------------
@@ -316,6 +529,8 @@ impl ServerPtyManager {
         cols: u16,
         command: Option<String>,
         command_argv: Option<Vec<String>>,
+        ssh_connection: Option<SshCommand>,
+        tmux_session: Option<String>,
         cwd: Option<String>,
     ) -> Result<(), String> {
         let pty_system = native_pty_system();
@@ -328,6 +543,19 @@ impl ServerPtyManager {
             })
             .map_err(|e| format!("failed to open PTY: {e}"))?;
 
+        let command_argv = match tmux_session {
+            Some(session_name) => Some(build_tmux_attach_argv(
+                command.as_deref(),
+                ssh_connection,
+                &session_name,
+            )?),
+            None => command_argv,
+        };
+        let command = if command_argv.is_some() {
+            None
+        } else {
+            command
+        };
         let mut cmd = command_builder(command, command_argv)?;
         cmd.env("TERM", "xterm-256color");
         let cwd = match cwd {

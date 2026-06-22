@@ -1,12 +1,34 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "./runtime";
+import { getSharedWmuxServerClient } from "./wmuxServerClient";
+
+const SERVER_INVOKE_COMMANDS = new Set([
+  "check_remote_tmux",
+  "check_remote_clis",
+  "tmux_list_sessions",
+  "tmux_switch_client",
+  "tmux_new_session",
+  "tmux_kill_session",
+]);
+
+const BROWSER_NOOP_COMMANDS = new Set([
+  "set_workspace_list",
+  "send_notification",
+  "stop_monitor",
+]);
 
 export const appInvoke = <T = unknown>(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<T> => {
   if (!isTauriRuntime()) {
+    if (SERVER_INVOKE_COMMANDS.has(command)) {
+      return getSharedWmuxServerClient().invokeCommand<T>(command, args ?? {});
+    }
+    if (BROWSER_NOOP_COMMANDS.has(command)) {
+      return Promise.resolve(undefined as T);
+    }
     return Promise.reject(new Error(`${command} is unavailable in the browser runtime`));
   }
   return tauriInvoke<T>(command, args);
@@ -27,4 +49,3 @@ export const openExternalUrl = (uri: string): Promise<void> => {
   window.open(uri, "_blank", "noopener,noreferrer");
   return Promise.resolve();
 };
-

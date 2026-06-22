@@ -1,5 +1,5 @@
 use crate::platform::pty as platform_pty;
-use crate::ssh_command::{resolve_ssh_command, split_command_line, SshCommand};
+use crate::ssh_command::{split_command_line, SshCommand};
 use crate::tmux_cc::{shell_single_quote, TmuxCcParser, TmuxEvent};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use wmux_core::tmux_spawn::build_tmux_attach_argv;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,53 +122,7 @@ impl PtyManager {
         // shell_words_parse skips `\` handling on Windows (to preserve paths like `C:\Users\…`),
         // leaving stray backslashes inside the session name. Past symptoms: `wmux-host\\`,
         // `wmux-host `, each connect creating a brand new session.
-        let safe: String = session_name
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        // Disable mouse on the target session so xterm's drag-to-select survives on the client:
-        // when tmux has `mouse on` (common via users' ~/.tmux.conf), tmux captures mousedown and
-        // swallows the browser-level selection, making copy-by-drag impossible in the wmux pane.
-        //
-        // Chaining via tmux's native `\; set -g mouse off` is NOT safe here — spawn_internal's
-        // shell_words_parse skips `\` handling on Windows (commit a3b6f10 lesson) so the escape
-        // drops through to tmux as a bare `;` and gets misinterpreted. Instead, do a three-step
-        // sequence inside a remote `sh -c`:
-        //   1. ensure the session exists (create detached if not)
-        //   2. set mouse off *only on that session* (don't touch global -g, so other tmux
-        //      sessions on the same server keep the user's preference)
-        //   3. exec into attach so tmux replaces sh and ssh tracks tmux's lifetime
-        // `safe` is [a-zA-Z0-9_-] only, so no inner quoting is needed. Inner uses `"` because the
-        // whole thing is wrapped in `'` by shell_single_quote below.
-        // `-u` forces UTF-8 mode regardless of the remote locale. Without it, tmux auto-detects
-        // via LANG/LC_CTYPE, and SSH typically doesn't forward those — the remote tmux falls back
-        // to ASCII width calculation and Powerline/Nerd-Font glyphs (PUA U+E000-U+F8FF) render as
-        // replacement placeholders (`_`). The starship prompt shows up fine outside tmux because
-        // the login shell inherits the system locale directly.
-        // `set -g detach-on-destroy off`: when the user ends the session they
-        // are currently in (typing `exit`, kill-session from inside, etc.),
-        // tmux switches the client to another live session instead of
-        // detaching. Without this the SSH connection drops and wmux tears
-        // down the pane (taking any AI split with it). Applied with -g so
-        // it covers user-created sessions too, not just the wrapper.
-        let tmux_inner = format!(
-            "sh -c \"tmux -u has-session -t {name} 2>/dev/null || tmux -u new-session -d -s {name}; tmux -u set-option -t {name} mouse off; tmux -u set-option -g detach-on-destroy off; exec tmux -u attach -t {name}\"",
-            name = safe
-        );
-        let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
-            .ok_or_else(|| "Invalid SSH command".to_string())?;
-        // Force tty allocation with `-tt`, not `-t`. A single `-t` only requests a
-        // remote pty when the ssh client itself has a local tty; the Windows ConPTY
-        // that wmux runs ssh.exe under is not detected as one, so `-t` silently skips
-        // allocation and the remote `tmux attach` dies with "open terminal failed: not
-        // a terminal", spinning the reconnect loop. `-tt` forces it on every platform.
-        let argv = ssh.argv_with_extra_options(&["-tt"], Some(&tmux_inner));
+        let argv = build_tmux_attach_argv(ssh_command.as_deref(), ssh_connection, &session_name)?;
         // tmux_cc=false: we no longer use control mode. Keep the parser module for a future
         // re-introduction of real pane mapping (see TODO Phase 10 Step 1: pane mapping policy).
         self.spawn_internal(

@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+wmux-core = { path = "../wmux-core" }
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 clap = { version = "4", features = ["derive"] }

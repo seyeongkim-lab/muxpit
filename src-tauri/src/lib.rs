@@ -145,11 +145,11 @@ async fn pty_has_agent_process(
 ) -> Result<bool, String> {
     let pid = state.get_child_pid(id)?;
     match pid {
-        Some(p) => tauri::async_runtime::spawn_blocking(move || {
-            process_tree_contains_agent(p, &agent)
-        })
-        .await
-        .map_err(|e| format!("Task join error: {e}")),
+        Some(p) => {
+            tauri::async_runtime::spawn_blocking(move || process_tree_contains_agent(p, &agent))
+                .await
+                .map_err(|e| format!("Task join error: {e}"))
+        }
         None => Ok(false),
     }
 }

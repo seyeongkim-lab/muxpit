@@ -6095,7 +6095,15 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-shell",
  "windows-sys 0.59.0",
+ "wmux-core",
  "wmux-platform",
+]
+
+[[package]]
+name = "wmux-core"
+version = "0.0.1"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

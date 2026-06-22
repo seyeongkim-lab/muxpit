@@ -42,6 +42,8 @@ export const browserPtyBackend: PtyBackend = {
       cols: request.cols,
       command: request.sshCommand,
       commandArgv: null,
+      sshConnection: request.sshConnection,
+      tmuxSession: request.sessionName,
       cwd: null,
       workspaceId: request.workspaceId,
       surfaceId: request.surfaceId,
@@ -57,4 +59,3 @@ export const browserPtyBackend: PtyBackend = {
 };
 
 export const hasBrowserPtyToken = (): boolean => getServerToken().trim() !== "";
-

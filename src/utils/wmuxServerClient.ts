@@ -30,11 +30,17 @@ type PendingSpawn = {
   reject: (reason: Error) => void;
 };
 
+type PendingInvoke = {
+  resolve: (value: unknown) => void;
+  reject: (reason: Error) => void;
+};
+
 type ServerMessage =
   | { t: "dir"; reqId: number; path: string; entries: ServerDirEntry[] }
   | { t: "spawned"; id: number; ptyId: number }
   | { t: "output"; ptyId: number; data: string }
   | { t: "exit"; ptyId: number; code: number | null }
+  | { t: "invokeResult"; reqId: number; value: unknown }
   | { t: "error"; reqId?: number | null; message: string };
 
 export const getServerToken = (): string => {
@@ -74,6 +80,7 @@ export class WmuxServerClient {
   private nextReqId = 1;
   private pendingReadDirs = new Map<number, PendingReadDir>();
   private pendingSpawns = new Map<number, PendingSpawn>();
+  private pendingInvokes = new Map<number, PendingInvoke>();
   private outputHandlers = new Set<(payload: ServerPtyOutput) => void>();
   private exitHandlers = new Set<(payload: ServerPtyExit) => void>();
 
@@ -109,6 +116,8 @@ export class WmuxServerClient {
     cols: number;
     command?: string | null;
     commandArgv?: string[] | null;
+    sshConnection?: unknown | null;
+    tmuxSession?: string | null;
     cwd?: string | null;
     workspaceId?: string;
     surfaceId?: string;
@@ -127,10 +136,27 @@ export class WmuxServerClient {
         cols: request.cols,
         command: request.command ?? null,
         commandArgv: request.commandArgv ?? null,
+        sshConnection: request.sshConnection ?? null,
+        tmuxSession: request.tmuxSession ?? null,
         cwd: request.cwd ?? null,
         workspaceId: request.workspaceId ?? null,
         surfaceId: request.surfaceId ?? null,
       }));
+    });
+  }
+
+  async invokeCommand<T>(command: string, args: Record<string, unknown>): Promise<T> {
+    if (!this.token) {
+      return Promise.reject(new Error("missing token"));
+    }
+    const reqId = this.nextReqId++;
+    const ws = await this.openSocket();
+    return new Promise<T>((resolve, reject) => {
+      this.pendingInvokes.set(reqId, {
+        resolve: (value) => resolve(value as T),
+        reject,
+      });
+      ws.send(JSON.stringify({ t: "invoke", reqId, command, args }));
     });
   }
 
@@ -224,11 +250,20 @@ export class WmuxServerClient {
       return;
     }
 
+    if (msg.t === "invokeResult") {
+      const pending = this.pendingInvokes.get(msg.reqId);
+      if (!pending) return;
+      this.pendingInvokes.delete(msg.reqId);
+      pending.resolve(msg.value);
+      return;
+    }
+
     if (msg.t === "error") {
       const error = new Error(msg.message);
       if (typeof msg.reqId === "number") {
         if (this.rejectPendingReadDir(msg.reqId, error)) return;
         if (this.rejectPendingSpawn(msg.reqId, error)) return;
+        if (this.rejectPendingInvoke(msg.reqId, error)) return;
       } else {
         this.rejectAll(error);
       }
@@ -244,6 +279,10 @@ export class WmuxServerClient {
       pending.reject(error);
     }
     this.pendingSpawns.clear();
+    for (const pending of this.pendingInvokes.values()) {
+      pending.reject(error);
+    }
+    this.pendingInvokes.clear();
   }
 
   private rejectPendingReadDir(reqId: number, error: Error): boolean {
@@ -258,6 +297,14 @@ export class WmuxServerClient {
     const pending = this.pendingSpawns.get(reqId);
     if (!pending) return false;
     this.pendingSpawns.delete(reqId);
+    pending.reject(error);
+    return true;
+  }
+
+  private rejectPendingInvoke(reqId: number, error: Error): boolean {
+    const pending = this.pendingInvokes.get(reqId);
+    if (!pending) return false;
+    this.pendingInvokes.delete(reqId);
     pending.reject(error);
     return true;
   }
