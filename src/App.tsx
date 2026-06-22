@@ -857,6 +857,9 @@ export const App = () => {
 
   return (
     <div style={styles.container}>
+      {/* Native-window titlebar is meaningless in the browser runtime (it's a tab,
+          not an OS window), so render it only under Tauri. */}
+      {!isWmuxServerRuntime() && (
       <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
         <div data-tauri-drag-region style={styles.titlebarBrand}>
           <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
@@ -894,6 +897,7 @@ export const App = () => {
           </button>
         </div>
       </div>
+      )}
       <div style={styles.appBody}>
         <Sidebar
           onOpenSettings={() => setSettingsOpen(true)}
