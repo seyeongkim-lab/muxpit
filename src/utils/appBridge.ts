@@ -12,6 +12,7 @@ const SERVER_INVOKE_COMMANDS = new Set([
   "tmux_new_session",
   "tmux_kill_session",
   "tmux_pane_cwd",
+  "remote_read_dir",
   "start_monitor",
   "stop_monitor",
   "request_session_content",

@@ -6,6 +6,7 @@
 
 mod agent_ipc;
 mod monitor;
+mod remote_fs;
 
 use agent_ipc::{AgentSessionGrant, AgentSessionGrants, ServerAgentIpc};
 use axum::{
@@ -408,6 +409,14 @@ struct TmuxPaneCwdArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct RemoteReadDirArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct StartMonitorArgs {
     monitor_id: String,
     ssh_command: Option<String>,
@@ -571,6 +580,24 @@ async fn handle_invoke(
                     tmux_remote::pane_current_path(&ssh, &session)
                 })
                 .await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "remote_read_dir" => match parse_args::<RemoteReadDirArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection).map(|ssh| (ssh, parsed.path))
+        }) {
+            Ok((ssh, path)) => {
+                if ssh.is_local() {
+                    ServerMsg::Error {
+                        req_id: Some(req_id),
+                        message: "remote_read_dir requires a remote host".to_string(),
+                    }
+                } else {
+                    blocking_invoke(req_id, move || remote_fs::list_dir(&ssh, &path)).await
+                }
             }
             Err(message) => ServerMsg::Error {
                 req_id: Some(req_id),
@@ -1323,8 +1350,19 @@ async fn download(
     };
     let root = st.root.clone();
 
-    // std::fs + zip are blocking; keep them off the async runtime.
-    let result = tokio::task::spawn_blocking(move || build_download(&root, &path)).await;
+    // A remote workspace passes its SSH connection as a JSON `ssh` param; fetch
+    // over SSH from that host. Otherwise serve from the server-local root.
+    let remote_ssh = q
+        .get("ssh")
+        .and_then(|raw| serde_json::from_str::<SshCommand>(raw).ok())
+        .filter(|ssh| !ssh.is_local());
+
+    // std::fs + zip + ssh are blocking; keep them off the async runtime.
+    let result = tokio::task::spawn_blocking(move || match remote_ssh {
+        Some(ssh) => remote_fs::download(&ssh, &path),
+        None => build_download(&root, &path),
+    })
+    .await;
 
     match result {
         Ok(Ok((filename, bytes))) => {

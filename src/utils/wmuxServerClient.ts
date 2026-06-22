@@ -1,3 +1,5 @@
+import type { SshConnection } from "./sshConnection.ts";
+
 export interface ServerDirEntry {
   name: string;
   isDir: boolean;
@@ -66,10 +68,17 @@ export const getSharedWmuxServerClient = (): WmuxServerClient => {
   return sharedClient;
 };
 
-export const buildDownloadUrl = (path: string, token = getServerToken()): string => {
+export const buildDownloadUrl = (
+  path: string,
+  token = getServerToken(),
+  ssh?: SshConnection | null,
+): string => {
   const params = new URLSearchParams();
   params.set("token", token);
   params.set("path", path);
+  // A remote workspace's files live on its SSH host, not the server. Pass the
+  // connection so the server fetches over SSH (cat / tar.gz) instead of locally.
+  if (ssh && ssh.program) params.set("ssh", JSON.stringify(ssh));
   return `/download?${params.toString()}`;
 };
 

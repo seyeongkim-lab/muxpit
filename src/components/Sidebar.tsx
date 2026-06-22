@@ -84,6 +84,20 @@ const getWorkspaceSshTarget = (workspace: Workspace): string | null => {
   return null;
 };
 
+// The file panel mirrors whichever leaf the reported cwd comes from: the tmux
+// leaf (its cwd is polled) or the representative terminal leaf (OSC cwd). When
+// that leaf is a remote SSH session, return it so the panel lists/downloads
+// over SSH instead of reading the server host. Local/local-sentinel → null.
+const getFilePanelSshLeaf = (workspace: Workspace | undefined): LeafNode | null => {
+  if (!workspace) return null;
+  const leaves = collectTerminalLeaves(workspace.layout);
+  const focused = findLeafById(workspace.layout, workspace.focusedLeafId);
+  const leaf = leaves.find((l) => l.tmuxSession && l.ptyId) ?? focused ?? leaves[0] ?? null;
+  if (!leaf) return null;
+  const remote = !!leaf.sshConnection?.program || !!(leaf.sshCommand && leaf.sshCommand.trim());
+  return remote ? leaf : null;
+};
+
 const compactPath = (path: string): string =>
   path
     .replace(/^\/home\/[^/]+(?=\/|$)/, "~")
@@ -434,9 +448,16 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
         </div>
       </div>
 
-      {isWmuxServerRuntime() && (
-        <ServerFilesPanel cwd={activeId ? infoMap[activeId]?.cwd ?? null : null} />
-      )}
+      {isWmuxServerRuntime() && (() => {
+        const fileLeaf = getFilePanelSshLeaf(workspaces.find((w) => w.id === activeId));
+        return (
+          <ServerFilesPanel
+            cwd={activeId ? infoMap[activeId]?.cwd ?? null : null}
+            sshConnection={fileLeaf?.sshConnection ?? null}
+            sshCommand={fileLeaf?.sshCommand ?? null}
+          />
+        );
+      })()}
 
 
       {monitor && latestSnapshot && (latestSnapshot.claudeSessions?.length ?? 0) > 0 && (

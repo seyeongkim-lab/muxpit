@@ -7,6 +7,8 @@ import {
   type ServerDirEntry,
   type ServerDirResponse,
 } from "../utils/wmuxServerClient";
+import { appInvoke } from "../utils/appBridge";
+import type { SshConnection } from "../utils/sshConnection";
 
 type DirState = {
   entries: ServerDirEntry[];
@@ -26,12 +28,23 @@ const compactPath = (path: string): string =>
     .replace(/^\/home\/[^/]+(?=\/|$)/, "~")
     .replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
 
-export const ServerFilesPanel = ({ cwd }: { cwd?: string | null }) => {
+interface ServerFilesPanelProps {
+  cwd?: string | null;
+  // When the active workspace is a tmux/ssh session on another host, its files
+  // live there, not on the server. Listing and downloads route over this SSH
+  // connection. Absent for local/server-host workspaces.
+  sshConnection?: SshConnection | null;
+  sshCommand?: string | null;
+}
+
+export const ServerFilesPanel = ({ cwd, sshConnection, sshCommand }: ServerFilesPanelProps) => {
   const token = getServerToken();
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [dirs, setDirs] = useState<Map<string, DirState>>(() => new Map());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = useState(false);
+
+  const isRemote = !!(sshConnection?.program || (sshCommand && sshCommand.trim()));
 
   const loadPath = useCallback(
     async (path: string) => {
@@ -49,7 +62,13 @@ export const ServerFilesPanel = ({ cwd }: { cwd?: string | null }) => {
       });
 
       try {
-        const result: ServerDirResponse = await getSharedWmuxServerClient().readDir(requestPath);
+        const result: ServerDirResponse = isRemote
+          ? await appInvoke<ServerDirResponse>("remote_read_dir", {
+              path: requestPath,
+              sshConnection: sshConnection ?? null,
+              sshCommand: sshCommand ?? null,
+            })
+          : await getSharedWmuxServerClient().readDir(requestPath);
         setRootPath((prev) => prev ?? result.path);
         setExpanded((prev) => new Set(prev).add(result.path));
         setDirs((prev) => {
@@ -76,7 +95,7 @@ export const ServerFilesPanel = ({ cwd }: { cwd?: string | null }) => {
         });
       }
     },
-    [token],
+    [token, isRemote, sshConnection, sshCommand],
   );
 
   // Root the tree at the active session's working directory and re-load when the
@@ -132,7 +151,7 @@ export const ServerFilesPanel = ({ cwd }: { cwd?: string | null }) => {
           <span style={styles.fileSize}>{entry.isDir ? "" : formatSize(entry.size)}</span>
           <a
             className="wmux-btn"
-            href={buildDownloadUrl(path, token)}
+            href={buildDownloadUrl(path, token, sshConnection)}
             style={styles.download}
             title={entry.isDir ? "Download folder as zip" : "Download file"}
           >
