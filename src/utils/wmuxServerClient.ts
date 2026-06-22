@@ -146,6 +146,8 @@ export class WmuxServerClient {
     sshConnection?: unknown | null;
     tmuxSession?: string | null;
     cwd?: string | null;
+    enableCwdReporting?: boolean;
+    enableAgentSessionReporting?: boolean;
     workspaceId?: string;
     surfaceId?: string;
   }): Promise<number> {
@@ -166,6 +168,8 @@ export class WmuxServerClient {
         sshConnection: request.sshConnection ?? null,
         tmuxSession: request.tmuxSession ?? null,
         cwd: request.cwd ?? null,
+        enableCwdReporting: request.enableCwdReporting ?? false,
+        enableAgentSessionReporting: request.enableAgentSessionReporting ?? false,
         workspaceId: request.workspaceId ?? null,
         surfaceId: request.surfaceId ?? null,
       }));

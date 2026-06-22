@@ -4,8 +4,10 @@
 //! Browser runtime bridge: static serving, `readDir` over WS, file/dir download,
 //! PTY IO, tmux/SSH RPCs, and monitor events for the full wmux UI.
 
+mod agent_ipc;
 mod monitor;
 
+use agent_ipc::{AgentSessionGrant, AgentSessionGrants, ServerAgentIpc};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -16,6 +18,7 @@ use axum::{
     routing::{any, get},
     Router,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use monitor::ServerMonitorManager;
@@ -134,6 +137,9 @@ enum ClientMsg {
         ssh_connection: Option<SshCommand>,
         tmux_session: Option<String>,
         cwd: Option<String>,
+        workspace_id: Option<String>,
+        surface_id: Option<String>,
+        enable_agent_session_reporting: Option<bool>,
     },
     Write {
         id: i64,
@@ -247,6 +253,9 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
                 ssh_connection,
                 tmux_session,
                 cwd,
+                workspace_id,
+                surface_id,
+                enable_agent_session_reporting,
             }) => {
                 if let Err(message) = ptys.spawn(
                     id,
@@ -257,6 +266,9 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
                     ssh_connection,
                     tmux_session,
                     cwd,
+                    workspace_id,
+                    surface_id,
+                    enable_agent_session_reporting.unwrap_or(false),
                 ) {
                     send_msg(
                         &out_tx,
@@ -783,11 +795,16 @@ struct ServerPtyInstance {
     killer: Box<dyn ChildKiller + Send + Sync>,
     child_pid: Option<u32>,
     cwd: Option<String>,
+    agent_grants: AgentSessionGrants,
+    agent_session_grant: Option<AgentSessionGrant>,
 }
 
 impl Drop for ServerPtyInstance {
     fn drop(&mut self) {
         let _ = self.killer.kill();
+        if let Some(grant) = &self.agent_session_grant {
+            remove_agent_session_grant(&self.agent_grants, grant);
+        }
     }
 }
 
@@ -796,15 +813,21 @@ struct ServerPtyManager {
     next_id: Mutex<u32>,
     tx: mpsc::UnboundedSender<ServerMsg>,
     root: Arc<PathBuf>,
+    agent_grants: AgentSessionGrants,
+    agent_ipc: Option<ServerAgentIpc>,
 }
 
 impl ServerPtyManager {
     fn new(tx: mpsc::UnboundedSender<ServerMsg>, root: Arc<PathBuf>) -> Self {
+        let agent_grants = AgentSessionGrants::default();
+        let agent_ipc = ServerAgentIpc::start(tx.clone(), agent_grants.clone()).ok();
         Self {
             instances: Mutex::new(HashMap::new()),
             next_id: Mutex::new(1),
             tx,
             root,
+            agent_grants,
+            agent_ipc,
         }
     }
 
@@ -818,6 +841,9 @@ impl ServerPtyManager {
         ssh_connection: Option<SshCommand>,
         tmux_session: Option<String>,
         cwd: Option<String>,
+        workspace_id: Option<String>,
+        surface_id: Option<String>,
+        enable_agent_session_reporting: bool,
     ) -> Result<(), String> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -851,6 +877,24 @@ impl ServerPtyManager {
         let child_cwd = child_process_cwd(&cwd);
         let instance_cwd = child_cwd.to_string_lossy().into_owned();
         cmd.cwd(child_cwd.as_os_str());
+        let agent_session_grant = build_agent_session_grant(
+            enable_agent_session_reporting,
+            workspace_id.as_deref(),
+            surface_id.as_deref(),
+        )?;
+        let mut agent_session_guard =
+            register_agent_session_grant(&self.agent_grants, agent_session_grant.clone());
+        apply_wmux_env(
+            &mut cmd,
+            workspace_id.as_deref(),
+            surface_id.as_deref(),
+            agent_session_grant
+                .as_ref()
+                .map(|grant| grant.token.as_str()),
+            self.agent_ipc
+                .as_ref()
+                .and_then(ServerAgentIpc::socket_path),
+        );
 
         let mut child = pair
             .slave
@@ -883,8 +927,11 @@ impl ServerPtyManager {
                 killer,
                 child_pid,
                 cwd: Some(instance_cwd),
+                agent_grants: self.agent_grants.clone(),
+                agent_session_grant,
             },
         );
+        agent_session_guard.finish();
 
         send_msg(
             &self.tx,
@@ -994,6 +1041,74 @@ impl ServerPtyManager {
     }
 }
 
+fn build_agent_session_grant(
+    enable: bool,
+    workspace_id: Option<&str>,
+    surface_id: Option<&str>,
+) -> Result<Option<AgentSessionGrant>, String> {
+    if !enable {
+        return Ok(None);
+    }
+    let Some(workspace_id) = workspace_id.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(surface_id) = surface_id.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    Ok(Some(AgentSessionGrant {
+        workspace_id: workspace_id.to_string(),
+        surface_id: surface_id.to_string(),
+        token: generate_agent_session_token()?,
+    }))
+}
+
+fn generate_agent_session_token() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|e| format!("random token error: {e}"))?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn register_agent_session_grant(
+    grants: &AgentSessionGrants,
+    grant: Option<AgentSessionGrant>,
+) -> AgentSessionGrantGuard {
+    if let Some(grant) = grant {
+        grants.lock().push(grant.clone());
+        AgentSessionGrantGuard {
+            grants: grants.clone(),
+            grant: Some(grant),
+        }
+    } else {
+        AgentSessionGrantGuard {
+            grants: grants.clone(),
+            grant: None,
+        }
+    }
+}
+
+fn remove_agent_session_grant(grants: &AgentSessionGrants, grant: &AgentSessionGrant) {
+    grants.lock().retain(|candidate| candidate != grant);
+}
+
+struct AgentSessionGrantGuard {
+    grants: AgentSessionGrants,
+    grant: Option<AgentSessionGrant>,
+}
+
+impl AgentSessionGrantGuard {
+    fn finish(&mut self) {
+        self.grant = None;
+    }
+}
+
+impl Drop for AgentSessionGrantGuard {
+    fn drop(&mut self) {
+        if let Some(grant) = &self.grant {
+            remove_agent_session_grant(&self.grants, grant);
+        }
+    }
+}
+
 fn checked_pty_id(id: i64) -> Result<u32, String> {
     u32::try_from(id).map_err(|_| format!("invalid PTY id {id}"))
 }
@@ -1036,6 +1151,32 @@ fn command_builder(
         cmd.args(&shell.interactive_args);
     }
     Ok(cmd)
+}
+
+fn apply_wmux_env(
+    cmd: &mut CommandBuilder,
+    workspace_id: Option<&str>,
+    surface_id: Option<&str>,
+    agent_session_token: Option<&str>,
+    socket_path: Option<&Path>,
+) {
+    if let Some(workspace_id) = workspace_id.filter(|value| !value.is_empty()) {
+        cmd.env("WMUX_WORKSPACE_ID", workspace_id);
+    }
+    if let Some(surface_id) = surface_id.filter(|value| !value.is_empty()) {
+        cmd.env("WMUX_SURFACE_ID", surface_id);
+    }
+    if let Some(agent_session_token) = agent_session_token.filter(|value| !value.is_empty()) {
+        cmd.env("WMUX_AGENT_SESSION_TOKEN", agent_session_token);
+    }
+    if let Some(socket_path) = socket_path {
+        cmd.env("WMUX_SOCKET_PATH", socket_path.as_os_str());
+    }
+    if let Some(cli_path) =
+        std::env::var_os("WMUX_BUNDLED_CLI_PATH").filter(|value| !value.is_empty())
+    {
+        cmd.env("WMUX_BUNDLED_CLI_PATH", cli_path);
+    }
 }
 
 struct ShellSpec {
