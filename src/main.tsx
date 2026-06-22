@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/linear.css";
+import { App } from "./App";
 import { installNavigatorLocaleFallback } from "./utils/locale";
 
 type BootErrorBoundaryProps = {
@@ -45,28 +46,8 @@ installNavigatorLocaleFallback();
 const rootElement = document.getElementById("root")!;
 const root = createRoot(rootElement);
 
-type TauriRuntimeHost = {
-  __TAURI_INTERNALS__?: unknown;
-};
-
-const isTauriRuntime = (): boolean =>
-  typeof window !== "undefined" &&
-  typeof (window as TauriRuntimeHost).__TAURI_INTERNALS__ === "object";
-
-const appModule = isTauriRuntime()
-  ? import("./App").then(({ App }) => ({ Component: App }))
-  : import("./WebApp").then(({ WebApp }) => ({ Component: WebApp }));
-
-void appModule
-  .then(({ Component }) => {
-    root.render(
-      <BootErrorBoundary>
-        <Component />
-      </BootErrorBoundary>,
-    );
-  })
-  .catch((error) => {
-    console.error("[wmux] boot failed:", error);
-    rootElement.textContent = `[wmux boot error] ${error instanceof Error ? error.message : String(error)}`;
-    rootElement.style.cssText = "padding:16px;color:#f38ba8;font:13px monospace;white-space:pre-wrap;";
-  });
+root.render(
+  <BootErrorBoundary>
+    <App />
+  </BootErrorBoundary>,
+);

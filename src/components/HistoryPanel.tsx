@@ -3,7 +3,7 @@ import { useHistoryStore } from "../stores/history";
 import { usePrefixStore } from "../stores/prefix";
 import { useWorkspaceStore } from "../stores/workspace";
 import type { LayoutNode } from "../stores/workspace";
-import { invoke } from "@tauri-apps/api/core";
+import { getPtyBackend } from "../utils/runtimePtyBackend";
 
 const findFocusedPtyId = (node: LayoutNode, focusedLeafId: string): number | null => {
   if (node.type === "leaf" && node.id === focusedLeafId) return node.ptyId;
@@ -67,7 +67,7 @@ export const HistoryPanel = () => {
     if (!ws) return;
     const ptyId = findFocusedPtyId(ws.layout, ws.focusedLeafId);
     if (ptyId == null) return;
-    await invoke("write_pty", { id: ptyId, data: command }).catch(() => {});
+    await getPtyBackend().write(ptyId, command).catch(() => {});
   };
 
   const onSelect = async (command: string) => {

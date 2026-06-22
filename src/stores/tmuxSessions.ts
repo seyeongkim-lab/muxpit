@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
 import { sanitizeTmuxSessionName } from "../utils/tmuxSession.ts";
 import { pickActiveSession, reconcileActiveSession } from "../utils/tmuxSessionState.ts";
 import type { SshConnection } from "../utils/sshConnection.ts";
+import { appInvoke } from "../utils/appBridge.ts";
 
 export interface TmuxSession {
   id: string;          // "$0"
@@ -113,7 +113,7 @@ type StoreGet = () => TmuxSessionsState;
 type StoreSet = (fn: (state: TmuxSessionsState) => Partial<TmuxSessionsState>) => void;
 
 const invokeSwitchClient = (ctx: AttachInfo, targetSession: string): Promise<void> =>
-  invoke<void>("tmux_switch_client", {
+  appInvoke<void>("tmux_switch_client", {
     sshCommand: ctx.sshCommand,
     sshConnection: ctx.sshConnection ?? null,
     wrapperSession: ctx.activeSession,
@@ -220,7 +220,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
     const ctx = get()._attach[wsId];
     if (!ctx) return;
     try {
-      const sessions = await invoke<TmuxSession[]>("tmux_list_sessions", {
+      const sessions = await appInvoke<TmuxSession[]>("tmux_list_sessions", {
         sshCommand: ctx.sshCommand,
         sshConnection: ctx.sshConnection ?? null,
       });
@@ -269,7 +269,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   createNew: async (wsId, name) => {
     const ctx = get()._attach[wsId];
     if (!ctx) return;
-    const newId = await invoke<string>("tmux_new_session", {
+    const newId = await appInvoke<string>("tmux_new_session", {
       sshCommand: ctx.sshCommand,
       sshConnection: ctx.sshConnection ?? null,
       name: name && name.trim() ? name.trim() : null,
@@ -283,7 +283,7 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   killSession: async (wsId, sessionId) => {
     const ctx = get()._attach[wsId];
     if (!ctx) return;
-    await invoke("tmux_kill_session", {
+    await appInvoke("tmux_kill_session", {
       sshCommand: ctx.sshCommand,
       sshConnection: ctx.sshConnection ?? null,
       session: sessionId,

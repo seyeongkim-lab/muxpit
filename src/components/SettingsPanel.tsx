@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSettingsStore, PREFIX_KEY_CHOICES, SESSION_LIST_METADATA_OPTIONS, type PrefixKey } from "../stores/settings";
 import { useWorkspaceStore } from "../stores/workspace";
-import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
 import { playNotificationSound } from "../utils/notificationSound";
 import { isMacOsPlatform } from "../utils/runtimePlatform";
+import { appInvoke } from "../utils/appBridge";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -139,7 +139,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
 
   useEffect(() => {
     if (open && allFonts.length === 0) {
-      invoke<string[]>("list_fonts").then(setAllFonts).catch(() => {});
+      appInvoke<string[]>("list_fonts").then(setAllFonts).catch(() => {});
     }
   }, [open, allFonts.length]);
 
@@ -147,7 +147,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     setCliInstalling(true);
     setCliInstallStatus(null);
     try {
-      const path = await invoke<string>("install_cli_symlink");
+      const path = await appInvoke<string>("install_cli_symlink");
       setCliInstallStatus(`Installed at ${path}`);
     } catch (error) {
       setCliInstallStatus(error instanceof Error ? error.message : String(error));

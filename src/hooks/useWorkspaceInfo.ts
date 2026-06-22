@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
+import { appInvoke } from "../utils/appBridge";
 
 const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
   if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") && node.id === id) return node;
@@ -134,7 +134,7 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
       const pollLeafCwd = async (workspaceId: string, leaf: LeafNode) => {
         if (!cwdRestoreEnabled || !leaf.ptyId || isSshLeaf(leaf)) return;
         try {
-          const metadata = await invoke<SessionMetadata>("get_session_metadata", {
+          const metadata = await appInvoke<SessionMetadata>("get_session_metadata", {
             id: leaf.ptyId,
             cwd: leaf.lastCwd ?? null,
           });
@@ -177,7 +177,7 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
 
           try {
             const prev = useWorkspaceInfoStore.getState().info[ws.id];
-            const metadata = await invoke<SessionMetadata>("get_session_metadata", {
+            const metadata = await appInvoke<SessionMetadata>("get_session_metadata", {
               id: leaf.ptyId,
               cwd: prev?.cwd || null,
             });
@@ -242,7 +242,7 @@ export const useSshContextPoller = (intervalMs = 30000) => {
           const leaf = findLeafInLayout(ws.layout, lid);
           if (leaf && leaf.type === "leaf" && leaf.ptyId) {
             try {
-              const ctx = await invoke<{ ssh_command: string | null }>(
+              const ctx = await appInvoke<{ ssh_command: string | null }>(
                 "get_shell_ctx",
                 { id: leaf.ptyId },
               );

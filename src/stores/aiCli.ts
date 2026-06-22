@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
 import type { AiKind } from "./workspace";
 import type { SshHost } from "./sshHosts";
 import { buildSshCommandWithRemoteCmdFromBase, buildSshConnection } from "./sshHosts";
@@ -9,6 +8,7 @@ import {
   type SshConnection,
 } from "../utils/sshConnection";
 import { buildAiRemoteCommand } from "../utils/aiRemoteCommand";
+import { appInvoke } from "../utils/appBridge";
 
 export const AI_KINDS: AiKind[] = ["claude", "codex", "gemini", "copilot"];
 
@@ -109,7 +109,7 @@ export const useAiCliStore = create<AiCliState>((set, get) => ({
       let result: Record<string, boolean> | null = null;
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          result = await invoke<Record<string, boolean>>("check_remote_clis", {
+          result = await appInvoke<Record<string, boolean>>("check_remote_clis", {
             sshCommand,
             sshConnection: sshConnection ?? null,
             names: AI_KINDS,

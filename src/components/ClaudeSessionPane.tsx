@@ -1,6 +1,4 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "../stores/workspace";
 import { buildClaudeResumeRemoteCommand } from "../utils/claudeSession";
 import {
@@ -8,6 +6,7 @@ import {
   parseSshCommandLine,
   type SshConnection,
 } from "../utils/sshConnection";
+import { appInvoke, appListen } from "../utils/appBridge";
 
 interface ClaudeSessionPaneProps {
   id: string;
@@ -98,14 +97,14 @@ export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, proje
     setError(null);
 
     // Listen for response
-    const unlisten = listen<{ request_id: string; lines: string[]; error: string | null }>(
+    const unlisten = appListen<{ request_id: string; lines: string[]; error: string | null }>(
       "claude-session-content",
-      (event) => {
-        if (!active || event.payload.request_id !== reqId) return;
-        if (event.payload.error) {
-          setError(event.payload.error);
+      (payload) => {
+        if (!active || payload.request_id !== reqId) return;
+        if (payload.error) {
+          setError(payload.error);
         } else {
-          const parsed = parseJournalEntries(event.payload.lines);
+          const parsed = parseJournalEntries(payload.lines);
           setMessages(parsed);
         }
         setLoading(false);
@@ -113,7 +112,7 @@ export const ClaudeSessionPane = ({ id, sshTarget, sshConnection, project, proje
     );
 
     // Send request through monitor's SSH connection
-    invoke("request_session_content", {
+    appInvoke("request_session_content", {
       monitorId,
       project,
       sessionId,

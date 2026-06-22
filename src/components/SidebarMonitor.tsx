@@ -1,9 +1,8 @@
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useSidebarLayoutStore } from "../stores/sidebarLayout";
 import type { SshConnection } from "../utils/sshConnection";
+import { appInvoke, appListen } from "../utils/appBridge";
 
 interface SidebarMonitorProps {
   monitorId: string;
@@ -101,21 +100,20 @@ export const SidebarMonitor = ({ monitorId, sshTarget, sshCommand, sshConnection
   // Start monitor on mount; re-start when monitorId changes
   useEffect(() => {
     let active = true;
-    invoke("start_monitor", { monitorId, sshCommand, sshConnection: sshConnection ?? null }).catch((err) => {
+    appInvoke("start_monitor", { monitorId, sshCommand, sshConnection: sshConnection ?? null }).catch((err) => {
       if (active) console.error("start_monitor error:", err);
     });
 
     return () => {
       active = false;
-      invoke("stop_monitor", { monitorId }).catch(() => {});
+      appInvoke("stop_monitor", { monitorId }).catch(() => {});
       useMonitorStore.getState().clearMonitor(monitorId);
     };
   }, [monitorId, sshCommand, sshConnection]);
 
   // Listen for monitor-data events
   useEffect(() => {
-    const unlisten = listen<MonitorDataEvent>("monitor-data", (event) => {
-      const d = event.payload;
+    const unlisten = appListen<MonitorDataEvent>("monitor-data", (d) => {
       if (d.monitor_id !== monitorId) return;
 
       const snapshot: MonitorSnapshot = {

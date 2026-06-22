@@ -26,8 +26,6 @@ import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegis
 import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspaceInfo";
 import { useAgentSessionProcessMonitor } from "./hooks/useAgentSessionProcessMonitor";
 import { applyThemeVars, getResolvedTheme } from "./themes";
-import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
 import type { LayoutNode, LeafNode } from "./stores/workspace";
 import {
   findNeighbor,
@@ -44,6 +42,7 @@ import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
 import { isAgentSessionEndEvent } from "./utils/agentSession";
 import { decideAppShortcut } from "./utils/appShortcuts";
+import { appInvoke, appListen } from "./utils/appBridge";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
   parseSshCommandLine,
@@ -166,7 +165,7 @@ export const App = () => {
       monitorTargetRef.current = null;
       monitorCommandRef.current = null;
       setSidebarMonitor((prev) => {
-        if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+        if (prev) appInvoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
         return null;
       });
       return;
@@ -217,7 +216,7 @@ export const App = () => {
 
         if (!target) {
           try {
-            const ctx = await invoke<{ ssh_command: string | null }>("get_shell_ctx", { id: leaf.ptyId });
+            const ctx = await appInvoke<{ ssh_command: string | null }>("get_shell_ctx", { id: leaf.ptyId });
             if (!cancelled && ctx.ssh_command) {
               const parsed = parseSshCommandLine(ctx.ssh_command);
               target = parsed?.connection.target ?? parseSshTarget(ctx.ssh_command);
@@ -234,7 +233,7 @@ export const App = () => {
             monitorTargetRef.current = target;
             monitorCommandRef.current = sshCommand;
             setSidebarMonitor((prev) => {
-              if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+              if (prev) appInvoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
               return { monitorId: `mon-${Date.now()}`, sshTarget: target!, sshCommand: sshCommand!, sshConnection };
             });
           }
@@ -250,7 +249,7 @@ export const App = () => {
         monitorTargetRef.current = null;
         monitorCommandRef.current = null;
         setSidebarMonitor((prev) => {
-          if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+          if (prev) appInvoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
           return null;
         });
       }
@@ -314,7 +313,7 @@ export const App = () => {
       paneCount: collectLeafIds(ws.layout).length,
       active: ws.id === activeId,
     }));
-    invoke("set_workspace_list", { workspaces: summaries }).catch(() => {});
+    appInvoke("set_workspace_list", { workspaces: summaries }).catch(() => {});
   }, [workspaces, activeId]);
 
   // Confirm before closing, then save session (Tauri close-requested + beforeunload fallback)
@@ -347,10 +346,10 @@ export const App = () => {
 
   // Listen for PTY exit events to auto-close panes
   useEffect(() => {
-    const unlisten = listen<{ id: number; code: number | null }>(
+    const unlisten = appListen<{ id: number; code: number | null }>(
       "pty-exit",
-      (event) => {
-        const ptyId = event.payload.id;
+      (payload) => {
+        const ptyId = payload.id;
 
         // Delay so "[Process exited]" message is visible
         setTimeout(() => {
@@ -387,7 +386,7 @@ export const App = () => {
 
   // Listen for notification events from Rust backend
   useEffect(() => {
-    const unlisten = listen<{
+    const unlisten = appListen<{
       title: string;
       body: string;
       workspace_id?: string;
@@ -396,18 +395,18 @@ export const App = () => {
       event?: string;
     }>(
       "wmux-notify",
-      (event) => {
-        const { title, body } = event.payload;
-        if (!shouldShowNotificationForTarget(event.payload.workspace_id, event.payload.surface_id)) {
+      (payload) => {
+        const { title, body } = payload;
+        if (!shouldShowNotificationForTarget(payload.workspace_id, payload.surface_id)) {
           return;
         }
 
-        const wsId = event.payload.workspace_id ?? activeId ?? "";
+        const wsId = payload.workspace_id ?? activeId ?? "";
         useNotificationStore.getState().addNotification(wsId, title, body);
         playNotificationSound();
 
         // Send Windows toast notification
-        invoke("send_notification", { title, body }).catch(() => {});
+        appInvoke("send_notification", { title, body }).catch(() => {});
       },
     );
 
@@ -418,7 +417,7 @@ export const App = () => {
 
   // Listen for agent hook session bindings from wmux-cli.
   useEffect(() => {
-    const unlisten = listen<{
+    const unlisten = appListen<{
       source?: string;
       event?: string;
       workspace_id?: string;
@@ -427,13 +426,13 @@ export const App = () => {
       cwd?: string;
     }>(
       "wmux-agent-session",
-      (event) => {
-        const { source, workspace_id, surface_id, session_id } = event.payload;
+      (payload) => {
+        const { source, workspace_id, surface_id, session_id } = payload;
         if ((source !== "codex" && source !== "claude") || !workspace_id || !surface_id || !session_id) {
           return;
         }
 
-        if (isAgentSessionEndEvent(event.payload.event)) {
+        if (isAgentSessionEndEvent(payload.event)) {
           useWorkspaceStore.getState().clearLeafAgentSession(workspace_id, surface_id, {
             kind: source,
             sessionId: session_id,
@@ -444,8 +443,8 @@ export const App = () => {
         useWorkspaceStore.getState().setLeafAgentSession(workspace_id, surface_id, {
           kind: source,
           sessionId: session_id,
-          cwd: event.payload.cwd,
-          event: event.payload.event,
+          cwd: payload.cwd,
+          event: payload.event,
           updatedAt: Date.now(),
         });
       },
@@ -733,7 +732,7 @@ export const App = () => {
     let useTmux = mode === "on";
     if (mode === "auto") {
       try {
-        const version = await invoke<string | null>("check_remote_tmux", { sshCommand: cmd, sshConnection });
+        const version = await appInvoke<string | null>("check_remote_tmux", { sshCommand: cmd, sshConnection });
         useTmux = !!version && isTmuxVersionSupported(version);
       } catch {
         useTmux = false;
@@ -747,7 +746,7 @@ export const App = () => {
     }
     const monitorId = `mon-${Date.now()}`;
     setSidebarMonitor((prev) => {
-      if (prev) invoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
+      if (prev) appInvoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
       return { monitorId, sshTarget: target, sshCommand: cmd, sshConnection };
     });
     monitorTargetRef.current = target;
@@ -772,7 +771,7 @@ export const App = () => {
 
   const handleCloseMonitor = useCallback(() => {
     if (sidebarMonitor) {
-      invoke("stop_monitor", { monitorId: sidebarMonitor.monitorId }).catch(() => {});
+      appInvoke("stop_monitor", { monitorId: sidebarMonitor.monitorId }).catch(() => {});
       setSidebarMonitor(null);
       monitorTargetRef.current = null;
     }

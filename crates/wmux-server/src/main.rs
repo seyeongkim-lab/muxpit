@@ -121,6 +121,7 @@ enum ClientMsg {
         rows: u16,
         cols: u16,
         command: Option<String>,
+        command_argv: Option<Vec<String>>,
         cwd: Option<String>,
     },
     Write {
@@ -217,9 +218,10 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
                 rows,
                 cols,
                 command,
+                command_argv,
                 cwd,
             }) => {
-                if let Err(message) = ptys.spawn(id, rows, cols, command, cwd) {
+                if let Err(message) = ptys.spawn(id, rows, cols, command, command_argv, cwd) {
                     send_msg(
                         &out_tx,
                         ServerMsg::Error {
@@ -313,6 +315,7 @@ impl ServerPtyManager {
         rows: u16,
         cols: u16,
         command: Option<String>,
+        command_argv: Option<Vec<String>>,
         cwd: Option<String>,
     ) -> Result<(), String> {
         let pty_system = native_pty_system();
@@ -325,13 +328,14 @@ impl ServerPtyManager {
             })
             .map_err(|e| format!("failed to open PTY: {e}"))?;
 
-        let mut cmd = command_builder(command);
+        let mut cmd = command_builder(command, command_argv)?;
         cmd.env("TERM", "xterm-256color");
         let cwd = match cwd {
             Some(path) => resolve_in_root(&self.root, &path)?,
             None => self.root.as_ref().clone(),
         };
-        cmd.cwd(cwd.as_os_str());
+        let child_cwd = child_process_cwd(&cwd);
+        cmd.cwd(child_cwd.as_os_str());
 
         let mut child = pair
             .slave
@@ -454,7 +458,35 @@ fn checked_pty_id(id: i64) -> Result<u32, String> {
     u32::try_from(id).map_err(|_| format!("invalid PTY id {id}"))
 }
 
-fn command_builder(command: Option<String>) -> CommandBuilder {
+fn child_process_cwd(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(raw) = path.to_str() {
+            if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{rest}"));
+            }
+            if let Some(rest) = raw.strip_prefix(r"\\?\") {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
+fn command_builder(
+    command: Option<String>,
+    command_argv: Option<Vec<String>>,
+) -> Result<CommandBuilder, String> {
+    if let Some(argv) = command_argv.filter(|argv| !argv.is_empty()) {
+        let mut args = argv.into_iter();
+        let program = args
+            .next()
+            .ok_or_else(|| "commandArgv must include a program".to_string())?;
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(args);
+        return Ok(cmd);
+    }
+
     let shell = default_shell();
     let mut cmd = CommandBuilder::new(shell.program);
     if let Some(command) = command.filter(|value| !value.trim().is_empty()) {
@@ -463,7 +495,7 @@ fn command_builder(command: Option<String>) -> CommandBuilder {
     } else {
         cmd.args(&shell.interactive_args);
     }
-    cmd
+    Ok(cmd)
 }
 
 struct ShellSpec {
@@ -674,5 +706,16 @@ mod tests {
     #[test]
     fn sanitize_filename_replaces_header_breaking_chars() {
         assert_eq!(sanitize_filename("a\"b\\c\n"), "a_b_c_");
+    }
+
+    #[test]
+    fn child_process_cwd_removes_windows_verbatim_prefix() {
+        let path = PathBuf::from(r"\\?\C:\Users\one\Projects\wmux");
+        let cwd = child_process_cwd(&path);
+        if cfg!(windows) {
+            assert_eq!(cwd, PathBuf::from(r"C:\Users\one\Projects\wmux"));
+        } else {
+            assert_eq!(cwd, path);
+        }
     }
 }

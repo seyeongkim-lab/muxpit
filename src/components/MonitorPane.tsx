@@ -1,10 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { SshConnection } from "../utils/sshConnection";
+import { appInvoke, appListen } from "../utils/appBridge";
 
 interface MonitorPaneProps {
   id: string;
@@ -66,22 +65,21 @@ export const MonitorPane = ({ id, sshTarget, sshCommand, sshConnection, monitorI
     if (startedRef.current) return;
     startedRef.current = true;
 
-    invoke("start_monitor", {
+    appInvoke("start_monitor", {
       monitorId,
       sshCommand: sshCommand ?? `ssh ${sshTarget}`,
       sshConnection: sshConnection ?? null,
     }).catch(console.error);
 
     return () => {
-      invoke("stop_monitor", { monitorId }).catch(() => {});
+      appInvoke("stop_monitor", { monitorId }).catch(() => {});
       useMonitorStore.getState().clearMonitor(monitorId);
     };
   }, [monitorId, sshCommand, sshConnection, sshTarget]);
 
   // Listen for monitor-data events
   useEffect(() => {
-    const unlisten = listen<MonitorDataEvent>("monitor-data", (event) => {
-      const d = event.payload;
+    const unlisten = appListen<MonitorDataEvent>("monitor-data", (d) => {
       if (d.monitor_id !== monitorId) return;
 
       const snapshot: MonitorSnapshot = {

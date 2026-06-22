@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-shell";
 import { useHistoryStore } from "../stores/history";
 import { useNotificationStore } from "../stores/notifications";
 import { usePrefixStore } from "../stores/prefix";
@@ -24,7 +22,6 @@ import {
   sshConnectionToArgv,
   type SshConnection,
 } from "../utils/sshConnection";
-import { tauriPtyBackend } from "../utils/tauriPtyBackend";
 import { createTerminalClipboard } from "../utils/terminalClipboard";
 import { decideTerminalInput, shouldReadTerminalSelectionForInput } from "../utils/terminalInput";
 import {
@@ -42,6 +39,8 @@ import { buildTerminalSpawnPlan } from "../utils/terminalSpawnPlan";
 import { TerminalOutputParser, type TerminalOutputEvent } from "../utils/terminalOutput";
 import { terminalInstances } from "../components/terminalRegistry";
 import { createTerminalSurface, type TerminalSurface } from "../components/terminalSurface";
+import { appInvoke, openExternalUrl } from "../utils/appBridge";
+import { getPtyBackend } from "../utils/runtimePtyBackend";
 
 // Exponential backoff between tmux-CC reconnection attempts.
 const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
@@ -72,7 +71,7 @@ const handleTerminalOutputEvent = (event: TerminalOutputEvent, workspaceId: stri
       if (!shouldShowNotificationForTarget(workspaceId, leafId)) return;
       useNotificationStore.getState().addNotification(workspaceId, event.title, event.body);
       playNotificationSound();
-      invoke("send_notification", { title: event.title, body: event.body }).catch(() => {});
+      appInvoke("send_notification", { title: event.title, body: event.body }).catch(() => {});
       return;
     case "gitBranch":
       patchInfo(workspaceId, { gitBranch: event.branch });
@@ -91,7 +90,7 @@ const createConfiguredSurface = (): TerminalSurface => {
     theme: getResolvedTheme(settings.themeName, settings.customColors),
     enableWebglRenderer: settings.enableWebglRenderer,
     clearStaleInputBufferAfterTextInput: SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT,
-    openLink: (uri) => open(uri).catch(() => {}),
+    openLink: (uri) => openExternalUrl(uri).catch(() => {}),
   });
 };
 
@@ -122,6 +121,7 @@ export const useTerminalSession = ({
 
     initializedRef.current = true;
     const surface = createConfiguredSurface();
+    const ptyBackend = getPtyBackend();
 
     // Declared here (assigned after the spawn-source resolution below) so the
     // key handler and pty-exit listener can reference it without hitting the
@@ -137,7 +137,7 @@ export const useTerminalSession = ({
     const pasteClipboard = async () => {
       await pasteTerminalClipboard({
         clipboard,
-        imageStore: tauriPtyBackend,
+        imageStore: ptyBackend,
         surface,
         spawnCommand,
         spawnSshConnection,
@@ -180,7 +180,7 @@ export const useTerminalSession = ({
       pasteTerminalPasteEvent({
         event,
         clipboard,
-        imageStore: tauriPtyBackend,
+        imageStore: ptyBackend,
         surface,
         spawnCommand,
         spawnSshConnection,
@@ -209,7 +209,7 @@ export const useTerminalSession = ({
       }
     };
 
-    const unlistenOutput = await tauriPtyBackend.onOutput((payload) => {
+    const unlistenOutput = await ptyBackend.onOutput((payload) => {
       if (!idAssigned) {
         bufferedOutput.push(payload);
         return;
@@ -236,7 +236,7 @@ export const useTerminalSession = ({
           if (!terminalInstances.has(leafId)) return;
           try {
             const oldId = ptyId;
-            const newId = await spawnTerminalPty(tauriPtyBackend, {
+            const newId = await spawnTerminalPty(ptyBackend, {
               rows: Math.max(surface.rows, 1),
               cols: Math.max(surface.cols, 1),
               spawnCommand: sshCommand,
@@ -248,14 +248,14 @@ export const useTerminalSession = ({
             });
             const instance = terminalInstances.get(leafId);
             if (!instance) {
-              tauriPtyBackend.kill(newId).catch(() => {});
+              ptyBackend.kill(newId).catch(() => {});
               return;
             }
             ptyId = newId;
             instance.ptyId = newId;
             setPtyId(workspaceId, leafId, newId);
             if (oldId && oldId !== newId) {
-              tauriPtyBackend.kill(oldId).catch(() => {});
+              ptyBackend.kill(oldId).catch(() => {});
             }
             for (const payload of consumePtyEventsForId(reconnectOutput, newId)) {
               handleOutput(payload);
@@ -287,7 +287,7 @@ export const useTerminalSession = ({
       }
     };
 
-    const unlistenExit = await tauriPtyBackend.onExit((payload) => {
+    const unlistenExit = await ptyBackend.onExit((payload) => {
       if (!idAssigned) {
         bufferedExit.push(payload);
         return;
@@ -301,13 +301,13 @@ export const useTerminalSession = ({
 
     const onData = surface.onData((data) => {
       if (ptyId === 0) return;
-      tauriPtyBackend.write(ptyId, data).catch(console.error);
+      ptyBackend.write(ptyId, data).catch(console.error);
       surface.clearStaleInputBufferAfterTextInput(data);
     });
 
     const onResize = surface.onResize(({ rows, cols }) => {
       if (ptyId === 0) return;
-      tauriPtyBackend.resize(ptyId, rows, cols).catch(console.error);
+      ptyBackend.resize(ptyId, rows, cols).catch(console.error);
     });
 
     const cleanupUnregisteredTerminal = () => {
@@ -336,7 +336,7 @@ export const useTerminalSession = ({
       spawnSshConnection = savedSpec.sshConnection ?? null;
     } else if (cloneFromPtyId) {
       try {
-        const ctx = await tauriPtyBackend.getShellContext(cloneFromPtyId);
+        const ctx = await ptyBackend.getShellContext(cloneFromPtyId);
         if (ctx.ssh_command) {
           const parsed = parseSshCommandLine(ctx.ssh_command);
           spawnCommand = ctx.ssh_command;
@@ -373,7 +373,7 @@ export const useTerminalSession = ({
     spawnSshConnection = spawnPlan.spawnSshConnection;
 
     try {
-      ptyId = await spawnTerminalPty(tauriPtyBackend, {
+      ptyId = await spawnTerminalPty(ptyBackend, {
         rows: Math.max(surface.rows, 1),
         cols: Math.max(surface.cols, 1),
         spawnCommand,
@@ -387,7 +387,7 @@ export const useTerminalSession = ({
         leafId,
       });
       if (spawnPlan.postSpawnInput) {
-        tauriPtyBackend.write(ptyId, spawnPlan.postSpawnInput).catch(console.error);
+        ptyBackend.write(ptyId, spawnPlan.postSpawnInput).catch(console.error);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -395,7 +395,7 @@ export const useTerminalSession = ({
       if (spawnCommand) {
         surface.write(`\x1b[33m[retrying with default shell]\x1b[0m\r\n`);
         try {
-          ptyId = await tauriPtyBackend.spawn({
+          ptyId = await ptyBackend.spawn({
             rows: Math.max(surface.rows, 1),
             cols: Math.max(surface.cols, 1),
             command: null,
@@ -407,7 +407,7 @@ export const useTerminalSession = ({
             surfaceId: leafId,
           });
           if (spawnPlan.fallbackPostSpawnInput) {
-            tauriPtyBackend.write(ptyId, spawnPlan.fallbackPostSpawnInput).catch(console.error);
+            ptyBackend.write(ptyId, spawnPlan.fallbackPostSpawnInput).catch(console.error);
           }
         } catch (err2) {
           const msg2 = err2 instanceof Error ? err2.message : String(err2);
@@ -431,7 +431,7 @@ export const useTerminalSession = ({
 
     if (isCancelled()) {
       if (ptyId !== 0) {
-        tauriPtyBackend.kill(ptyId).catch(() => {});
+        ptyBackend.kill(ptyId).catch(() => {});
       }
       cleanupUnregisteredTerminal();
       return;
@@ -457,10 +457,10 @@ export const useTerminalSession = ({
 
     if (cloneFromPtyId && !spawnCommand && !spawnPlan.postSpawnInput) {
       try {
-        const ctx = await tauriPtyBackend.getShellContext(cloneFromPtyId);
+        const ctx = await ptyBackend.getShellContext(cloneFromPtyId);
         if (ctx.cwd) {
           setTimeout(() => {
-            tauriPtyBackend.write(ptyId, `cd "${ctx.cwd}"\r`).catch(() => {});
+            ptyBackend.write(ptyId, `cd "${ctx.cwd}"\r`).catch(() => {});
           }, 500);
         }
       } catch {
@@ -480,7 +480,7 @@ export const useTerminalSession = ({
       !spawnPlan.suppressShellHistoryHook
     ) {
       setTimeout(() => {
-        tauriPtyBackend.write(ptyId, SHELL_HISTORY_HOOK).catch(() => {});
+        ptyBackend.write(ptyId, SHELL_HISTORY_HOOK).catch(() => {});
       }, 700);
     }
 

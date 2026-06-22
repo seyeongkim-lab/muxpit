@@ -42,6 +42,19 @@ export const getServerToken = (): string => {
   return new URLSearchParams(window.location.search).get("token") ?? "";
 };
 
+let sharedClient: WmuxServerClient | null = null;
+let sharedClientToken = "";
+
+export const getSharedWmuxServerClient = (): WmuxServerClient => {
+  const token = getServerToken();
+  if (!sharedClient || sharedClientToken !== token) {
+    sharedClient?.close();
+    sharedClient = new WmuxServerClient(token);
+    sharedClientToken = token;
+  }
+  return sharedClient;
+};
+
 export const buildDownloadUrl = (path: string, token = getServerToken()): string => {
   const params = new URLSearchParams();
   params.set("token", token);
@@ -95,7 +108,10 @@ export class WmuxServerClient {
     rows: number;
     cols: number;
     command?: string | null;
+    commandArgv?: string[] | null;
     cwd?: string | null;
+    workspaceId?: string;
+    surfaceId?: string;
   }): Promise<number> {
     if (!this.token) {
       return Promise.reject(new Error("missing token"));
@@ -110,7 +126,10 @@ export class WmuxServerClient {
         rows: request.rows,
         cols: request.cols,
         command: request.command ?? null,
+        commandArgv: request.commandArgv ?? null,
         cwd: request.cwd ?? null,
+        workspaceId: request.workspaceId ?? null,
+        surfaceId: request.surfaceId ?? null,
       }));
     });
   }
