@@ -76,10 +76,12 @@ const isTmuxVersionSupported = (version: string): boolean => {
  */
 const autoAiSplitInFlight = new Set<string>();
 
-const autoAiSplit = async (wsId: string, sshCommand: string, sshConnection?: SshConnection, host?: SshHost) => {
+const autoAiSplit = async (wsId: string, sshCommand: string, sshConnection?: SshConnection, host?: SshHost, explicitTarget?: string) => {
   let key: string | null = null;
   try {
-    const target = sshConnection?.target ?? (host ? `${host.user}@${host.host}` : parseSshTarget(sshCommand));
+    // `explicitTarget` is used for the local/server host, whose connection has an
+    // empty target string (which would otherwise short-circuit detection).
+    const target = explicitTarget ?? sshConnection?.target ?? (host ? `${host.user}@${host.host}` : parseSshTarget(sshCommand));
     if (!target) return;
     key = `${wsId}:${target}`;
     if (autoAiSplitInFlight.has(key)) return;
@@ -271,16 +273,17 @@ export const App = () => {
       // SshConnection tells the server to run these commands on its own host.
       if (hasAnyPty && isWmuxServerRuntime()) {
         const localTarget = serverHostnameRef.current || window.location.hostname || "server";
+        const localConnection: SshConnection = { program: "", options: [], target: "" };
         if (monitorTargetRef.current !== localTarget) {
           monitorTargetRef.current = localTarget;
           monitorCommandRef.current = "";
-          const localConnection: SshConnection = { program: "", options: [], target: "" };
           setSidebarMonitor((prev) => {
             if (prev) appInvoke("stop_monitor", { monitorId: prev.monitorId }).catch(() => {});
             return { monitorId: `mon-${Date.now()}`, sshTarget: localTarget, sshCommand: "", sshConnection: localConnection };
           });
-          useAiCliStore.getState().probe(localTarget, "", localConnection);
         }
+        // Probe + auto-open the AI pane on the local host, same as a remote host.
+        autoAiSplit(ws.id, "", localConnection, undefined, localTarget);
         return;
       }
 
