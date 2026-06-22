@@ -4,64 +4,12 @@ use crate::remote_monitor::{
     parse_remote_output, MonitorSnapshots, CLAUDE_END_MARKER, END_MARKER,
 };
 use crate::ssh_command::SshCommand;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessInfo {
-    pub pid: u32,
-    pub user: String,
-    pub cpu: f64,
-    pub mem: f64,
-    pub command: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetInfo {
-    pub rx_bytes_per_sec: u64,
-    pub tx_bytes_per_sec: u64,
-    /// NIC link speed in Mbps (e.g. 1000 for 1Gbps, 10000 for 10Gbps). None if unknown.
-    pub link_speed_mbps: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClaudeSession {
-    pub project: String,
-    pub project_path: String,
-    pub session_id: String,
-    pub started_at: Option<String>,
-    pub last_activity: Option<String>,
-    pub message_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MonitorData {
-    pub monitor_id: String,
-    pub cpu_percent: f64,
-    pub mem_total_mb: u64,
-    pub mem_used_mb: u64,
-    pub mem_percent: f64,
-    pub load_avg: [f64; 3],
-    pub processes: Vec<ProcessInfo>,
-    pub hostname: String,
-    pub timestamp: u64,
-    pub error: Option<String>,
-    pub net: Option<NetInfo>,
-    pub disks: Vec<DiskInfo>,
-    pub claude_sessions: Vec<ClaudeSession>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiskInfo {
-    pub mount: String,
-    pub total_gb: f64,
-    pub used_gb: f64,
-    pub percent: f64,
-}
+use wmux_core::monitor::{ClaudeSession, MonitorData, SessionContentEvent};
 
 /// A request to fetch a file via the monitor's SSH connection.
 #[derive(Clone)]
@@ -69,14 +17,6 @@ struct FetchRequest {
     project: String,
     session_id: String,
     request_id: String,
-}
-
-/// Response emitted via "claude-session-content" event.
-#[derive(Clone, Serialize)]
-struct SessionContentEvent {
-    request_id: String,
-    lines: Vec<String>,
-    error: Option<String>,
 }
 
 struct MonitorSession {

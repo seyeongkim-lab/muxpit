@@ -35,12 +35,15 @@ type PendingInvoke = {
   reject: (reason: Error) => void;
 };
 
+type EventHandler = (payload: unknown) => void;
+
 type ServerMessage =
   | { t: "dir"; reqId: number; path: string; entries: ServerDirEntry[] }
   | { t: "spawned"; id: number; ptyId: number }
   | { t: "output"; ptyId: number; data: string }
   | { t: "exit"; ptyId: number; code: number | null }
   | { t: "invokeResult"; reqId: number; value: unknown }
+  | { t: "event"; event: string; payload: unknown }
   | { t: "error"; reqId?: number | null; message: string };
 
 export const getServerToken = (): string => {
@@ -83,6 +86,7 @@ export class WmuxServerClient {
   private pendingInvokes = new Map<number, PendingInvoke>();
   private outputHandlers = new Set<(payload: ServerPtyOutput) => void>();
   private exitHandlers = new Set<(payload: ServerPtyExit) => void>();
+  private eventHandlers = new Map<string, Set<EventHandler>>();
 
   constructor(private readonly token: string) {}
 
@@ -109,6 +113,29 @@ export class WmuxServerClient {
   onExit(handler: (payload: ServerPtyExit) => void): () => void {
     this.exitHandlers.add(handler);
     return () => this.exitHandlers.delete(handler);
+  }
+
+  async listenEvent<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+    let handlers = this.eventHandlers.get(event);
+    if (!handlers) {
+      handlers = new Set();
+      this.eventHandlers.set(event, handlers);
+    }
+    const wrapped = (payload: unknown) => handler(payload as T);
+    handlers.add(wrapped);
+
+    if (this.token) {
+      this.openSocket().catch(() => {
+        handlers?.delete(wrapped);
+      });
+    }
+
+    return () => {
+      handlers?.delete(wrapped);
+      if (handlers?.size === 0) {
+        this.eventHandlers.delete(event);
+      }
+    };
   }
 
   async spawnTerminal(request: {
@@ -255,6 +282,13 @@ export class WmuxServerClient {
       if (!pending) return;
       this.pendingInvokes.delete(msg.reqId);
       pending.resolve(msg.value);
+      return;
+    }
+
+    if (msg.t === "event") {
+      const handlers = this.eventHandlers.get(msg.event);
+      if (!handlers) return;
+      for (const handler of handlers) handler(msg.payload);
       return;
     }
 

@@ -10,12 +10,14 @@ const SERVER_INVOKE_COMMANDS = new Set([
   "tmux_switch_client",
   "tmux_new_session",
   "tmux_kill_session",
+  "start_monitor",
+  "stop_monitor",
+  "request_session_content",
 ]);
 
 const BROWSER_NOOP_COMMANDS = new Set([
   "set_workspace_list",
   "send_notification",
-  "stop_monitor",
 ]);
 
 export const appInvoke = <T = unknown>(
@@ -38,7 +40,9 @@ export const appListen = <T>(
   event: string,
   handler: (payload: T) => void,
 ): Promise<() => void> => {
-  if (!isTauriRuntime()) return Promise.resolve(() => {});
+  if (!isTauriRuntime()) {
+    return getSharedWmuxServerClient().listenEvent<T>(event, handler);
+  }
   return tauriListen<T>(event, (tauriEvent) => handler(tauriEvent.payload));
 };
 

@@ -1,9 +1,10 @@
 //! wmux-server: serve the wmux web frontend + a WebSocket/HTTP bridge to a
 //! local engine, so a browser on another machine can drive this host.
 //!
-//! Phase 1/2 PoC: static serving, `readDir` over WS, file/dir download, and
-//! a plain local PTY bridge. The production path should still extract this
-//! into a shared `wmux-core` crate so Tauri and server use the same engine.
+//! Browser runtime bridge: static serving, `readDir` over WS, file/dir download,
+//! PTY IO, tmux/SSH RPCs, and monitor events for the full wmux UI.
+
+mod monitor;
 
 use axum::{
     extract::{
@@ -17,6 +18,7 @@ use axum::{
 };
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
+use monitor::ServerMonitorManager;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -158,7 +160,7 @@ enum ClientMsg {
 
 #[derive(Serialize, Debug)]
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
-enum ServerMsg {
+pub(crate) enum ServerMsg {
     Spawned {
         id: i64,
         pty_id: u32,
@@ -179,6 +181,10 @@ enum ServerMsg {
     InvokeResult {
         req_id: i64,
         value: Value,
+    },
+    Event {
+        event: String,
+        payload: Value,
     },
     Error {
         req_id: Option<i64>,
@@ -210,6 +216,7 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ServerMsg>();
     let ptys = ServerPtyManager::new(out_tx.clone(), st.root.clone());
+    let monitors = ServerMonitorManager::new(out_tx.clone());
 
     let writer = tokio::spawn(async move {
         while let Some(reply) = out_rx.recv().await {
@@ -298,7 +305,10 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
                 command,
                 args,
             }) => {
-                send_msg(&out_tx, handle_invoke(req_id, command, args).await);
+                send_msg(
+                    &out_tx,
+                    handle_invoke(req_id, command, args, &monitors).await,
+                );
             }
             Err(e) => {
                 send_msg(
@@ -363,7 +373,35 @@ struct TmuxKillArgs {
     session: String,
 }
 
-async fn handle_invoke(req_id: i64, command: String, args: Value) -> ServerMsg {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartMonitorArgs {
+    monitor_id: String,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StopMonitorArgs {
+    monitor_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RequestSessionContentArgs {
+    monitor_id: Option<String>,
+    project: String,
+    session_id: String,
+    request_id: String,
+}
+
+async fn handle_invoke(
+    req_id: i64,
+    command: String,
+    args: Value,
+    monitors: &ServerMonitorManager,
+) -> ServerMsg {
     match command.as_str() {
         "check_remote_tmux" => match ssh_from_value::<SshArgs>(args) {
             Ok(ssh) => {
@@ -431,6 +469,56 @@ async fn handle_invoke(req_id: i64, command: String, args: Value) -> ServerMsg {
             Ok((ssh, session)) => {
                 blocking_invoke(req_id, move || tmux_remote::kill_session(&ssh, &session)).await
             }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "start_monitor" => match parse_args::<StartMonitorArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection)
+                .map(|ssh| (parsed.monitor_id, ssh))
+        }) {
+            Ok((monitor_id, ssh)) => {
+                monitors.start(monitor_id, ssh);
+                ServerMsg::InvokeResult {
+                    req_id,
+                    value: Value::Null,
+                }
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "stop_monitor" => match parse_args::<StopMonitorArgs>(args) {
+            Ok(parsed) => {
+                monitors.stop(&parsed.monitor_id);
+                ServerMsg::InvokeResult {
+                    req_id,
+                    value: Value::Null,
+                }
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "request_session_content" => match parse_args::<RequestSessionContentArgs>(args) {
+            Ok(parsed) => match monitors.request_session_content(
+                parsed.monitor_id.as_deref(),
+                parsed.project,
+                parsed.session_id,
+                parsed.request_id,
+            ) {
+                Ok(()) => ServerMsg::InvokeResult {
+                    req_id,
+                    value: Value::Null,
+                },
+                Err(message) => ServerMsg::Error {
+                    req_id: Some(req_id),
+                    message,
+                },
+            },
             Err(message) => ServerMsg::Error {
                 req_id: Some(req_id),
                 message,
