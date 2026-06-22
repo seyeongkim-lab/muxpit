@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { FileTreePanel } from "./components/FileTreePanel";
+import { WebTerminalPanel } from "./components/WebTerminalPanel";
 import { applyThemeVars, getResolvedTheme } from "./themes";
 
 export const WebApp = () => {
@@ -16,7 +17,10 @@ export const WebApp = () => {
         </div>
       </div>
       <main style={styles.body}>
-        <FileTreePanel />
+        <aside style={styles.sidebar}>
+          <FileTreePanel />
+        </aside>
+        <WebTerminalPanel />
       </main>
     </div>
   );
@@ -71,6 +75,15 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     minHeight: 0,
     display: "flex",
+    overflow: "hidden",
+  },
+  sidebar: {
+    width: 420,
+    maxWidth: "42vw",
+    minWidth: 320,
+    flexShrink: 0,
+    minHeight: 0,
+    borderRight: "1px solid var(--wmux-hairline)",
     overflow: "hidden",
   },
 };

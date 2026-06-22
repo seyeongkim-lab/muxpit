@@ -1,8 +1,9 @@
 //! wmux-server: serve the wmux web frontend + a WebSocket/HTTP bridge to a
 //! local engine, so a browser on another machine can drive this host.
 //!
-//! Phase 1 (this file): static serving, `readDir` over WS, file/dir download.
-//! Phase 2 will fill in the pty message variants by reusing `wmux-core`.
+//! Phase 1/2 PoC: static serving, `readDir` over WS, file/dir download, and
+//! a plain local PTY bridge. The production path should still extract this
+//! into a shared `wmux-core` crate so Tauri and server use the same engine.
 
 use axum::{
     extract::{
@@ -15,15 +16,18 @@ use axum::{
     Router,
 };
 use clap::Parser;
+use futures_util::{SinkExt, StreamExt};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    io::Write as _,
+    io::{Read, Write as _},
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::UNIX_EPOCH,
 };
+use tokio::sync::mpsc;
 use tower_http::services::ServeDir;
 
 #[derive(Parser)]
@@ -110,7 +114,6 @@ fn resolve_in_root(root: &Path, p: &str) -> Result<PathBuf, String> {
 // ---- WebSocket protocol -----------------------------------------------------
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum ClientMsg {
     Spawn {
@@ -138,8 +141,7 @@ enum ClientMsg {
     },
 }
 
-#[derive(Serialize)]
-#[allow(dead_code)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum ServerMsg {
     Spawned {
@@ -165,7 +167,7 @@ enum ServerMsg {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct DirEntry {
     name: String,
@@ -185,31 +187,305 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, st))
 }
 
-async fn handle_socket(mut socket: WebSocket, st: AppState) {
-    while let Some(Ok(msg)) = socket.recv().await {
+async fn handle_socket(socket: WebSocket, st: AppState) {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ServerMsg>();
+    let ptys = ServerPtyManager::new(out_tx.clone(), st.root.clone());
+
+    let writer = tokio::spawn(async move {
+        while let Some(reply) = out_rx.recv().await {
+            let json = serde_json::to_string(&reply).unwrap_or_else(|_| "{}".into());
+            if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    while let Some(Ok(msg)) = ws_rx.next().await {
         let text = match msg {
             Message::Text(t) => t,
             Message::Close(_) => break,
             _ => continue,
         };
-        let reply = match serde_json::from_str::<ClientMsg>(&text) {
-            Ok(ClientMsg::ReadDir { req_id, path }) => read_dir_reply(&st.root, req_id, &path),
-            Ok(ClientMsg::Spawn { .. })
-            | Ok(ClientMsg::Write { .. })
-            | Ok(ClientMsg::Resize { .. })
-            | Ok(ClientMsg::Kill { .. }) => ServerMsg::Error {
-                req_id: None,
-                message: "pty not implemented yet (Phase 2)".into(),
-            },
-            Err(e) => ServerMsg::Error {
-                req_id: None,
-                message: format!("bad message: {e}"),
-            },
+
+        match serde_json::from_str::<ClientMsg>(&text) {
+            Ok(ClientMsg::ReadDir { req_id, path }) => {
+                send_msg(&out_tx, read_dir_reply(&st.root, req_id, &path));
+            }
+            Ok(ClientMsg::Spawn {
+                id,
+                rows,
+                cols,
+                command,
+                cwd,
+            }) => {
+                if let Err(message) = ptys.spawn(id, rows, cols, command, cwd) {
+                    send_msg(
+                        &out_tx,
+                        ServerMsg::Error {
+                            req_id: Some(id),
+                            message,
+                        },
+                    );
+                }
+            }
+            Ok(ClientMsg::Write { id, data }) => {
+                if let Err(message) = ptys.write(id, &data) {
+                    send_msg(
+                        &out_tx,
+                        ServerMsg::Error {
+                            req_id: Some(id),
+                            message,
+                        },
+                    );
+                }
+            }
+            Ok(ClientMsg::Resize { id, rows, cols }) => {
+                if let Err(message) = ptys.resize(id, rows, cols) {
+                    send_msg(
+                        &out_tx,
+                        ServerMsg::Error {
+                            req_id: Some(id),
+                            message,
+                        },
+                    );
+                }
+            }
+            Ok(ClientMsg::Kill { id }) => {
+                if let Err(message) = ptys.kill(id) {
+                    send_msg(
+                        &out_tx,
+                        ServerMsg::Error {
+                            req_id: Some(id),
+                            message,
+                        },
+                    );
+                }
+            }
+            Err(e) => {
+                send_msg(
+                    &out_tx,
+                    ServerMsg::Error {
+                        req_id: None,
+                        message: format!("bad message: {e}"),
+                    },
+                );
+            }
         };
-        let json = serde_json::to_string(&reply).unwrap_or_else(|_| "{}".into());
-        if socket.send(Message::Text(json.into())).await.is_err() {
-            break;
+    }
+
+    drop(ptys);
+    drop(out_tx);
+    let _ = writer.await;
+}
+
+fn send_msg(tx: &mpsc::UnboundedSender<ServerMsg>, msg: ServerMsg) {
+    let _ = tx.send(msg);
+}
+
+// ---- PTY --------------------------------------------------------------------
+
+struct ServerPtyInstance {
+    writer: Box<dyn std::io::Write + Send>,
+    _master: Box<dyn MasterPty + Send>,
+}
+
+struct ServerPtyManager {
+    instances: Mutex<HashMap<u32, ServerPtyInstance>>,
+    next_id: Mutex<u32>,
+    tx: mpsc::UnboundedSender<ServerMsg>,
+    root: Arc<PathBuf>,
+}
+
+impl ServerPtyManager {
+    fn new(tx: mpsc::UnboundedSender<ServerMsg>, root: Arc<PathBuf>) -> Self {
+        Self {
+            instances: Mutex::new(HashMap::new()),
+            next_id: Mutex::new(1),
+            tx,
+            root,
         }
+    }
+
+    fn spawn(
+        &self,
+        client_id: i64,
+        rows: u16,
+        cols: u16,
+        command: Option<String>,
+        cwd: Option<String>,
+    ) -> Result<(), String> {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("failed to open PTY: {e}"))?;
+
+        let mut cmd = command_builder(command);
+        cmd.env("TERM", "xterm-256color");
+        let cwd = match cwd {
+            Some(path) => resolve_in_root(&self.root, &path)?,
+            None => self.root.as_ref().clone(),
+        };
+        cmd.cwd(cwd.as_os_str());
+
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("failed to spawn shell: {e}"))?;
+
+        let id = {
+            let mut next = self.next_id.lock().unwrap();
+            let id = *next;
+            *next += 1;
+            id
+        };
+
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("failed to clone reader: {e}"))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| format!("failed to take writer: {e}"))?;
+
+        self.instances.lock().unwrap().insert(
+            id,
+            ServerPtyInstance {
+                writer,
+                _master: pair.master,
+            },
+        );
+
+        send_msg(
+            &self.tx,
+            ServerMsg::Spawned {
+                id: client_id,
+                pty_id: id,
+            },
+        );
+
+        let output_tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => send_msg(
+                        &output_tx,
+                        ServerMsg::Output {
+                            pty_id: id,
+                            data: String::from_utf8_lossy(&buf[..n]).into_owned(),
+                        },
+                    ),
+                    Err(_) => break,
+                }
+            }
+            send_msg(
+                &output_tx,
+                ServerMsg::Exit {
+                    pty_id: id,
+                    code: None,
+                },
+            );
+        });
+
+        let exit_tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let code = child.wait().ok().map(|s| s.exit_code() as i32);
+            send_msg(&exit_tx, ServerMsg::Exit { pty_id: id, code });
+        });
+
+        Ok(())
+    }
+
+    fn write(&self, id: i64, data: &str) -> Result<(), String> {
+        let id = checked_pty_id(id)?;
+        let mut instances = self.instances.lock().unwrap();
+        let instance = instances
+            .get_mut(&id)
+            .ok_or_else(|| format!("PTY {id} not found"))?;
+        instance
+            .writer
+            .write_all(data.as_bytes())
+            .map_err(|e| format!("write error: {e}"))?;
+        instance
+            .writer
+            .flush()
+            .map_err(|e| format!("flush error: {e}"))?;
+        Ok(())
+    }
+
+    fn resize(&self, id: i64, rows: u16, cols: u16) -> Result<(), String> {
+        let id = checked_pty_id(id)?;
+        let instances = self.instances.lock().unwrap();
+        let instance = instances
+            .get(&id)
+            .ok_or_else(|| format!("PTY {id} not found"))?;
+        instance
+            ._master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("resize error: {e}"))?;
+        Ok(())
+    }
+
+    fn kill(&self, id: i64) -> Result<(), String> {
+        let id = checked_pty_id(id)?;
+        self.instances
+            .lock()
+            .unwrap()
+            .remove(&id)
+            .ok_or_else(|| format!("PTY {id} not found"))?;
+        Ok(())
+    }
+}
+
+fn checked_pty_id(id: i64) -> Result<u32, String> {
+    u32::try_from(id).map_err(|_| format!("invalid PTY id {id}"))
+}
+
+fn command_builder(command: Option<String>) -> CommandBuilder {
+    let shell = default_shell();
+    let mut cmd = CommandBuilder::new(shell.program);
+    if let Some(command) = command.filter(|value| !value.trim().is_empty()) {
+        cmd.args(&shell.command_args);
+        cmd.arg(command);
+    } else {
+        cmd.args(&shell.interactive_args);
+    }
+    cmd
+}
+
+struct ShellSpec {
+    program: String,
+    interactive_args: Vec<String>,
+    command_args: Vec<String>,
+}
+
+fn default_shell() -> ShellSpec {
+    if cfg!(windows) {
+        let program = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        return ShellSpec {
+            program,
+            interactive_args: vec![],
+            command_args: vec!["/C".to_string()],
+        };
+    }
+
+    ShellSpec {
+        program: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
+        interactive_args: vec!["-l".to_string()],
+        command_args: vec!["-lc".to_string()],
     }
 }
 
