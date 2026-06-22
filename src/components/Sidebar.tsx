@@ -434,6 +434,10 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
         </div>
       </div>
 
+      {isWmuxServerRuntime() && (
+        <ServerFilesPanel cwd={activeId ? infoMap[activeId]?.cwd ?? null : null} />
+      )}
+
 
       {monitor && latestSnapshot && (latestSnapshot.claudeSessions?.length ?? 0) > 0 && (
         <SidebarClaude
@@ -462,8 +466,6 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
           onClose={onCloseMonitor}
         />
       )}
-
-      {isWmuxServerRuntime() && <ServerFilesPanel />}
 
       <div style={styles.footer}>
         <span style={styles.footerText}>{workspaces.length} sessions</span>

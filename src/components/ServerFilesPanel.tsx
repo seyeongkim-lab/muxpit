@@ -26,7 +26,7 @@ const compactPath = (path: string): string =>
     .replace(/^\/home\/[^/]+(?=\/|$)/, "~")
     .replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
 
-export const ServerFilesPanel = () => {
+export const ServerFilesPanel = ({ cwd }: { cwd?: string | null }) => {
   const token = getServerToken();
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [dirs, setDirs] = useState<Map<string, DirState>>(() => new Map());
@@ -79,9 +79,17 @@ export const ServerFilesPanel = () => {
     [token],
   );
 
+  // Root the tree at the active session's working directory and re-load when the
+  // user `cd`s in the terminal (cwd is parsed from the pty stream). Falls back to
+  // the server root when no cwd is known. Paths outside the server `--root` come
+  // back as a readDir error, which the tree renders in place.
+  const requestedRoot = cwd && cwd.trim() ? cwd : "";
   useEffect(() => {
-    void loadPath("");
-  }, [loadPath]);
+    setDirs(new Map());
+    setExpanded(new Set());
+    setRootPath(null);
+    void loadPath(requestedRoot);
+  }, [requestedRoot, loadPath]);
 
   const toggleDir = useCallback(
     (path: string) => {
