@@ -45,11 +45,23 @@ installNavigatorLocaleFallback();
 const rootElement = document.getElementById("root")!;
 const root = createRoot(rootElement);
 
-void import("./App")
-  .then(({ App }) => {
+type TauriRuntimeHost = {
+  __TAURI_INTERNALS__?: unknown;
+};
+
+const isTauriRuntime = (): boolean =>
+  typeof window !== "undefined" &&
+  typeof (window as TauriRuntimeHost).__TAURI_INTERNALS__ === "object";
+
+const appModule = isTauriRuntime()
+  ? import("./App").then(({ App }) => ({ Component: App }))
+  : import("./WebApp").then(({ WebApp }) => ({ Component: WebApp }));
+
+void appModule
+  .then(({ Component }) => {
     root.render(
       <BootErrorBoundary>
-        <App />
+        <Component />
       </BootErrorBoundary>,
     );
   })
