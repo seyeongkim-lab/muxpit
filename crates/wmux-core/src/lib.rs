@@ -1,5 +1,6 @@
 pub mod command;
 pub mod monitor;
+pub mod pasted_image;
 pub mod remote_monitor;
 pub mod remote_probe;
 pub mod ssh_command;

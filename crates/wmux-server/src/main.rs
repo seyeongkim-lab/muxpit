@@ -33,7 +33,7 @@ use std::{
 use tokio::sync::mpsc;
 use tower_http::services::ServeDir;
 use wmux_core::{
-    remote_probe,
+    pasted_image, remote_probe,
     ssh_command::{resolve_ssh_command, SshCommand},
     tmux_remote,
     tmux_spawn::build_tmux_attach_argv,
@@ -396,6 +396,20 @@ struct RequestSessionContentArgs {
     request_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveImageArgs {
+    image_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushImageArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    image_base64: String,
+}
+
 async fn handle_invoke(
     req_id: i64,
     command: String,
@@ -519,6 +533,33 @@ async fn handle_invoke(
                     message,
                 },
             },
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "save_image_locally" => match parse_args::<SaveImageArgs>(args) {
+            Ok(parsed) => {
+                blocking_invoke(req_id, move || {
+                    pasted_image::save_image_locally_sync(&parsed.image_base64)
+                })
+                .await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "push_image_to_remote" => match parse_args::<PushImageArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection)
+                .map(|ssh| (ssh, parsed.image_base64))
+        }) {
+            Ok((ssh, image_base64)) => {
+                blocking_invoke(req_id, move || {
+                    pasted_image::push_image_to_remote_sync(&ssh, &image_base64)
+                })
+                .await
+            }
             Err(message) => ServerMsg::Error {
                 req_id: Some(req_id),
                 message,

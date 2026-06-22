@@ -2,16 +2,11 @@ import type {
   PtyBackend,
   PtyExit,
   PtyOutput,
-  PushImageToRemoteRequest,
-  SaveImageLocallyRequest,
   ShellContext,
   SpawnPtyRequest,
   SpawnTmuxCcRequest,
 } from "./ptyBackend";
 import { getServerToken, getSharedWmuxServerClient } from "./wmuxServerClient";
-
-const unavailable = (feature: string): Promise<never> =>
-  Promise.reject(new Error(`${feature} is not implemented by wmux-server yet`));
 
 export const browserPtyBackend: PtyBackend = {
   onOutput: async (handler: (payload: PtyOutput) => void) => {
@@ -54,8 +49,16 @@ export const browserPtyBackend: PtyBackend = {
   getShellContext: (_id): Promise<ShellContext> =>
     Promise.resolve({ ssh_command: null, cwd: null }),
   hasAgentProcess: (_id, _agent) => Promise.resolve(false),
-  saveImageLocally: (_request: SaveImageLocallyRequest) => unavailable("local image paste"),
-  pushImageToRemote: (_request: PushImageToRemoteRequest) => unavailable("remote image paste"),
+  saveImageLocally: (request) =>
+    getSharedWmuxServerClient().invokeCommand<string>("save_image_locally", {
+      imageBase64: request.imageBase64,
+    }),
+  pushImageToRemote: (request) =>
+    getSharedWmuxServerClient().invokeCommand<string>("push_image_to_remote", {
+      sshCommand: request.sshCommand,
+      sshConnection: request.sshConnection,
+      imageBase64: request.imageBase64,
+    }),
 };
 
 export const hasBrowserPtyToken = (): boolean => getServerToken().trim() !== "";
