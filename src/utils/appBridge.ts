@@ -25,7 +25,6 @@ const SERVER_INVOKE_COMMANDS = new Set([
 
 const BROWSER_NOOP_COMMANDS = new Set([
   "set_workspace_list",
-  "send_notification",
 ]);
 
 export const appInvoke = <T = unknown>(
@@ -36,12 +35,41 @@ export const appInvoke = <T = unknown>(
     if (SERVER_INVOKE_COMMANDS.has(command)) {
       return getSharedWmuxServerClient().invokeCommand<T>(command, args ?? {});
     }
+    if (command === "send_notification") {
+      return sendBrowserNotification(args) as Promise<T>;
+    }
     if (BROWSER_NOOP_COMMANDS.has(command)) {
       return Promise.resolve(undefined as T);
     }
     return Promise.reject(new Error(`${command} is unavailable in the browser runtime`));
   }
   return tauriInvoke<T>(command, args);
+};
+
+const sendBrowserNotification = async (
+  args?: Record<string, unknown>,
+): Promise<void> => {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+
+  const title =
+    typeof args?.title === "string" && args.title.trim()
+      ? args.title
+      : "wmux";
+  const body =
+    typeof args?.body === "string" && args.body.trim()
+      ? args.body
+      : undefined;
+
+  if (Notification.permission === "granted") {
+    new Notification(title, { body });
+    return;
+  }
+
+  if (Notification.permission !== "default") return;
+  const permission = await Notification.requestPermission();
+  if (permission === "granted") {
+    new Notification(title, { body });
+  }
 };
 
 export const appListen = <T>(
