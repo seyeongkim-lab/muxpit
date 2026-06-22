@@ -23,7 +23,34 @@ pub fn resolve_ssh_command(
     ssh_command: Option<&str>,
     ssh_connection: Option<SshCommand>,
 ) -> Option<SshCommand> {
-    ssh_connection.or_else(|| ssh_command.and_then(parse_ssh_command))
+    ssh_connection
+        .or_else(|| ssh_command.and_then(parse_ssh_command))
+        .map(SshCommand::with_multiplexing)
+}
+
+/// Shared directory for SSH ControlMaster sockets, created `0700`. The ssh
+/// client runs on this host, so the socket path is local and short.
+#[cfg(not(windows))]
+fn ssh_control_dir() -> &'static std::path::Path {
+    use std::path::{Path, PathBuf};
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let user = std::env::var("USER").unwrap_or_else(|_| "wmux".to_string());
+        let user: String = user
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .collect();
+        let base = if Path::new("/tmp").is_dir() {
+            PathBuf::from("/tmp")
+        } else {
+            std::env::temp_dir()
+        };
+        let dir = base.join(format!("wmux-ssh-{user}"));
+        let _ = std::fs::create_dir_all(&dir);
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        dir
+    })
 }
 
 pub fn split_command_line(input: &str) -> Vec<String> {
@@ -185,6 +212,38 @@ fn option_takes_value(option: &str) -> bool {
 }
 
 impl SshCommand {
+    /// Add OpenSSH connection multiplexing so every connection to a host — the
+    /// long-lived tmux attach plus the short tmux-list/monitor/probe connections
+    /// — shares one TCP+auth channel instead of a fresh handshake each time.
+    /// `%C` keys the socket by host/port/user, so the attach (master) and the
+    /// probes (which reuse it) converge on the same path. No-op on Windows (its
+    /// OpenSSH has no ControlMaster) and for an empty program.
+    #[cfg(not(windows))]
+    pub fn with_multiplexing(mut self) -> Self {
+        if self.program.is_empty()
+            || self
+                .options
+                .iter()
+                .any(|o| o.starts_with("ControlPath=") || o.starts_with("ControlMaster="))
+        {
+            return self;
+        }
+        let control_path = ssh_control_dir().join("cm-%C");
+        self.options.push("-o".to_string());
+        self.options.push("ControlMaster=auto".to_string());
+        self.options.push("-o".to_string());
+        self.options
+            .push(format!("ControlPath={}", control_path.to_string_lossy()));
+        self.options.push("-o".to_string());
+        self.options.push("ControlPersist=120".to_string());
+        self
+    }
+
+    #[cfg(windows)]
+    pub fn with_multiplexing(self) -> Self {
+        self
+    }
+
     pub fn argv_with_extra_options(
         &self,
         extra_options: &[&str],
@@ -315,6 +374,33 @@ mod tests {
     #[test]
     fn quote_posix_single_quotes() {
         assert_eq!(quote_posix_shell_arg("a'b"), "'a'\\''b'");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn resolve_adds_connection_multiplexing() {
+        let ssh = resolve_ssh_command(Some("ssh -p 2222 me@host"), None).unwrap();
+        // ControlMaster/ControlPath/ControlPersist appended to the options.
+        assert!(ssh.options.iter().any(|o| o == "ControlMaster=auto"));
+        assert!(ssh
+            .options
+            .iter()
+            .any(|o| o.starts_with("ControlPath=") && o.contains("cm-%C")));
+        assert!(ssh.options.iter().any(|o| o == "ControlPersist=120"));
+        // The original options are preserved and the attach argv carries them.
+        assert!(ssh.options.iter().any(|o| o == "-p"));
+        let argv = ssh.argv_with_extra_options(&["-tt"], Some("tmux attach"));
+        assert!(argv.iter().any(|a| a.starts_with("ControlPath=")));
+        assert_eq!(argv.last().unwrap(), "tmux attach");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn with_multiplexing_is_idempotent() {
+        let ssh = resolve_ssh_command(Some("ssh me@host"), None).unwrap();
+        let n = ssh.options.len();
+        let again = ssh.with_multiplexing();
+        assert_eq!(again.options.len(), n, "must not double-add control options");
     }
 
     #[test]
