@@ -9,9 +9,11 @@ import { destroyAllTerminals } from "./terminalRegistry";
 import { SidebarMonitor } from "./SidebarMonitor";
 import { SidebarClaude } from "./SidebarClaude";
 import { SidebarTmuxSessions } from "./SidebarTmuxSessions";
+import { ServerFilesPanel } from "./ServerFilesPanel";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useState, useRef } from "react";
 import type { SshConnection } from "../utils/sshConnection";
+import { isWmuxServerRuntime } from "../utils/runtime";
 
 interface SidebarMonitorInfo {
   monitorId: string;
@@ -258,6 +260,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
           </button>
         </div>
       )}
+
+      {isWmuxServerRuntime() && <ServerFilesPanel />}
 
       <div style={styles.sessionSection}>
         <div style={styles.sectionHeader}>
