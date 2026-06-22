@@ -13,6 +13,14 @@ const SERVER_INVOKE_COMMANDS = new Set([
   "start_monitor",
   "stop_monitor",
   "request_session_content",
+  "get_workspace_info",
+  "get_ports",
+  "get_pty_pid",
+  "get_shell_ctx",
+  "get_session_metadata",
+  "pty_has_agent_process",
+  "save_image_locally",
+  "push_image_to_remote",
 ]);
 
 const BROWSER_NOOP_COMMANDS = new Set([

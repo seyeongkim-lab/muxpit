@@ -6082,12 +6082,10 @@ version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.17",
- "listeners",
  "log",
  "portable-pty",
  "serde",
  "serde_json",
- "sysinfo",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
@@ -6104,8 +6102,10 @@ name = "wmux-core"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "listeners",
  "serde",
  "serde_json",
+ "sysinfo",
 ]
 
 [[package]]

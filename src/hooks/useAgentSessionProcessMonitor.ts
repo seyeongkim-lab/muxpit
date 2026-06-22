@@ -3,8 +3,8 @@ import { useSettingsStore } from "../stores/settings";
 import { useWorkspaceStore, type LayoutNode, type LeafNode } from "../stores/workspace";
 import { updateAgentProcessMonitorEntry, type AgentProcessMonitorEntry } from "../utils/agentProcessMonitor";
 import type { PtyBackend } from "../utils/ptyBackend";
+import { getPtyBackend } from "../utils/runtimePtyBackend";
 import { parseSshCommandLine } from "../utils/sshConnection";
-import { tauriPtyBackend } from "../utils/tauriPtyBackend";
 
 interface MonitoredLeaf {
   workspaceId: string;
@@ -29,7 +29,7 @@ const monitorKey = (workspaceId: string, leafId: string): string =>
 
 export const useAgentSessionProcessMonitor = (
   intervalMs = 2000,
-  backend: Pick<PtyBackend, "hasAgentProcess"> = tauriPtyBackend,
+  backend: Pick<PtyBackend, "hasAgentProcess"> = getPtyBackend(),
 ) => {
   const entriesRef = useRef(new Map<string, AgentProcessMonitorEntry>());
 

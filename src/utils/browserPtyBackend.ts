@@ -46,9 +46,10 @@ export const browserPtyBackend: PtyBackend = {
   write: (id, data) => getSharedWmuxServerClient().writePty(id, data),
   resize: (id, rows, cols) => getSharedWmuxServerClient().resizePty(id, rows, cols),
   kill: (id) => getSharedWmuxServerClient().killPty(id),
-  getShellContext: (_id): Promise<ShellContext> =>
-    Promise.resolve({ ssh_command: null, cwd: null }),
-  hasAgentProcess: (_id, _agent) => Promise.resolve(false),
+  getShellContext: (id): Promise<ShellContext> =>
+    getSharedWmuxServerClient().invokeCommand<ShellContext>("get_shell_ctx", { id }),
+  hasAgentProcess: (id, agent) =>
+    getSharedWmuxServerClient().invokeCommand<boolean>("pty_has_agent_process", { id, agent }),
   saveImageLocally: (request) =>
     getSharedWmuxServerClient().invokeCommand<string>("save_image_locally", {
       imageBase64: request.imageBase64,

@@ -33,7 +33,7 @@ use std::{
 use tokio::sync::mpsc;
 use tower_http::services::ServeDir;
 use wmux_core::{
-    pasted_image, remote_probe,
+    pasted_image, process, remote_probe,
     ssh_command::{resolve_ssh_command, SshCommand},
     tmux_remote,
     tmux_spawn::build_tmux_attach_argv,
@@ -307,7 +307,7 @@ async fn handle_socket(socket: WebSocket, st: AppState) {
             }) => {
                 send_msg(
                     &out_tx,
-                    handle_invoke(req_id, command, args, &monitors).await,
+                    handle_invoke(req_id, command, args, &ptys, &monitors).await,
                 );
             }
             Err(e) => {
@@ -410,10 +410,43 @@ struct PushImageArgs {
     image_base64: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PtyIdArgs {
+    id: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionMetadataArgs {
+    id: i64,
+    cwd: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentProcessArgs {
+    id: i64,
+    agent: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceInfoArgs {
+    cwd: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortsArgs {
+    pid: u32,
+}
+
 async fn handle_invoke(
     req_id: i64,
     command: String,
     args: Value,
+    ptys: &ServerPtyManager,
     monitors: &ServerMonitorManager,
 ) -> ServerMsg {
     match command.as_str() {
@@ -565,6 +598,121 @@ async fn handle_invoke(
                 message,
             },
         },
+        "get_pty_pid" => match parse_args::<PtyIdArgs>(args) {
+            Ok(parsed) => match ptys.get_child_pid(parsed.id) {
+                Ok(value) => match serde_json::to_value(value) {
+                    Ok(value) => ServerMsg::InvokeResult { req_id, value },
+                    Err(e) => ServerMsg::Error {
+                        req_id: Some(req_id),
+                        message: format!("invoke serialization error: {e}"),
+                    },
+                },
+                Err(message) => ServerMsg::Error {
+                    req_id: Some(req_id),
+                    message,
+                },
+            },
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "get_workspace_info" => match parse_args::<WorkspaceInfoArgs>(args) {
+            Ok(parsed) => {
+                blocking_invoke(req_id, move || {
+                    Ok(process::gather_workspace_info(&parsed.cwd))
+                })
+                .await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "get_ports" => match parse_args::<PortsArgs>(args) {
+            Ok(parsed) => {
+                blocking_invoke(req_id, move || Ok(process::get_listening_ports(parsed.pid))).await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "get_shell_ctx" => match parse_args::<PtyIdArgs>(args) {
+            Ok(parsed) => match ptys.get_child_pid(parsed.id) {
+                Ok(Some(pid)) => {
+                    blocking_invoke(req_id, move || Ok(process::get_shell_context(pid))).await
+                }
+                Ok(None) => match serde_json::to_value(process::ShellContext::default()) {
+                    Ok(value) => ServerMsg::InvokeResult { req_id, value },
+                    Err(e) => ServerMsg::Error {
+                        req_id: Some(req_id),
+                        message: format!("invoke serialization error: {e}"),
+                    },
+                },
+                Err(message) => ServerMsg::Error {
+                    req_id: Some(req_id),
+                    message,
+                },
+            },
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "get_session_metadata" => match parse_args::<SessionMetadataArgs>(args) {
+            Ok(parsed) => match ptys.get_child_pid(parsed.id) {
+                Ok(Some(pid)) => {
+                    let cwd = parsed
+                        .cwd
+                        .or_else(|| ptys.get_spawn_cwd(parsed.id).ok().flatten());
+                    blocking_invoke(req_id, move || {
+                        Ok(process::collect_session_metadata(pid, cwd))
+                    })
+                    .await
+                }
+                Ok(None) => match serde_json::to_value(process::SessionMetadata::default()) {
+                    Ok(value) => ServerMsg::InvokeResult { req_id, value },
+                    Err(e) => ServerMsg::Error {
+                        req_id: Some(req_id),
+                        message: format!("invoke serialization error: {e}"),
+                    },
+                },
+                Err(message) => ServerMsg::Error {
+                    req_id: Some(req_id),
+                    message,
+                },
+            },
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "pty_has_agent_process" => match parse_args::<AgentProcessArgs>(args) {
+            Ok(parsed) => match ptys.get_child_pid(parsed.id) {
+                Ok(Some(pid)) => {
+                    blocking_invoke(req_id, move || {
+                        Ok(process::process_tree_contains_agent(pid, &parsed.agent))
+                    })
+                    .await
+                }
+                Ok(None) => match serde_json::to_value(false) {
+                    Ok(value) => ServerMsg::InvokeResult { req_id, value },
+                    Err(e) => ServerMsg::Error {
+                        req_id: Some(req_id),
+                        message: format!("invoke serialization error: {e}"),
+                    },
+                },
+                Err(message) => ServerMsg::Error {
+                    req_id: Some(req_id),
+                    message,
+                },
+            },
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
         _ => ServerMsg::Error {
             req_id: Some(req_id),
             message: format!("{command} is not implemented by wmux-server"),
@@ -632,6 +780,8 @@ where
 struct ServerPtyInstance {
     writer: Box<dyn std::io::Write + Send>,
     _master: Box<dyn MasterPty + Send>,
+    child_pid: Option<u32>,
+    cwd: Option<String>,
 }
 
 struct ServerPtyManager {
@@ -692,12 +842,14 @@ impl ServerPtyManager {
             None => self.root.as_ref().clone(),
         };
         let child_cwd = child_process_cwd(&cwd);
+        let instance_cwd = child_cwd.to_string_lossy().into_owned();
         cmd.cwd(child_cwd.as_os_str());
 
         let mut child = pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| format!("failed to spawn shell: {e}"))?;
+        let child_pid = child.process_id();
 
         let id = {
             let mut next = self.next_id.lock().unwrap();
@@ -720,6 +872,8 @@ impl ServerPtyManager {
             ServerPtyInstance {
                 writer,
                 _master: pair.master,
+                child_pid,
+                cwd: Some(instance_cwd),
             },
         );
 
@@ -808,6 +962,26 @@ impl ServerPtyManager {
             .remove(&id)
             .ok_or_else(|| format!("PTY {id} not found"))?;
         Ok(())
+    }
+
+    fn get_child_pid(&self, id: i64) -> Result<Option<u32>, String> {
+        let id = checked_pty_id(id)?;
+        Ok(self
+            .instances
+            .lock()
+            .unwrap()
+            .get(&id)
+            .and_then(|instance| instance.child_pid))
+    }
+
+    fn get_spawn_cwd(&self, id: i64) -> Result<Option<String>, String> {
+        let id = checked_pty_id(id)?;
+        Ok(self
+            .instances
+            .lock()
+            .unwrap()
+            .get(&id)
+            .and_then(|instance| instance.cwd.clone()))
     }
 }
 
