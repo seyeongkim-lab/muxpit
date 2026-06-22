@@ -4,6 +4,7 @@ import { isTauriRuntime } from "./runtime.ts";
 import { getSharedWmuxServerClient } from "./wmuxServerClient.ts";
 
 const SERVER_INVOKE_COMMANDS = new Set([
+  "get_server_info",
   "check_remote_tmux",
   "check_remote_clis",
   "tmux_list_sessions",

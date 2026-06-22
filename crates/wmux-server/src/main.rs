@@ -100,6 +100,17 @@ fn default_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
+/// This server host's name, shown as the "local" host label in the browser UI.
+fn server_hostname() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("HOSTNAME").ok().filter(|s| !s.is_empty()))
+        .or_else(|| std::env::var("COMPUTERNAME").ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "server".to_string())
+}
+
 fn token_ok(q: &HashMap<String, String>, st: &AppState) -> bool {
     q.get("token").map(String::as_str) == Some(st.token.as_str())
 }
@@ -464,6 +475,14 @@ async fn handle_invoke(
     monitors: &ServerMonitorManager,
 ) -> ServerMsg {
     match command.as_str() {
+        "get_server_info" => ServerMsg::InvokeResult {
+            req_id,
+            value: serde_json::json!({
+                "hostname": server_hostname(),
+                "home": std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default(),
+                "user": std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default(),
+            }),
+        },
         "check_remote_tmux" => match ssh_from_value::<SshArgs>(args) {
             Ok(ssh) => {
                 blocking_invoke(req_id, move || Ok(remote_probe::check_remote_tmux(&ssh))).await

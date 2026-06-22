@@ -170,6 +170,15 @@ export const App = () => {
   const monitorCommandRef = useRef<string | null>(null);
   const activeWsId = activeWs?.id;
 
+  // The wmux-server host's own name, used to label the default "local" monitor.
+  const serverHostnameRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isWmuxServerRuntime()) return;
+    appInvoke<{ hostname?: string }>("get_server_info")
+      .then((info) => { if (info?.hostname) serverHostnameRef.current = info.hostname; })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!activeWsId) {
       // No active workspace — stop monitor
@@ -261,7 +270,7 @@ export const App = () => {
       // monitor + AI panel by default, without requiring an SSH host. An empty
       // SshConnection tells the server to run these commands on its own host.
       if (hasAnyPty && isWmuxServerRuntime()) {
-        const localTarget = window.location.hostname || "server";
+        const localTarget = serverHostnameRef.current || window.location.hostname || "server";
         if (monitorTargetRef.current !== localTarget) {
           monitorTargetRef.current = localTarget;
           monitorCommandRef.current = "";
