@@ -831,7 +831,61 @@ fn ssh_from_parts(
     ssh_connection: Option<SshCommand>,
 ) -> Result<SshCommand, String> {
     resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .map(ssh_with_multiplexing)
         .ok_or_else(|| "Invalid SSH command".to_string())
+}
+
+/// Shared directory for SSH ControlMaster sockets, created `0700`. The ssh
+/// client always runs on this (Unix) host, so the socket path is local and
+/// short regardless of which host we connect to.
+fn ssh_control_dir() -> &'static Path {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let user = std::env::var("USER").unwrap_or_else(|_| "wmux".to_string());
+        let user: String = user
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .collect();
+        let base = if Path::new("/tmp").is_dir() {
+            PathBuf::from("/tmp")
+        } else {
+            std::env::temp_dir()
+        };
+        let dir = base.join(format!("wmux-ssh-{user}"));
+        let _ = std::fs::create_dir_all(&dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        dir
+    })
+}
+
+/// Add SSH connection multiplexing so every connection wmux opens to a host —
+/// the long-lived tmux attach plus all the short cwd/readDir/download/monitor
+/// probes — shares one TCP+auth channel instead of a fresh handshake each time.
+/// `%C` keys the socket by host/port/user, so the attach (master) and the
+/// probes (which reuse it) converge on the same path. Server-only: the desktop
+/// (Windows) build never runs this, and Windows OpenSSH lacks ControlMaster.
+fn ssh_with_multiplexing(mut ssh: SshCommand) -> SshCommand {
+    if ssh.is_local()
+        || ssh
+            .options
+            .iter()
+            .any(|o| o.starts_with("ControlPath=") || o.starts_with("ControlMaster="))
+    {
+        return ssh;
+    }
+    let control_path = ssh_control_dir().join("cm-%C");
+    ssh.options.push("-o".to_string());
+    ssh.options.push("ControlMaster=auto".to_string());
+    ssh.options.push("-o".to_string());
+    ssh.options
+        .push(format!("ControlPath={}", control_path.to_string_lossy()));
+    ssh.options.push("-o".to_string());
+    ssh.options.push("ControlPersist=120".to_string());
+    ssh
 }
 
 async fn blocking_invoke<T, F>(req_id: i64, work: F) -> ServerMsg
@@ -926,6 +980,9 @@ impl ServerPtyManager {
             })
             .map_err(|e| format!("failed to open PTY: {e}"))?;
 
+        // Multiplex the attach connection so it becomes the shared master that
+        // the cwd/readDir/monitor probes reuse instead of re-handshaking.
+        let ssh_connection = ssh_connection.map(ssh_with_multiplexing);
         let command_argv = match tmux_session {
             Some(session_name) => Some(build_tmux_attach_argv(
                 command.as_deref(),
@@ -1355,7 +1412,8 @@ async fn download(
     let remote_ssh = q
         .get("ssh")
         .and_then(|raw| serde_json::from_str::<SshCommand>(raw).ok())
-        .filter(|ssh| !ssh.is_local());
+        .filter(|ssh| !ssh.is_local())
+        .map(ssh_with_multiplexing);
 
     // std::fs + zip + ssh are blocking; keep them off the async runtime.
     let result = tokio::task::spawn_blocking(move || match remote_ssh {
