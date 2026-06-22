@@ -400,6 +400,14 @@ struct TmuxKillArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct TmuxPaneCwdArgs {
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    session: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct StartMonitorArgs {
     monitor_id: String,
     ssh_command: Option<String>,
@@ -548,6 +556,21 @@ async fn handle_invoke(
         }) {
             Ok((ssh, session)) => {
                 blocking_invoke(req_id, move || tmux_remote::kill_session(&ssh, &session)).await
+            }
+            Err(message) => ServerMsg::Error {
+                req_id: Some(req_id),
+                message,
+            },
+        },
+        "tmux_pane_cwd" => match parse_args::<TmuxPaneCwdArgs>(args).and_then(|parsed| {
+            ssh_from_parts(parsed.ssh_command, parsed.ssh_connection)
+                .map(|ssh| (ssh, parsed.session))
+        }) {
+            Ok((ssh, session)) => {
+                blocking_invoke(req_id, move || {
+                    tmux_remote::pane_current_path(&ssh, &session)
+                })
+                .await
             }
             Err(message) => ServerMsg::Error {
                 req_id: Some(req_id),

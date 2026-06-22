@@ -128,6 +128,30 @@ pub fn new_session(ssh: &SshCommand, name: Option<&str>) -> Result<String, Strin
     Ok(id)
 }
 
+/// Current working directory of the pane shown by the client attached to
+/// `session`. tmux consumes OSC 7 from the inner shell, so a plain `tmux attach`
+/// never relays cwd to the terminal surface; the file browser polls this
+/// instead. Resolves through the attached client tty so it follows
+/// switch-client; falls back to the session's own active pane.
+pub fn pane_current_path(ssh: &SshCommand, session: &str) -> Result<Option<String>, String> {
+    let s = safe_session_token(session).ok_or_else(|| "invalid session".to_string())?;
+    let quoted = quote_posix_shell_arg(&s);
+    let remote = format!(
+        "tty=$(tmux list-clients -t {q} -F '#{{client_tty}}' 2>/dev/null | head -n1); \
+         if [ -n \"$tty\" ]; then tmux display-message -p -c \"$tty\" '#{{pane_current_path}}'; \
+         else tmux display-message -p -t {q} '#{{pane_current_path}}'; fi",
+        q = quoted
+    );
+    let mut cmd = build_ssh(ssh);
+    cmd.arg(remote);
+    let out = cmd.output().map_err(|e| format!("ssh exec: {e}"))?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(if path.is_empty() { None } else { Some(path) })
+}
+
 pub fn kill_session(ssh: &SshCommand, session: &str) -> Result<(), String> {
     let s = safe_session_token(session).ok_or_else(|| "invalid session".to_string())?;
     let mut cmd = build_ssh(ssh);

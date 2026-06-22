@@ -11,6 +11,7 @@ const SERVER_INVOKE_COMMANDS = new Set([
   "tmux_switch_client",
   "tmux_new_session",
   "tmux_kill_session",
+  "tmux_pane_cwd",
   "start_monitor",
   "stop_monitor",
   "request_session_content",

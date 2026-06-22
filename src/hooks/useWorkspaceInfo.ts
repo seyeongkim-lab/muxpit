@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
 import { appInvoke } from "../utils/appBridge";
+import { isWmuxServerRuntime } from "../utils/runtime";
 
 const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
   if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") && node.id === id) return node;
@@ -223,6 +224,53 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
       clearInterval(timer);
     };
   }, [workspaces.length, setInfo, intervalMs]);
+};
+
+// tmux attach consumes the inner shell's OSC 7, so the frontend cwd parser
+// never sees `cd` inside a tmux session. Poll the active workspace's tmux pane
+// path instead and patch it into the info store so the browser file panel
+// follows it. Browser-only: the desktop app has no file panel.
+export const useTmuxCwdPoller = (intervalMs = 3000) => {
+  const activeId = useWorkspaceStore((s) => s.activeId);
+
+  useEffect(() => {
+    if (!isWmuxServerRuntime() || !activeId) return;
+    let active = true;
+
+    const poll = async () => {
+      const state = useWorkspaceStore.getState();
+      const wsId = state.activeId;
+      if (!wsId) return;
+      const workspace = state.workspaces.find((w) => w.id === wsId);
+      if (!workspace) return;
+      const leaf = collectTerminalLeaves(workspace.layout).find(
+        (candidate) => candidate.tmuxSession && candidate.ptyId,
+      );
+      if (!leaf?.tmuxSession) return;
+
+      try {
+        const cwd = await appInvoke<string | null>("tmux_pane_cwd", {
+          session: leaf.tmuxSession,
+          sshCommand: leaf.sshCommand ?? null,
+          sshConnection:
+            leaf.sshConnection ??
+            (leaf.sshCommand ? null : { program: "", options: [], target: "" }),
+        });
+        if (active && cwd) {
+          useWorkspaceInfoStore.getState().patchInfo(wsId, { cwd });
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    };
+
+    poll();
+    const timer = setInterval(poll, intervalMs);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [activeId, intervalMs]);
 };
 
 // Separate slow poller for SSH context caching (for session restore)

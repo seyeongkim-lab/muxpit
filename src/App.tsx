@@ -23,7 +23,7 @@ import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegistry";
-import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspaceInfo";
+import { useWorkspaceInfoPoller, useSshContextPoller, useTmuxCwdPoller } from "./hooks/useWorkspaceInfo";
 import { useAgentSessionProcessMonitor } from "./hooks/useAgentSessionProcessMonitor";
 import { applyThemeVars, getResolvedTheme } from "./themes";
 import type { LayoutNode, LeafNode } from "./stores/workspace";
@@ -163,6 +163,8 @@ export const App = () => {
   useWorkspaceInfoPoller(5000);
   // SSH context caching every 30 seconds (for session restore)
   useSshContextPoller(30000);
+  // Browser file panel follows the active tmux session's cwd (OSC 7 is eaten by tmux)
+  useTmuxCwdPoller(3000);
   // Codex has no native SessionEnd hook, so clear local resume bindings when
   // the Codex process disappears from the pane's PTY process tree.
   useAgentSessionProcessMonitor(2000);
