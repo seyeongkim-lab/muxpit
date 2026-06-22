@@ -179,6 +179,22 @@ fn option_takes_value(option: &str) -> bool {
 }
 
 impl SshCommand {
+    /// A sentinel that runs commands directly on the local host instead of over
+    /// ssh. Used by wmux-server to operate on its own host (the browser
+    /// runtime's "local"). Detected by an empty `program`.
+    pub fn local() -> Self {
+        SshCommand {
+            program: String::new(),
+            options: Vec::new(),
+            target: String::new(),
+            tty_mode: None,
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.program.is_empty()
+    }
+
     pub fn argv_with_extra_options(
         &self,
         extra_options: &[&str],
@@ -196,6 +212,13 @@ impl SshCommand {
     }
 
     pub fn to_command_with_extra_options(&self, extra_options: &[&str]) -> Command {
+        if self.is_local() {
+            // Local execution: callers append the remote command as a single
+            // shell string, so run it via `sh -c <string>` on this host.
+            let mut cmd = silent_command("sh");
+            cmd.arg("-c");
+            return cmd;
+        }
         let mut cmd = silent_command(&self.program);
         cmd.args(&self.options);
         cmd.args(extra_options);

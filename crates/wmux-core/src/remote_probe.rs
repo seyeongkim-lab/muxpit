@@ -3,22 +3,37 @@ use crate::ssh_command::{quote_posix_shell_arg, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
 
-pub fn check_remote_tmux(ssh: &SshCommand) -> Option<String> {
-    let mut cmd = silent_command(&ssh.program);
-    for opt in &ssh.options {
-        cmd.arg(opt);
-    }
-    cmd.args([
-        "-o",
-        "ConnectTimeout=3",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-    ]);
-    cmd.arg(&ssh.target);
-    cmd.arg("tmux -V 2>/dev/null");
+/// Build the base command for a one-shot probe. The caller appends the remote
+/// command as a single shell-string arg. For a local `SshCommand` this runs
+/// `sh -c <string>` on this host; otherwise `ssh <opts> <target> <string>`.
+fn probe_base(ssh: &SshCommand, connect_timeout: &str) -> std::process::Command {
+    let mut cmd = if ssh.is_local() {
+        let mut c = silent_command("sh");
+        c.arg("-c");
+        c
+    } else {
+        let mut c = silent_command(&ssh.program);
+        for opt in &ssh.options {
+            c.arg(opt);
+        }
+        c.args([
+            "-o",
+            connect_timeout,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+        ]);
+        c.arg(&ssh.target);
+        c
+    };
     cmd.stderr(Stdio::null());
+    cmd
+}
+
+pub fn check_remote_tmux(ssh: &SshCommand) -> Option<String> {
+    let mut cmd = probe_base(ssh, "ConnectTimeout=3");
+    cmd.arg("tmux -V 2>/dev/null");
 
     match cmd.output() {
         Ok(o) if o.status.success() => {
@@ -52,25 +67,12 @@ pub fn check_remote_clis(
         return Ok(result);
     }
 
-    let mut cmd = silent_command(&ssh.program);
-    for opt in &ssh.options {
-        cmd.arg(opt);
-    }
-    cmd.args([
-        "-o",
-        "ConnectTimeout=10",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-    ]);
-    cmd.arg(&ssh.target);
+    let mut cmd = probe_base(ssh, "ConnectTimeout=10");
     let remote = format!(
         "for n in {}; do command -v \"$n\" >/dev/null 2>&1 && echo \"$n\"; done",
         safe_names.join(" ")
     );
     cmd.arg(login_shell_remote_command(&remote));
-    cmd.stderr(Stdio::null());
 
     let output = cmd
         .output()

@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
-use wmux_core::command::apply_no_window;
+use wmux_core::command::{apply_no_window, silent_command};
 use wmux_core::monitor::{MonitorData, SessionContentEvent};
 use wmux_core::remote_monitor::{
     build_claude_fetch_command, build_claude_script, build_collect_script, parse_claude_sessions,
@@ -139,19 +139,25 @@ fn run_persistent_monitor(
             return;
         }
 
-        let mut cmd = ssh.to_command_with_extra_options(&[
-            "-T",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=5",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "ServerAliveInterval=10",
-            "-o",
-            "ServerAliveCountMax=3",
-        ]);
+        // Local host: a plain `sh` reading the collect script from stdin, same
+        // as the remote login shell would. Remote: the persistent ssh channel.
+        let mut cmd = if ssh.is_local() {
+            silent_command("sh")
+        } else {
+            ssh.to_command_with_extra_options(&[
+                "-T",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=5",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "ServerAliveInterval=10",
+                "-o",
+                "ServerAliveCountMax=3",
+            ])
+        };
         apply_no_window(&mut cmd);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
