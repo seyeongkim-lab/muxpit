@@ -455,6 +455,17 @@ export const useTerminalSession = ({
 
     setPtyId(workspaceId, leafId, ptyId);
 
+    // The spawn size is captured before the first fit settles. Over a WS backend
+    // the spawn round-trip can outlast that fit, so the fit's resize event fires
+    // while `ptyId` is still undefined and is lost — leaving the pty (and tmux)
+    // stuck at the pre-fit size. Re-fit once the pty exists and push the current
+    // size explicitly (the fit alone emits onResize only when the size changes).
+    requestAnimationFrame(() => {
+      if (disposedRef.current) return;
+      surface.fit();
+      ptyBackend.resize(ptyId, Math.max(surface.rows, 1), Math.max(surface.cols, 1)).catch(() => {});
+    });
+
     if (cloneFromPtyId && !spawnCommand && !spawnPlan.postSpawnInput) {
       try {
         const ctx = await ptyBackend.getShellContext(cloneFromPtyId);
