@@ -150,7 +150,12 @@ export const ServerFilesPanel = ({ cwd }: { cwd?: string | null }) => {
     );
   };
 
-  const root = rootPath ? dirs.get(rootPath) : dirs.get("");
+  // Before the root load resolves (or when it errors), `rootPath` is still null
+  // but `dirs` is keyed by the requested path — so render off whichever key is
+  // live. Without this the panel falls back to `dirs.get("")`, finds nothing for
+  // a non-root cwd, and shows a blank screen instead of the loading/error state.
+  const activeRootKey = rootPath ?? requestedRoot;
+  const root = dirs.get(activeRootKey);
 
   return (
     <div style={styles.section}>
@@ -177,7 +182,10 @@ export const ServerFilesPanel = ({ cwd }: { cwd?: string | null }) => {
           {!token && <div style={styles.errorBlock}>missing token</div>}
           {token && root?.loading && <div style={styles.status}>loading</div>}
           {token && root?.error && <div style={styles.errorBlock}>{root.error}</div>}
-          {token && root?.entries.map((entry) => renderEntry(rootPath ?? "", entry, 0))}
+          {token && root && !root.loading && !root.error && root.entries.length === 0 && (
+            <div style={styles.status}>empty</div>
+          )}
+          {token && root?.entries.map((entry) => renderEntry(activeRootKey, entry, 0))}
         </div>
       )}
     </div>
