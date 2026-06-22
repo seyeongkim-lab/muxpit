@@ -230,47 +230,56 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
 // never sees `cd` inside a tmux session. Poll the active workspace's tmux pane
 // path instead and patch it into the info store so the browser file panel
 // follows it. Browser-only: the desktop app has no file panel.
-export const useTmuxCwdPoller = (intervalMs = 3000) => {
+//
+// Self-scheduling (next tick only after the previous resolves) so a slow probe
+// can't pile up overlapping SSH connections; patches only when the path
+// actually changes so an unchanged cwd doesn't re-render the sidebar every
+// tick; and a remote (SSH) leaf polls less often than a local one — each remote
+// probe is a full SSH handshake and contends with terminal IO over the link.
+export const useTmuxCwdPoller = (localMs = 3000, remoteMs = 7000) => {
   const activeId = useWorkspaceStore((s) => s.activeId);
 
   useEffect(() => {
     if (!isWmuxServerRuntime() || !activeId) return;
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const poll = async () => {
-      const state = useWorkspaceStore.getState();
-      const wsId = state.activeId;
-      if (!wsId) return;
-      const workspace = state.workspaces.find((w) => w.id === wsId);
-      if (!workspace) return;
-      const leaf = collectTerminalLeaves(workspace.layout).find(
-        (candidate) => candidate.tmuxSession && candidate.ptyId,
-      );
-      if (!leaf?.tmuxSession) return;
-
+    const tick = async () => {
+      let delay = localMs;
       try {
-        const cwd = await appInvoke<string | null>("tmux_pane_cwd", {
-          session: leaf.tmuxSession,
-          sshCommand: leaf.sshCommand ?? null,
-          sshConnection:
-            leaf.sshConnection ??
-            (leaf.sshCommand ? null : { program: "", options: [], target: "" }),
-        });
-        if (active && cwd) {
-          useWorkspaceInfoStore.getState().patchInfo(wsId, { cwd });
+        const state = useWorkspaceStore.getState();
+        const wsId = state.activeId;
+        const workspace = wsId ? state.workspaces.find((w) => w.id === wsId) : undefined;
+        const leaf = workspace
+          ? collectTerminalLeaves(workspace.layout).find((c) => c.tmuxSession && c.ptyId)
+          : undefined;
+        if (wsId && leaf?.tmuxSession) {
+          const remote = !!leaf.sshConnection?.program || !!(leaf.sshCommand && leaf.sshCommand.trim());
+          delay = remote ? remoteMs : localMs;
+          const cwd = await appInvoke<string | null>("tmux_pane_cwd", {
+            session: leaf.tmuxSession,
+            sshCommand: leaf.sshCommand ?? null,
+            sshConnection:
+              leaf.sshConnection ??
+              (leaf.sshCommand ? null : { program: "", options: [], target: "" }),
+          });
+          if (active && cwd) {
+            const prev = useWorkspaceInfoStore.getState().info[wsId]?.cwd;
+            if (cwd !== prev) useWorkspaceInfoStore.getState().patchInfo(wsId, { cwd });
+          }
         }
       } catch {
         // Silently ignore polling errors
       }
+      if (active) timer = setTimeout(tick, delay);
     };
 
-    poll();
-    const timer = setInterval(poll, intervalMs);
+    timer = setTimeout(tick, 0);
     return () => {
       active = false;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
-  }, [activeId, intervalMs]);
+  }, [activeId, localMs, remoteMs]);
 };
 
 // Separate slow poller for SSH context caching (for session restore)

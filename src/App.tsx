@@ -164,7 +164,7 @@ export const App = () => {
   // SSH context caching every 30 seconds (for session restore)
   useSshContextPoller(30000);
   // Browser file panel follows the active tmux session's cwd (OSC 7 is eaten by tmux)
-  useTmuxCwdPoller(3000);
+  useTmuxCwdPoller();
   // Codex has no native SessionEnd hook, so clear local resume bindings when
   // the Codex process disappears from the pane's PTY process tree.
   useAgentSessionProcessMonitor(2000);
