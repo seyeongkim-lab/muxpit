@@ -1,7 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
-import { isTauriRuntime } from "./runtime";
-import { getSharedWmuxServerClient } from "./wmuxServerClient";
+import { isTauriRuntime } from "./runtime.ts";
+import { getSharedWmuxServerClient } from "./wmuxServerClient.ts";
 
 const SERVER_INVOKE_COMMANDS = new Set([
   "check_remote_tmux",

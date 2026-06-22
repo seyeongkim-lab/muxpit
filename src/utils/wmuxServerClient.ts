@@ -13,11 +13,13 @@ export interface ServerDirResponse {
 export interface ServerPtyOutput {
   ptyId: number;
   data: string;
+  surfaceId?: string | null;
 }
 
 export interface ServerPtyExit {
   ptyId: number;
   code: number | null;
+  surfaceId?: string | null;
 }
 
 type PendingReadDir = {
@@ -40,8 +42,8 @@ type EventHandler = (payload: unknown) => void;
 type ServerMessage =
   | { t: "dir"; reqId: number; path: string; entries: ServerDirEntry[] }
   | { t: "spawned"; id: number; ptyId: number }
-  | { t: "output"; ptyId: number; data: string }
-  | { t: "exit"; ptyId: number; code: number | null }
+  | { t: "output"; ptyId: number; data: string; surfaceId?: string | null }
+  | { t: "exit"; ptyId: number; code: number | null; surfaceId?: string | null }
   | { t: "invokeResult"; reqId: number; value: unknown }
   | { t: "event"; event: string; payload: unknown }
   | { t: "error"; reqId?: number | null; message: string };
@@ -272,12 +274,12 @@ export class WmuxServerClient {
     }
 
     if (msg.t === "output") {
-      for (const handler of this.outputHandlers) handler({ ptyId: msg.ptyId, data: msg.data });
+      for (const handler of this.outputHandlers) handler({ ptyId: msg.ptyId, data: msg.data, surfaceId: msg.surfaceId ?? null });
       return;
     }
 
     if (msg.t === "exit") {
-      for (const handler of this.exitHandlers) handler({ ptyId: msg.ptyId, code: msg.code });
+      for (const handler of this.exitHandlers) handler({ ptyId: msg.ptyId, code: msg.code, surfaceId: msg.surfaceId ?? null });
       return;
     }
 

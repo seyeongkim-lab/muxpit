@@ -174,10 +174,12 @@ pub(crate) enum ServerMsg {
     Output {
         pty_id: u32,
         data: String,
+        surface_id: Option<String>,
     },
     Exit {
         pty_id: u32,
         code: Option<i32>,
+        surface_id: Option<String>,
     },
     Dir {
         req_id: i64,
@@ -918,6 +920,7 @@ impl ServerPtyManager {
             .master
             .take_writer()
             .map_err(|e| format!("failed to take writer: {e}"))?;
+        let surface_id_for_events = surface_id.clone();
 
         self.instances.lock().unwrap().insert(
             id,
@@ -942,6 +945,7 @@ impl ServerPtyManager {
         );
 
         let output_tx = self.tx.clone();
+        let output_surface_id = surface_id_for_events.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
             loop {
@@ -952,6 +956,7 @@ impl ServerPtyManager {
                         ServerMsg::Output {
                             pty_id: id,
                             data: String::from_utf8_lossy(&buf[..n]).into_owned(),
+                            surface_id: output_surface_id.clone(),
                         },
                     ),
                     Err(_) => break,
@@ -962,14 +967,23 @@ impl ServerPtyManager {
                 ServerMsg::Exit {
                     pty_id: id,
                     code: None,
+                    surface_id: output_surface_id,
                 },
             );
         });
 
         let exit_tx = self.tx.clone();
+        let exit_surface_id = surface_id_for_events;
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|s| s.exit_code() as i32);
-            send_msg(&exit_tx, ServerMsg::Exit { pty_id: id, code });
+            send_msg(
+                &exit_tx,
+                ServerMsg::Exit {
+                    pty_id: id,
+                    code,
+                    surface_id: exit_surface_id,
+                },
+            );
         });
 
         Ok(())

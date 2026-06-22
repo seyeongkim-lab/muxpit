@@ -6,19 +6,19 @@ import type {
   SpawnPtyRequest,
   SpawnTmuxCcRequest,
 } from "./ptyBackend";
-import { getServerToken, getSharedWmuxServerClient } from "./wmuxServerClient";
+import { getServerToken, getSharedWmuxServerClient } from "./wmuxServerClient.ts";
 
 export const browserPtyBackend: PtyBackend = {
   onOutput: async (handler: (payload: PtyOutput) => void) => {
     const client = getSharedWmuxServerClient();
     return client.onOutput((payload) => {
-      handler({ id: payload.ptyId, data: payload.data });
+      handler({ id: payload.ptyId, data: payload.data, surfaceId: payload.surfaceId ?? null });
     });
   },
   onExit: async (handler: (payload: PtyExit) => void) => {
     const client = getSharedWmuxServerClient();
     return client.onExit((payload) => {
-      handler({ id: payload.ptyId, code: payload.code });
+      handler({ id: payload.ptyId, code: payload.code, surfaceId: payload.surfaceId ?? null });
     });
   },
   spawn: (request: SpawnPtyRequest) =>
