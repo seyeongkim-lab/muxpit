@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import {
   buildDownloadUrl,
   getServerToken,
@@ -37,7 +37,11 @@ interface ServerFilesPanelProps {
   sshCommand?: string | null;
 }
 
-export const ServerFilesPanel = ({ cwd, sshConnection, sshCommand }: ServerFilesPanelProps) => {
+// Memoized: the sidebar re-renders on monitor/info ticks, but the file tree
+// only needs to re-render when its cwd or SSH target changes. Its props are
+// referentially stable (a primitive cwd string and the leaf's own objects), so
+// a shallow compare keeps the tree off the main thread during sidebar churn.
+const ServerFilesPanelImpl = ({ cwd, sshConnection, sshCommand }: ServerFilesPanelProps) => {
   const token = getServerToken();
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [dirs, setDirs] = useState<Map<string, DirState>>(() => new Map());
@@ -210,6 +214,8 @@ export const ServerFilesPanel = ({ cwd, sshConnection, sshCommand }: ServerFiles
     </div>
   );
 };
+
+export const ServerFilesPanel = memo(ServerFilesPanelImpl);
 
 const styles: Record<string, React.CSSProperties> = {
   section: {

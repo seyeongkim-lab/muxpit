@@ -54,18 +54,19 @@ fn run(ssh: &SshCommand, remote_script: &str) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
-/// List `path` on the remote host. Portable POSIX `sh` (Linux + macOS): emits
-/// the canonical path first, then one `type<TAB>size<TAB>name` line per entry.
+/// List `path` on the remote host. Emits the canonical path first, then one
+/// `type<TAB>size<TAB>name` line per entry. A single `ls -lLA | awk` instead of
+/// a `stat`/`wc` per file: the latter forks once per entry, which on a large
+/// directory is hundreds of ms of remote CPU on the SSH connection the terminal
+/// shares — enough to stutter the terminal while the panel loads.
 pub fn list_dir(ssh: &SshCommand, path: &str) -> Result<RemoteDir, String> {
     let p = quote_posix_shell_arg(path);
     let script = format!(
         "cd -- {p} 2>/dev/null || exit 3; pwd; \
-         for e in * .*; do \
-           [ \"$e\" = . ] && continue; [ \"$e\" = .. ] && continue; \
-           [ -e \"$e\" ] || [ -L \"$e\" ] || continue; \
-           if [ -d \"$e\" ]; then printf 'd\\t0\\t%s\\n' \"$e\"; \
-           else s=$(wc -c < \"$e\" 2>/dev/null); [ -n \"$s\" ] || s=0; printf 'f\\t%s\\t%s\\n' \"$s\" \"$e\"; fi; \
-         done"
+         ls -lLA 2>/dev/null | awk 'NR>1 {{ \
+           t=(substr($1,1,1)==\"d\")?\"d\":\"f\"; name=$0; \
+           sub(/^([^ ]+ +){{8}}/,\"\",name); \
+           if (name != \"\") printf \"%s\\t%s\\t%s\\n\", t, $5, name }}'"
     );
     let stdout = run(ssh, &script)?;
     let text = String::from_utf8_lossy(&stdout);
