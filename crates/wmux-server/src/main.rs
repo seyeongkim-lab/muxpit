@@ -19,7 +19,7 @@ use axum::{
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use monitor::ServerMonitorManager;
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -780,8 +780,15 @@ where
 struct ServerPtyInstance {
     writer: Box<dyn std::io::Write + Send>,
     _master: Box<dyn MasterPty + Send>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
     child_pid: Option<u32>,
     cwd: Option<String>,
+}
+
+impl Drop for ServerPtyInstance {
+    fn drop(&mut self) {
+        let _ = self.killer.kill();
+    }
 }
 
 struct ServerPtyManager {
@@ -849,6 +856,7 @@ impl ServerPtyManager {
             .slave
             .spawn_command(cmd)
             .map_err(|e| format!("failed to spawn shell: {e}"))?;
+        let killer = child.clone_killer();
         let child_pid = child.process_id();
 
         let id = {
@@ -872,6 +880,7 @@ impl ServerPtyManager {
             ServerPtyInstance {
                 writer,
                 _master: pair.master,
+                killer,
                 child_pid,
                 cwd: Some(instance_cwd),
             },
