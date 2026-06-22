@@ -179,7 +179,7 @@ export const SidebarMonitor = ({ monitorId, sshTarget, sshCommand, sshConnection
   };
 
   return (
-    <div className="wmux-card" style={{ ...styles.container, height }}>
+    <div className="wmux-card" style={{ ...styles.container, height: `min(${height}px, 34vh)` }}>
       <div style={styles.resizeHandle} onMouseDown={onResizeStart} title="Drag to resize" />
       {/* Header */}
       <div style={styles.header}>

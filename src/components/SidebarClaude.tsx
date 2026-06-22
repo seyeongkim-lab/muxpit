@@ -89,7 +89,7 @@ export const SidebarClaude = ({ sessions, sshTarget: _sshTarget, onViewSession, 
   if (sessions.length === 0) return null;
 
   return (
-    <div className="wmux-card" style={{ ...styles.container, height: collapsed ? undefined : height }}>
+    <div className="wmux-card" style={{ ...styles.container, height: collapsed ? undefined : `min(${height}px, 20vh)` }}>
       <div style={styles.resizeHandle} onMouseDown={onResizeStart} title="Drag to resize" />
       <div style={styles.header} onClick={() => setCollapsed((c) => !c)}>
         <span style={styles.headerText}>Claude Sessions</span>

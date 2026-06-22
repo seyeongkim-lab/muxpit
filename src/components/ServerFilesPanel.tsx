@@ -227,8 +227,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
   },
   tree: {
-    maxHeight: "24vh",
-    minHeight: 88,
+    maxHeight: "18vh",
+    minHeight: 64,
     overflow: "auto",
     padding: "0 0 6px",
   },

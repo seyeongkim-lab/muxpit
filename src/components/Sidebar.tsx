@@ -1,4 +1,4 @@
-import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
+import { useWorkspaceStore, collectLeafIds, type AiKind, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
@@ -8,9 +8,11 @@ import { useHistoryStore } from "../stores/history";
 import { destroyAllTerminals } from "./terminalRegistry";
 import { SidebarMonitor } from "./SidebarMonitor";
 import { SidebarClaude } from "./SidebarClaude";
+import { SidebarAiPanel } from "./SidebarAiPanel";
 import { SidebarTmuxSessions } from "./SidebarTmuxSessions";
 import { ServerFilesPanel } from "./ServerFilesPanel";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
+import { useAiCliStore } from "../stores/aiCli";
 import { useState, useRef } from "react";
 import type { SshConnection } from "../utils/sshConnection";
 import { isWmuxServerRuntime } from "../utils/runtime";
@@ -31,6 +33,7 @@ interface SidebarProps {
   onCloseMonitor?: () => void;
   onViewClaudeSession?: (sshTarget: string, project: string, projectPath: string | undefined, sessionId: string, sshConnection?: SshConnection) => void;
   onResumeClaudeSession?: (sshCommand: string, projectPath: string, sessionId: string, sshConnection?: SshConnection) => void;
+  onOpenAiPane?: (kind: AiKind) => void;
   gridView?: boolean;
   onToggleGridView?: () => void;
 }
@@ -92,7 +95,7 @@ const formatMemory = (bytes: number): string => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
 };
 
-export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
+export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, onOpenAiPane, gridView, onToggleGridView }: SidebarProps) => {
   // Granular selectors so the sidebar only re-renders on the slices it shows,
   // not on every workspace-store mutation. Actions are stable refs in zustand.
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -118,6 +121,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
+  const aiAvailable = useAiCliStore((s) => monitor ? s.availableByHost[monitor.sshTarget] : undefined);
+  const aiProbing = useAiCliStore((s) => monitor ? s.probing.has(monitor.sshTarget) : false);
   const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
   const totalUnread = notifications.filter((n) => !n.read).length;
   const [editName, setEditName] = useState("");
@@ -260,8 +265,6 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
           </button>
         </div>
       )}
-
-      {isWmuxServerRuntime() && <ServerFilesPanel />}
 
       <div style={styles.sessionSection}>
         <div style={styles.sectionHeader}>
@@ -441,6 +444,15 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
         />
       )}
 
+      {monitor && (
+        <SidebarAiPanel
+          sshTarget={monitor.sshTarget}
+          available={aiAvailable}
+          probing={aiProbing}
+          onOpenAiPane={onOpenAiPane}
+        />
+      )}
+
       {monitor && onCloseMonitor && (
         <SidebarMonitor
           monitorId={monitor.monitorId}
@@ -450,6 +462,8 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
           onClose={onCloseMonitor}
         />
       )}
+
+      {isWmuxServerRuntime() && <ServerFilesPanel />}
 
       <div style={styles.footer}>
         <span style={styles.footerText}>{workspaces.length} sessions</span>
@@ -473,6 +487,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     userSelect: "none",
+    overflowY: "auto",
+    overflowX: "hidden",
   },
   header: {
     display: "flex",
@@ -501,7 +517,7 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
   },
   sessionSection: {
-    flex: 1,
+    flex: "1 1 120px",
     display: "flex",
     flexDirection: "column" as const,
     minHeight: 0,

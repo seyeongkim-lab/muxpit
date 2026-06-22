@@ -17,7 +17,7 @@ import {
   quotePosixShellArg,
   type SshHost,
 } from "./stores/sshHosts";
-import { useAiCliStore, buildAiLaunchSpec, parseSshTarget } from "./stores/aiCli";
+import { useAiCliStore, AI_KINDS, buildAiLaunchSpec, parseSshTarget } from "./stores/aiCli";
 import { useNotificationStore } from "./stores/notifications";
 import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
@@ -69,19 +69,27 @@ const isTmuxVersionSupported = (version: string): boolean => {
 
 
 /**
- * Probe the remote for installed AI CLIs and (when claude is found) auto-split a
- * second pane into it. Probe results are cached on `useAiCliStore` so the
- * per-pane toolbar can render the same set without a second SSH call.
+ * Probe the remote for installed AI CLIs and auto-split a second pane into the
+ * first detected tool by priority. Probe results are cached on `useAiCliStore`
+ * so the per-pane toolbar can render the same set without a second SSH call.
  */
+const autoAiSplitInFlight = new Set<string>();
+
 const autoAiSplit = async (wsId: string, sshCommand: string, sshConnection?: SshConnection, host?: SshHost) => {
+  let key: string | null = null;
   try {
     const target = sshConnection?.target ?? (host ? `${host.user}@${host.host}` : parseSshTarget(sshCommand));
     if (!target) return;
+    key = `${wsId}:${target}`;
+    if (autoAiSplitInFlight.has(key)) return;
+    autoAiSplitInFlight.add(key);
+
     const connection = sshConnection ?? (host ? buildSshConnection(host) : parseSshCommandLine(sshCommand)?.connection);
 
     await useAiCliStore.getState().probe(target, sshCommand, connection);
     const available = useAiCliStore.getState().available(target);
-    if (!available || !available.has("claude")) return;
+    const kind = AI_KINDS.find((candidate) => available?.has(candidate));
+    if (!kind) return;
 
     const state = useWorkspaceStore.getState();
     const ws = state.workspaces.find((w) => w.id === wsId);
@@ -100,16 +108,18 @@ const autoAiSplit = async (wsId: string, sshCommand: string, sshConnection?: Ssh
     };
     if (hasAiPane(ws.layout)) return;
 
-    const claude = buildAiLaunchSpec("claude", sshCommand, connection);
+    const ai = buildAiLaunchSpec(kind, sshCommand, connection);
     const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
-    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claude.command, {
-      aiKind: "claude",
+    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", ai.command, {
+      aiKind: kind,
       aiSshTarget: target,
-      sshConnection: claude.sshConnection,
-      sshRemoteCommand: claude.sshRemoteCommand,
+      sshConnection: ai.sshConnection,
+      sshRemoteCommand: ai.sshRemoteCommand,
     });
   } catch {
     // Silently ignore — probe failures already cache an empty set.
+  } finally {
+    if (key) autoAiSplitInFlight.delete(key);
   }
 };
 
@@ -237,6 +247,7 @@ export const App = () => {
               return { monitorId: `mon-${Date.now()}`, sshTarget: target!, sshCommand: sshCommand!, sshConnection };
             });
           }
+          autoAiSplit(ws.id, sshCommand, sshConnection);
           return; // Found SSH — done
         }
       }
@@ -769,6 +780,17 @@ export const App = () => {
     addWorkspace(`Claude: ${projectPath.split("/").pop()}`, cmd, undefined, connection, remote);
   }, [addWorkspace]);
 
+  const handleOpenAiPane = useCallback((kind: (typeof AI_KINDS)[number]) => {
+    if (!activeWs || !sidebarMonitor) return;
+    const spec = buildAiLaunchSpec(kind, sidebarMonitor.sshCommand, sidebarMonitor.sshConnection);
+    useWorkspaceStore.getState().splitLeafWithCommand(activeWs.id, activeWs.focusedLeafId, "vertical", spec.command, {
+      aiKind: kind,
+      aiSshTarget: sidebarMonitor.sshTarget,
+      sshConnection: spec.sshConnection,
+      sshRemoteCommand: spec.sshRemoteCommand,
+    });
+  }, [activeWs, sidebarMonitor]);
+
   const handleCloseMonitor = useCallback(() => {
     if (sidebarMonitor) {
       appInvoke("stop_monitor", { monitorId: sidebarMonitor.monitorId }).catch(() => {});
@@ -850,6 +872,7 @@ export const App = () => {
           onCloseMonitor={handleCloseMonitor}
           onViewClaudeSession={handleViewClaudeSession}
           onResumeClaudeSession={handleResumeClaudeSession}
+          onOpenAiPane={handleOpenAiPane}
           gridView={gridView}
           onToggleGridView={() => setGridView((prev) => !prev)}
         />
