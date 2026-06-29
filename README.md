@@ -178,9 +178,14 @@ clipboard. In a remote pane running tmux with mouse mode on, the drag is
 captured by tmux instead of the local terminal, so hold `Shift` while dragging
 to force a local selection.
 
-To make a plain mouse-drag copy reach the system clipboard, let the remote tmux
-forward the selection over OSC 52. wmux honors OSC 52 clipboard writes; enable it
-on the remote in `~/.tmux.conf`:
+wmux receives OSC 52 clipboard writes from the terminal, and for the remote tmux
+session it manages it sets `set-clipboard on` and the matching terminal feature
+automatically on connect — so a tmux copy (mouse drag or copy-mode) reaches the
+local clipboard without editing your remote `~/.tmux.conf`. Only writes are
+honored; OSC 52 read requests are ignored so a remote cannot read your clipboard.
+
+This auto-config applies to the wmux-managed session. For a tmux session you
+start yourself (or a nested tmux), enable it in the remote `~/.tmux.conf`:
 
 ```tmux
 set -g set-clipboard on
@@ -192,10 +197,6 @@ On tmux older than 3.2, replace the second line with:
 ```tmux
 set -ga terminal-overrides ',*:Ms=\E]52;%p1%s;%p2%s\007'
 ```
-
-Reload with `tmux kill-server` (or restart the session). wmux only accepts
-clipboard writes; OSC 52 read requests are ignored so a remote cannot read your
-clipboard.
 
 ## License
 
