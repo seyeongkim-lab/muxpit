@@ -4,6 +4,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalTheme } from "../themes";
+import { decodeOsc52ClipboardWrite } from "../utils/osc52";
 import {
   shouldClearTerminalInputBuffer,
   shouldScheduleTerminalInputBufferCleanup,
@@ -58,6 +59,7 @@ export interface CreateTerminalSurfaceOptions {
   enableWebglRenderer: boolean;
   clearStaleInputBufferAfterTextInput: boolean;
   openLink: (uri: string) => void;
+  writeClipboard: (text: string) => void;
 }
 
 export const createTerminalSurface = (options: CreateTerminalSurfaceOptions): TerminalSurface =>
@@ -66,6 +68,7 @@ export const createTerminalSurface = (options: CreateTerminalSurfaceOptions): Te
 class XtermTerminalSurface implements TerminalSurface {
   private readonly term: XTerm;
   private readonly fitAddon = new FitAddon();
+  private readonly writeClipboard: (text: string) => void;
   private webglAddon?: WebglAddon;
   private webglEnabled: boolean;
   private readonly shouldClearStaleInputBufferAfterTextInput: boolean;
@@ -75,6 +78,7 @@ class XtermTerminalSurface implements TerminalSurface {
 
   constructor(options: CreateTerminalSurfaceOptions) {
     this.webglEnabled = options.enableWebglRenderer;
+    this.writeClipboard = options.writeClipboard;
     this.shouldClearStaleInputBufferAfterTextInput = options.clearStaleInputBufferAfterTextInput;
     this.term = new XTerm({
       cursorBlink: true,
@@ -89,6 +93,20 @@ class XtermTerminalSurface implements TerminalSurface {
     this.term.loadAddon(new WebLinksAddon((event, uri) => {
       if (event.ctrlKey) options.openLink(uri);
     }));
+    this.registerClipboardOscHandler();
+  }
+
+  // OSC 52 lets a program inside the terminal (e.g. a remote tmux with
+  // `set -s set-clipboard on`) set the host clipboard. xterm.js does not handle
+  // OSC 52 itself, so a mouse-drag copy in a remote tmux pane never reaches the
+  // local clipboard without this. Only writes are honored — answering a query
+  // ("?") would let the remote read our clipboard, so those are dropped.
+  private registerClipboardOscHandler() {
+    this.term.parser.registerOscHandler(52, (data) => {
+      const text = decodeOsc52ClipboardWrite(data);
+      if (text !== null) this.writeClipboard(text);
+      return true;
+    });
   }
 
   get rows() {

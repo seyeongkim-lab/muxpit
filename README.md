@@ -171,6 +171,32 @@ Prefix mode (press the prefix key first; default `Ctrl+Shift+B`):
 
 > Note: the prefix key is configurable in Settings.
 
+## Clipboard
+
+Selecting text with the mouse and pressing `Ctrl+C` copies to the system
+clipboard. In a remote pane running tmux with mouse mode on, the drag is
+captured by tmux instead of the local terminal, so hold `Shift` while dragging
+to force a local selection.
+
+To make a plain mouse-drag copy reach the system clipboard, let the remote tmux
+forward the selection over OSC 52. wmux honors OSC 52 clipboard writes; enable it
+on the remote in `~/.tmux.conf`:
+
+```tmux
+set -g set-clipboard on
+set -ga terminal-features ',*:clipboard'
+```
+
+On tmux older than 3.2, replace the second line with:
+
+```tmux
+set -ga terminal-overrides ',*:Ms=\E]52;%p1%s;%p2%s\007'
+```
+
+Reload with `tmux kill-server` (or restart the session). wmux only accepts
+clipboard writes; OSC 52 read requests are ignored so a remote cannot read your
+clipboard.
+
 ## License
 
 MIT — see `src-tauri/Cargo.toml`.
