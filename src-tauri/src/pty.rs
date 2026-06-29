@@ -156,8 +156,15 @@ impl PtyManager {
         // detaching. Without this the SSH connection drops and wmux tears
         // down the pane (taking any AI split with it). Applied with -g so
         // it covers user-created sessions too, not just the wrapper.
+        // `set -g set-clipboard on` + `set -ga terminal-features ',*:clipboard'`:
+        // forward tmux copies (mouse drag, copy-mode) to the local clipboard via
+        // OSC 52, which the frontend terminal surface receives. This saves the
+        // user from editing their remote ~/.tmux.conf. The value is single-quoted
+        // so the remote `sh -c` does not glob `*`; single quotes are literal
+        // inside the surrounding double quotes. `terminal-features` needs tmux
+        // 3.2+, so it is silenced on older servers (set-clipboard still applies).
         let tmux_inner = format!(
-            "sh -c \"tmux -u has-session -t {name} 2>/dev/null || tmux -u new-session -d -s {name}; tmux -u set-option -t {name} mouse off; tmux -u set-option -g detach-on-destroy off; exec tmux -u attach -t {name}\"",
+            "sh -c \"tmux -u has-session -t {name} 2>/dev/null || tmux -u new-session -d -s {name}; tmux -u set-option -t {name} mouse off; tmux -u set-option -g detach-on-destroy off; tmux -u set-option -g set-clipboard on; tmux -u set-option -ga terminal-features ',*:clipboard' 2>/dev/null; exec tmux -u attach -t {name}\"",
             name = safe
         );
         let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)

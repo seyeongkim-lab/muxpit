@@ -25,7 +25,7 @@ import {
   type SshConnection,
 } from "../utils/sshConnection";
 import { tauriPtyBackend } from "../utils/tauriPtyBackend";
-import { createTerminalClipboard } from "../utils/terminalClipboard";
+import { createTerminalClipboard, type TerminalClipboardPort } from "../utils/terminalClipboard";
 import { decideTerminalInput, shouldReadTerminalSelectionForInput } from "../utils/terminalInput";
 import {
   pasteTerminalClipboard,
@@ -83,7 +83,7 @@ const handleTerminalOutputEvent = (event: TerminalOutputEvent, workspaceId: stri
   }
 };
 
-const createConfiguredSurface = (): TerminalSurface => {
+const createConfiguredSurface = (clipboard: TerminalClipboardPort): TerminalSurface => {
   const settings = useSettingsStore.getState();
   return createTerminalSurface({
     fontSize: settings.fontSize,
@@ -92,6 +92,9 @@ const createConfiguredSurface = (): TerminalSurface => {
     enableWebglRenderer: settings.enableWebglRenderer,
     clearStaleInputBufferAfterTextInput: SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT,
     openLink: (uri) => open(uri).catch(() => {}),
+    writeClipboard: (text) => {
+      clipboard.writeText(text).catch(() => {});
+    },
   });
 };
 
@@ -121,7 +124,8 @@ export const useTerminalSession = ({
     }
 
     initializedRef.current = true;
-    const surface = createConfiguredSurface();
+    const clipboard = createTerminalClipboard();
+    const surface = createConfiguredSurface(clipboard);
 
     // Declared here (assigned after the spawn-source resolution below) so the
     // key handler and pty-exit listener can reference it without hitting the
@@ -129,7 +133,6 @@ export const useTerminalSession = ({
     let spawnCommand: string | null = null;
     let spawnCommandArgv: string[] | null = null;
     let spawnSshConnection: SshConnection | null = null;
-    const clipboard = createTerminalClipboard();
 
     // Ctrl+V entry point. Text is preferred when the OS clipboard exposes both
     // text and image flavors; image-only clipboards are saved locally or on the
