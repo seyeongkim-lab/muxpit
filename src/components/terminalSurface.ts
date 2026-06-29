@@ -261,6 +261,18 @@ class XtermTerminalSurface implements TerminalSurface {
   private loadWebglAddon() {
     try {
       const addon = new WebglAddon();
+      // A GPU device reset (monitor sleep/wake, display topology change, driver
+      // TDR) loses the WebGL context. Without disposing here the dead context
+      // keeps getting rendered into, which crashes the WebView2 renderer ("Aw,
+      // Snap" / blank page) across every pane. Disposing reverts xterm to its
+      // DOM renderer so the terminal stays usable.
+      addon.onContextLoss(() => {
+        try {
+          addon.dispose();
+        } catch {}
+        if (this.webglAddon === addon) this.webglAddon = undefined;
+        if (this.term.rows > 0) this.term.refresh(0, this.term.rows - 1);
+      });
       this.term.loadAddon(addon);
       this.webglAddon = addon;
     } catch {
