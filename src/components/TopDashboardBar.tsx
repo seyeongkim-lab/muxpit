@@ -85,6 +85,7 @@ export const TopDashboardBar = ({
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
   const setActive = useWorkspaceStore((s) => s.setActive);
+  const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
   const sshHosts = useSshHostsStore((s) => s.hosts);
   const infoMap = useWorkspaceInfoStore((s) => s.info);
   const tmuxAttach = useTmuxSessionsStore((s) => s._attach);
@@ -92,6 +93,20 @@ export const TopDashboardBar = ({
   const [hoveredTab, setHoveredTab] = useState<TopTab | null>(null);
   const [pinnedTab, setPinnedTab] = useState<TopTab | null>(null);
   const visibleTab = pinnedTab ?? hoveredTab;
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  const endDrag = () => {
+    setDragIndex(null);
+    setOverIndex(null);
+  };
+
+  const dropOnTab = (targetIndex: number) => {
+    if (dragIndex !== null && dragIndex !== targetIndex) {
+      reorderWorkspaces(dragIndex, targetIndex);
+    }
+    endDrag();
+  };
 
   const closeWorkspace = (event: React.MouseEvent, id: string) => {
     event.stopPropagation();
@@ -130,12 +145,35 @@ export const TopDashboardBar = ({
               tmuxByWs[workspace.id]?.sessions,
             );
             const paneCount = tabView.paneCount;
+            const isDragging = dragIndex === index;
+            const isDropTarget = overIndex === index && dragIndex !== null && dragIndex !== index;
             return (
               <button
                 key={workspace.id}
                 className={`wmux-btn wmux-top-tab${isActive ? " wmux-ws-active" : ""}`}
                 onClick={() => setActive(workspace.id)}
-                style={{ ...styles.sessionTab, ...(isActive ? styles.sessionTabActive : {}) }}
+                draggable
+                onDragStart={(event) => {
+                  setDragIndex(index);
+                  event.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(event) => {
+                  if (dragIndex === null) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (overIndex !== index) setOverIndex(index);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  dropOnTab(index);
+                }}
+                onDragEnd={endDrag}
+                style={{
+                  ...styles.sessionTab,
+                  ...(isActive ? styles.sessionTabActive : {}),
+                  ...(isDragging ? styles.sessionTabDragging : {}),
+                  ...(isDropTarget ? styles.sessionTabDropTarget : {}),
+                }}
                 title={[
                   tabView.title,
                   workspace.name !== tabView.title ? workspace.name : null,
@@ -531,6 +569,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderColor: "var(--wmux-hairline-strong)",
     borderBottomColor: "var(--wmux-bg-elev)",
     color: "var(--wmux-text)",
+  },
+  sessionTabDragging: {
+    opacity: 0.4,
+  },
+  sessionTabDropTarget: {
+    background: "var(--wmux-accent-soft)",
+    borderColor: "var(--wmux-accent-strong)",
+    borderBottomColor: "var(--wmux-accent-strong)",
   },
   sessionIndex: {
     color: "var(--wmux-accent)",
