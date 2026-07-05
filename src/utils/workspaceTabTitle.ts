@@ -1,7 +1,7 @@
 import type { WorkspaceInfo } from "../hooks/useWorkspaceInfo.ts";
 import type { AttachInfo, TmuxSession } from "../stores/tmuxSessions.ts";
 import type { LeafNode, LayoutNode, Workspace } from "../stores/workspace.ts";
-import type { AiTerminalStatusKind } from "./aiTerminalStatus.ts";
+import { detectAiAgentName, type AiTerminalStatusKind } from "./aiTerminalStatus.ts";
 import { parseSshCommandLine } from "./sshConnection.ts";
 
 export interface WorkspaceTabView {
@@ -24,8 +24,6 @@ const SHELL_NAMES = new Set([
   "tmux",
   "zsh",
 ]);
-
-const AI_NAMES = new Set(["claude", "codex", "gemini", "copilot"]);
 
 const compactPath = (path: string): string =>
   path
@@ -103,8 +101,8 @@ export const buildWorkspaceTabView = (
   const paneCount = leaves.length;
   const focusedLeaf = findFocusedLeaf(workspace.layout, workspace.focusedLeafId) ?? leaves[0] ?? null;
   const cwdBase = pathBaseName(info?.cwd || focusedLeaf?.lastCwd);
-  const agent = focusedLeaf?.aiKind ?? info?.agent ?? null;
-  if (agent && AI_NAMES.has(agent)) {
+  const agent = detectAiAgentName(focusedLeaf?.aiKind, info?.agent, info?.processName, info?.command);
+  if (agent) {
     const aiStatus = usefulAiStatus(info?.aiStatusLabel);
     if (aiStatus) {
       return {
