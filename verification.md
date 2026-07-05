@@ -98,3 +98,14 @@
 - Build: `pnpm tauri build --no-bundle` 통과.
 - Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
 - 갱신 확인: `LastWriteTime` 2026-07-05 10:38:28, SHA256 `2CDD2DCA4D2085EAED23FCEEA4819820848777147B71F4D2E7EA1AAB5E2AD682`.
+
+## 2026-07-05 Top Tab Activity Labels — Windows Deploy
+
+- Commit: `5670ba2` (`feat/osc52-clipboard`).
+- `node --test tests\workspaceTabTitle.test.ts`: 통과, 5 passed.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- `pnpm run test:ts`: 145/148 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 top-tab 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 첫 시도는 Tauri CLI가 `cargo`를 PATH에서 못 찾아 실패했고, `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 11:05:49, SHA256 `EEC19FECE49F2B97CE158B48D2BAEE07080F74D38ACE5E030D374DA2D72E3641`.
