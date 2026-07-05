@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Sidebar } from "./components/Sidebar";
+import { FilesRail } from "./components/FilesRail";
 import { SplitPane } from "./components/SplitPane";
+import { TopDashboardBar } from "./components/TopDashboardBar";
 import { GridOverview } from "./components/GridOverview";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -23,7 +25,7 @@ import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegistry";
-import { useWorkspaceInfoPoller, useSshContextPoller } from "./hooks/useWorkspaceInfo";
+import { useWorkspaceInfoPoller, useSshContextPoller, useWorkspaceInfoStore } from "./hooks/useWorkspaceInfo";
 import { useAgentSessionProcessMonitor } from "./hooks/useAgentSessionProcessMonitor";
 import { applyThemeVars, getResolvedTheme } from "./themes";
 import { listen } from "@tauri-apps/api/event";
@@ -57,6 +59,18 @@ const findLeafNode = (node: LayoutNode, id: string): LeafNode | null => {
   if (node.type === "leaf") return node.id === id ? node : null;
   if (node.type === "split") return findLeafNode(node.children[0], id) ?? findLeafNode(node.children[1], id);
   return null;
+};
+
+const findFirstLeafNode = (node: LayoutNode): LeafNode | null => {
+  if (node.type === "leaf") return node;
+  if (node.type === "split") return findFirstLeafNode(node.children[0]) ?? findFirstLeafNode(node.children[1]);
+  return null;
+};
+
+const isRemoteFileLeaf = (leaf: LeafNode | null): leaf is LeafNode => {
+  if (!leaf) return false;
+  if (leaf.sshConnection?.program || leaf.sshCommand) return true;
+  return !!parseSshCommandLine(leaf.command);
 };
 
 // tmux control mode needs 3.2+ (window/session notifications stabilised).
@@ -129,6 +143,22 @@ export const App = () => {
   const uiFontSize = useSettingsStore((s) => s.fontSize);
   const themeName = useSettingsStore((s) => s.themeName);
   const customColors = useSettingsStore((s) => s.customColors);
+  const dashboardLayout = useSettingsStore((s) => s.dashboardLayout);
+  const activeInfo = useWorkspaceInfoStore((s) => activeId ? s.info[activeId] : undefined);
+  const fileLeaf = activeWs
+    ? findLeafNode(activeWs.layout, activeWs.focusedLeafId) ?? findFirstLeafNode(activeWs.layout)
+    : null;
+  const fileLeafIsRemote = isRemoteFileLeaf(fileLeaf);
+  const parsedFileSsh = fileLeafIsRemote
+    ? parseSshCommandLine(fileLeaf.sshCommand ?? fileLeaf.command)
+    : undefined;
+  const fileRailCwd = activeInfo?.cwd || fileLeaf?.lastCwd || null;
+  const fileRailSshConnection = fileLeafIsRemote
+    ? fileLeaf.sshConnection ?? parsedFileSsh?.connection ?? null
+    : null;
+  const fileRailSshCommand = fileLeafIsRemote
+    ? fileLeaf.sshCommand ?? fileLeaf.command ?? null
+    : null;
 
   // Push resolved theme colours onto :root as CSS custom properties so the
   // sidebar/toolbar chrome stays in sync when the user switches themes.
@@ -804,56 +834,80 @@ export const App = () => {
 
   return (
     <div style={styles.container}>
-      <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
-        <div data-tauri-drag-region style={styles.titlebarBrand}>
-          <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
-          <span data-tauri-drag-region style={styles.titlebarSubtitle}>
-            {activeWs?.name ?? "Terminal Multiplexer"}
-          </span>
+      {dashboardLayout === "left" ? (
+        <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
+          <div data-tauri-drag-region style={styles.titlebarBrand}>
+            <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
+            <span data-tauri-drag-region style={styles.titlebarSubtitle}>
+              {activeWs?.name ?? "Terminal Multiplexer"}
+            </span>
+          </div>
+          <div style={styles.titlebarControls} onDoubleClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="wmux-titlebar-btn"
+              style={styles.titlebarButton}
+              onClick={handleWindowMinimize}
+              title="Minimize"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              className="wmux-titlebar-btn"
+              style={styles.titlebarButton}
+              onClick={handleWindowMaximize}
+              title="Maximize"
+            >
+              □
+            </button>
+            <button
+              type="button"
+              className="wmux-titlebar-btn wmux-titlebar-close"
+              style={{ ...styles.titlebarButton, ...styles.titlebarCloseButton }}
+              onClick={handleWindowClose}
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
         </div>
-        <div style={styles.titlebarControls} onDoubleClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="wmux-titlebar-btn"
-            style={styles.titlebarButton}
-            onClick={handleWindowMinimize}
-            title="Minimize"
-          >
-            -
-          </button>
-          <button
-            type="button"
-            className="wmux-titlebar-btn"
-            style={styles.titlebarButton}
-            onClick={handleWindowMaximize}
-            title="Maximize"
-          >
-            □
-          </button>
-          <button
-            type="button"
-            className="wmux-titlebar-btn wmux-titlebar-close"
-            style={{ ...styles.titlebarButton, ...styles.titlebarCloseButton }}
-            onClick={handleWindowClose}
-            title="Close"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-      <div style={styles.appBody}>
-        <Sidebar
+      ) : (
+        <TopDashboardBar
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
           onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
           onConnectHost={handleConnectHost}
           monitor={sidebarMonitor}
           onCloseMonitor={handleCloseMonitor}
-          onViewClaudeSession={handleViewClaudeSession}
-          onResumeClaudeSession={handleResumeClaudeSession}
+          onWindowMinimize={handleWindowMinimize}
+          onWindowMaximize={handleWindowMaximize}
+          onWindowClose={handleWindowClose}
           gridView={gridView}
           onToggleGridView={() => setGridView((prev) => !prev)}
         />
+      )}
+      <div style={styles.appBody}>
+        {dashboardLayout === "left" ? (
+          <Sidebar
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
+            onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
+            onConnectHost={handleConnectHost}
+            monitor={sidebarMonitor}
+            onCloseMonitor={handleCloseMonitor}
+            onViewClaudeSession={handleViewClaudeSession}
+            onResumeClaudeSession={handleResumeClaudeSession}
+            gridView={gridView}
+            onToggleGridView={() => setGridView((prev) => !prev)}
+          />
+        ) : (
+          <FilesRail
+            cwd={fileRailCwd}
+            sshConnection={fileRailSshConnection}
+            sshCommand={fileRailSshCommand}
+          />
+        )}
         <div style={styles.terminalArea}>
           {gridView ? (
             <GridOverview

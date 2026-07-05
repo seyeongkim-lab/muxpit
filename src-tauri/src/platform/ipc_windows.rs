@@ -6,7 +6,9 @@ pub(super) fn server_loop(app: AppHandle) {
         Ok(guard) => guard,
         Err(SingleInstanceError::AlreadyRunning) => {
             log::error!("wmux IPC server already running for pipe {pipe_name}");
-            app.exit(0);
+            // Another wmux process owns the CLI/hook IPC pipe. Keep this GUI
+            // instance alive; otherwise a stale hidden process can make every
+            // new launch appear and immediately close.
             return;
         }
         Err(SingleInstanceError::Other(e)) => {
