@@ -834,44 +834,45 @@ export const App = () => {
 
   return (
     <div style={styles.container}>
-      <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
-        <div data-tauri-drag-region style={styles.titlebarBrand}>
-          <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
-          <span data-tauri-drag-region style={styles.titlebarSubtitle}>
-            {activeWs?.name ?? "Terminal Multiplexer"}
-          </span>
+      {dashboardLayout === "left" ? (
+        <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
+          <div data-tauri-drag-region style={styles.titlebarBrand}>
+            <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
+            <span data-tauri-drag-region style={styles.titlebarSubtitle}>
+              {activeWs?.name ?? "Terminal Multiplexer"}
+            </span>
+          </div>
+          <div style={styles.titlebarControls} onDoubleClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="wmux-titlebar-btn"
+              style={styles.titlebarButton}
+              onClick={handleWindowMinimize}
+              title="Minimize"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              className="wmux-titlebar-btn"
+              style={styles.titlebarButton}
+              onClick={handleWindowMaximize}
+              title="Maximize"
+            >
+              □
+            </button>
+            <button
+              type="button"
+              className="wmux-titlebar-btn wmux-titlebar-close"
+              style={{ ...styles.titlebarButton, ...styles.titlebarCloseButton }}
+              onClick={handleWindowClose}
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
         </div>
-        <div style={styles.titlebarControls} onDoubleClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="wmux-titlebar-btn"
-            style={styles.titlebarButton}
-            onClick={handleWindowMinimize}
-            title="Minimize"
-          >
-            -
-          </button>
-          <button
-            type="button"
-            className="wmux-titlebar-btn"
-            style={styles.titlebarButton}
-            onClick={handleWindowMaximize}
-            title="Maximize"
-          >
-            □
-          </button>
-          <button
-            type="button"
-            className="wmux-titlebar-btn wmux-titlebar-close"
-            style={{ ...styles.titlebarButton, ...styles.titlebarCloseButton }}
-            onClick={handleWindowClose}
-            title="Close"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-      {dashboardLayout === "top" && (
+      ) : (
         <TopDashboardBar
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
@@ -879,6 +880,9 @@ export const App = () => {
           onConnectHost={handleConnectHost}
           monitor={sidebarMonitor}
           onCloseMonitor={handleCloseMonitor}
+          onWindowMinimize={handleWindowMinimize}
+          onWindowMaximize={handleWindowMaximize}
+          onWindowClose={handleWindowClose}
           gridView={gridView}
           onToggleGridView={() => setGridView((prev) => !prev)}
         />

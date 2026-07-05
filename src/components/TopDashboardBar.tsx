@@ -21,11 +21,14 @@ interface TopDashboardBarProps {
   onConnectHost?: (host: SshHost) => void;
   monitor?: SidebarMonitorInfo | null;
   onCloseMonitor?: () => void;
+  onWindowMinimize?: () => void;
+  onWindowMaximize?: () => void;
+  onWindowClose?: () => void;
   gridView?: boolean;
   onToggleGridView?: () => void;
 }
 
-type TopTab = "sessions" | "hosts" | "monitor";
+type TopTab = "hosts" | "monitor";
 
 interface MonitorDataEvent {
   monitor_id: string;
@@ -68,6 +71,9 @@ export const TopDashboardBar = ({
   onConnectHost,
   monitor,
   onCloseMonitor,
+  onWindowMinimize,
+  onWindowMaximize,
+  onWindowClose,
   gridView,
   onToggleGridView,
 }: TopDashboardBarProps) => {
@@ -153,7 +159,6 @@ export const TopDashboardBar = ({
     };
   }, [monitor]);
 
-  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeId);
   const monitorSummary = useMemo(() => {
     if (!monitor) return "off";
     if (!latestSnapshot) return monitor.sshTarget;
@@ -185,29 +190,48 @@ export const TopDashboardBar = ({
 
   return (
     <div style={styles.wrapper} onMouseLeave={hideTab}>
-      <div style={styles.bar}>
-        <div style={styles.brandGroup}>
+      <div data-tauri-drag-region style={styles.bar} onDoubleClick={onWindowMaximize}>
+        <div data-tauri-drag-region style={styles.brandGroup}>
           <span className="wmux-logo" style={styles.logo}>wmux</span>
-          <span style={styles.activeName} title={activeWorkspace?.name}>
-            {activeWorkspace?.name ?? "Terminal"}
-          </span>
         </div>
-        <div style={styles.tabs}>
+        <div style={styles.sessionTabs} onDoubleClick={(event) => event.stopPropagation()}>
+          {workspaces.map((workspace, index) => {
+            const isActive = workspace.id === activeId;
+            const paneCount = collectLeafIds(workspace.layout).length;
+            return (
+              <button
+                key={workspace.id}
+                className={`wmux-btn${isActive ? " wmux-ws-active" : ""}`}
+                onClick={() => setActive(workspace.id)}
+                style={{ ...styles.sessionTab, ...(isActive ? styles.sessionTabActive : {}) }}
+                title={`${workspace.name} - ${paneCount} pane${paneCount === 1 ? "" : "s"}`}
+              >
+                <span style={styles.sessionIndex}>{index + 1}</span>
+                <span style={styles.sessionTabName}>{workspace.name}</span>
+                {paneCount > 1 && <span style={styles.sessionPaneCount}>{paneCount}</span>}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(event) => closeWorkspace(event, workspace.id)}
+                  style={styles.sessionClose}
+                  title="Close workspace"
+                >
+                  x
+                </span>
+              </button>
+            );
+          })}
           <button
             className="wmux-btn"
             onClick={() => addWorkspace()}
-            style={styles.iconButton}
+            style={styles.newSessionButton}
             title="New workspace"
           >
             +
           </button>
-          <TopTabButton
-            active={visibleTab === "sessions"}
-            label="Sessions"
-            value={String(workspaces.length)}
-            onMouseEnter={() => showTab("sessions")}
-            onClick={() => togglePinned("sessions")}
-          />
+        </div>
+        <div data-tauri-drag-region style={styles.dragSpacer} />
+        <div style={styles.controls} onDoubleClick={(event) => event.stopPropagation()}>
           <TopTabButton
             active={visibleTab === "hosts"}
             label="Hosts"
@@ -238,6 +262,35 @@ export const TopDashboardBar = ({
           >
             Settings
           </button>
+          <div style={styles.windowControls}>
+            <button
+              type="button"
+              className="wmux-titlebar-btn"
+              style={styles.windowButton}
+              onClick={onWindowMinimize}
+              title="Minimize"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              className="wmux-titlebar-btn"
+              style={styles.windowButton}
+              onClick={onWindowMaximize}
+              title="Maximize"
+            >
+              □
+            </button>
+            <button
+              type="button"
+              className="wmux-titlebar-btn wmux-titlebar-close"
+              style={{ ...styles.windowButton, ...styles.windowCloseButton }}
+              onClick={onWindowClose}
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
         </div>
       </div>
       {visibleTab && (
@@ -246,34 +299,6 @@ export const TopDashboardBar = ({
           onMouseEnter={() => setHoveredTab(visibleTab)}
           onMouseLeave={hideTab}
         >
-          {visibleTab === "sessions" && (
-            <div style={styles.popoverList}>
-              {workspaces.map((workspace, index) => {
-                const isActive = workspace.id === activeId;
-                const paneCount = collectLeafIds(workspace.layout).length;
-                return (
-                  <div
-                    key={workspace.id}
-                    className={`wmux-ws-item${isActive ? " wmux-ws-active" : ""}`}
-                    style={{ ...styles.sessionRow, ...(isActive ? styles.sessionRowActive : {}) }}
-                    onClick={() => setActive(workspace.id)}
-                  >
-                    <span style={styles.index}>{index + 1}</span>
-                    <span style={styles.sessionName}>{workspace.name}</span>
-                    <span style={styles.metaText}>{paneCount} panes</span>
-                    <button
-                      className="wmux-btn"
-                      onClick={(event) => closeWorkspace(event, workspace.id)}
-                      style={styles.closeBtn}
-                      title="Close workspace"
-                    >
-                      x
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
           {visibleTab === "hosts" && (
             <div style={styles.popoverList}>
               <div style={styles.popoverHeader}>
@@ -387,36 +412,91 @@ const styles: Record<string, React.CSSProperties> = {
     height: 34,
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: "0 10px 0 12px",
+    gap: 8,
+    padding: "0 0 0 12px",
+    color: "var(--wmux-text)",
+    userSelect: "none",
   },
   brandGroup: {
     minWidth: 0,
+    flexShrink: 0,
     display: "flex",
     alignItems: "center",
-    gap: 9,
+    width: 54,
   },
   logo: {
     fontSize: 13,
   },
-  activeName: {
+  sessionTabs: {
     minWidth: 0,
+    maxWidth: "min(58vw, 760px)",
+    display: "flex",
+    alignItems: "center",
+    gap: 3,
+    overflowX: "auto",
+    overflowY: "hidden",
+    padding: "3px 0 0",
+  },
+  sessionTab: {
+    height: 29,
+    minWidth: 112,
+    maxWidth: 220,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    border: "1px solid transparent",
+    borderBottomColor: "transparent",
+    borderRadius: "5px 5px 0 0",
+    background: "transparent",
     color: "var(--wmux-subtext)",
-    fontSize: 12,
+    cursor: "pointer",
+    padding: "0 7px",
+    flexShrink: 0,
+  },
+  sessionTabActive: {
+    background: "var(--wmux-bg-elev)",
+    borderColor: "var(--wmux-hairline-strong)",
+    borderBottomColor: "var(--wmux-bg-elev)",
+    color: "var(--wmux-text)",
+  },
+  sessionIndex: {
+    color: "var(--wmux-accent)",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    flexShrink: 0,
+  },
+  sessionTabName: {
+    minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    fontSize: 12,
   },
-  tabs: {
-    display: "flex",
-    alignItems: "center",
-    gap: 5,
-    minWidth: 0,
+  sessionPaneCount: {
+    color: "var(--wmux-subtext)",
+    border: "1px solid var(--wmux-hairline)",
+    borderRadius: 8,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    lineHeight: "13px",
+    minWidth: 14,
+    height: 14,
+    textAlign: "center",
+    flexShrink: 0,
   },
-  iconButton: {
+  sessionClose: {
+    color: "var(--wmux-subtext)",
+    fontSize: 11,
+    lineHeight: "16px",
+    width: 16,
+    height: 16,
+    borderRadius: 3,
+    textAlign: "center",
+    flexShrink: 0,
+  },
+  newSessionButton: {
     width: 26,
-    height: 24,
+    height: 26,
     border: "1px solid var(--wmux-hairline)",
     borderRadius: 4,
     background: "var(--wmux-bg-elev)",
@@ -424,6 +504,18 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     padding: 0,
     lineHeight: 1,
+    flexShrink: 0,
+  },
+  dragSpacer: {
+    minWidth: 18,
+    flex: 1,
+    height: "100%",
+  },
+  controls: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    flexShrink: 0,
   },
   tabButton: {
     height: 24,
@@ -471,7 +563,7 @@ const styles: Record<string, React.CSSProperties> = {
   popover: {
     position: "absolute",
     top: 34,
-    right: 10,
+    right: 132,
     width: 360,
     maxHeight: "min(440px, 70vh)",
     overflow: "auto",
@@ -490,37 +582,6 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "4px 10px 7px",
-  },
-  sessionRow: {
-    minHeight: 30,
-    display: "grid",
-    gridTemplateColumns: "24px minmax(0, 1fr) 58px 24px",
-    alignItems: "center",
-    gap: 8,
-    padding: "4px 8px 4px 10px",
-    color: "var(--wmux-subtext)",
-    cursor: "pointer",
-  },
-  sessionRowActive: {
-    backgroundColor: "var(--wmux-accent-soft)",
-    color: "var(--wmux-text)",
-  },
-  index: {
-    color: "var(--wmux-subtext)",
-    fontSize: 11,
-    fontFamily: "'JetBrains Mono', monospace",
-  },
-  sessionName: {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    fontSize: 13,
-  },
-  metaText: {
-    color: "var(--wmux-subtext)",
-    fontSize: 11,
-    textAlign: "right",
   },
   closeBtn: {
     border: "none",
@@ -626,5 +687,24 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--wmux-subtext)",
     fontSize: 12,
     padding: 6,
+  },
+  windowControls: {
+    height: 34,
+    display: "flex",
+    marginLeft: 3,
+  },
+  windowButton: {
+    width: 42,
+    height: "100%",
+    border: "none",
+    borderLeft: "1px solid transparent",
+    backgroundColor: "transparent",
+    color: "var(--wmux-subtext)",
+    fontSize: 13,
+    lineHeight: 1,
+    cursor: "default",
+  },
+  windowCloseButton: {
+    fontSize: 16,
   },
 };
