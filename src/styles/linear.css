@@ -91,6 +91,24 @@
   background-color: #89b4fa;
 }
 
+/* Files rail resize grabber: invisible until hovered, then a thin accent line
+ * centred over the rail's right border. */
+.wmux-rail-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 100%;
+  transform: translateX(-50%);
+  background-color: transparent;
+  transition: background-color 120ms ease;
+}
+
+.wmux-rail-resize:hover::after {
+  background-color: var(--wmux-accent);
+}
+
 /* ---------- Sidebar list rows ---------- */
 
 .wmux-host-row {

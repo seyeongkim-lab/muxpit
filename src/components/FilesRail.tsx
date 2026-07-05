@@ -1,6 +1,7 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { SshConnection } from "../utils/sshConnection";
+import { clampFilesRailWidth, useSidebarLayoutStore } from "../stores/sidebarLayout";
 
 export interface DirEntry {
   name: string;
@@ -60,6 +61,51 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [dirs, setDirs] = useState<Map<string, DirState>>(() => new Map());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+
+  const asideRef = useRef<HTMLElement>(null);
+  const railWidth = useSidebarLayoutStore((s) => s.filesRailWidth);
+  const setRailWidth = useSidebarLayoutStore((s) => s.setFilesRailWidth);
+
+  // Drag the right edge to resize. During the drag the width is written straight
+  // to the DOM node so the (potentially large) file tree doesn't reconcile every
+  // frame; the store — and localStorage — is committed once on mouse up.
+  const startResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = asideRef.current?.getBoundingClientRect().width ?? railWidth;
+      let pending = startWidth;
+      let frameId: number | null = null;
+
+      const apply = () => {
+        frameId = null;
+        if (asideRef.current) {
+          asideRef.current.style.width = `${pending}px`;
+          asideRef.current.style.minWidth = `${pending}px`;
+        }
+      };
+
+      const onMouseMove = (ev: MouseEvent) => {
+        pending = clampFilesRailWidth(startWidth + (ev.clientX - startX));
+        if (frameId === null) frameId = requestAnimationFrame(apply);
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        if (frameId !== null) cancelAnimationFrame(frameId);
+        setRailWidth(pending);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [railWidth, setRailWidth],
+  );
 
   const loadPath = useCallback(
     async (path: string) => {
@@ -175,7 +221,7 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
   const root = dirs.get(activeRootKey);
 
   return (
-    <aside style={styles.rail}>
+    <aside ref={asideRef} style={{ ...styles.rail, width: railWidth, minWidth: railWidth }}>
       <div style={styles.header}>
         <div style={styles.titleGroup}>
           <span className="wmux-section-label">FILES</span>
@@ -195,6 +241,12 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
         )}
         {root?.entries.map((entry) => renderEntry(activeRootKey, entry, 0))}
       </div>
+      <div
+        className="wmux-rail-resize"
+        style={styles.resizeHandle}
+        onMouseDown={startResize}
+        title="Drag to resize"
+      />
     </aside>
   );
 };
@@ -203,14 +255,23 @@ export const FilesRail = memo(FilesRailImpl);
 
 const styles: Record<string, React.CSSProperties> = {
   rail: {
-    width: "17em",
-    minWidth: "17em",
+    position: "relative",
     height: "100%",
+    flexShrink: 0,
     backgroundColor: "var(--wmux-bg)",
     borderRight: "1px solid var(--wmux-hairline)",
     display: "flex",
     flexDirection: "column",
     userSelect: "none",
+  },
+  resizeHandle: {
+    position: "absolute",
+    top: 0,
+    right: -3,
+    width: 6,
+    height: "100%",
+    cursor: "col-resize",
+    zIndex: 5,
   },
   header: {
     display: "grid",
