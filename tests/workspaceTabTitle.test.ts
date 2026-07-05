@@ -99,6 +99,20 @@ test("workspace tab title shows SSH target", () => {
   assert.equal(view.title, "me@host");
 });
 
+test("workspace tab title keeps SSH target ahead of stale local title and cwd", () => {
+  const view = buildWorkspaceTabView(
+    makeWorkspace({ command: "ssh me@host" }),
+    makeInfo({
+      agent: "ssh",
+      cwd: "C:\\Users\\one\\Projects\\wmux",
+      terminalTitle: "C:\\Users\\one\\Projects\\wmux",
+    }),
+  );
+
+  assert.equal(view.title, "me@host");
+  assert.equal(view.detail, null);
+});
+
 test("workspace tab title shows active tmux session name", () => {
   const view = buildWorkspaceTabView(
     makeWorkspace({ command: "ssh me@host", tmuxSession: "wmux-host" }),
