@@ -78,3 +78,14 @@
 - Build: `pnpm tauri build --no-bundle` 통과 (release, 37.92s). Vite chunk size warning만 잔존.
 - 갱신 확인: `LastWriteTime` 2026-06-12 13:44:44, SHA256 `FC65D4A36801AADD14F815D0A9616D0F9CA52AF3C679BAE24B82710B028882CA`.
 - 미수행 (수동 검증 필요): 실제 앱에서 Win+Shift+S 후 SSH pane Ctrl+V — WebView2의 `navigator.clipboard.read()` 권한 자동 허용 여부 확인. 거부 시 텍스트 paste로 폴백.
+
+## 2026-07-05 Top Dashboard Files Rail — Windows Deploy
+
+- Commit: `3494d75` (`feat/osc52-clipboard`). Push to `origin/feat/osc52-clipboard` was blocked by approval policy because it would send code to GitHub.
+- `cargo check` (src-tauri): 통과.
+- `cargo test` (src-tauri): 통과, 66 passed.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `pnpm run test:ts`: 140/143 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 dashboard/files 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 통과. 첫 시도는 Tauri CLI가 `cargo`를 PATH에서 못 찾아 실패했고, `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
+- Shortcut fix: `C:\Users\one\Desktop\wmux.lnk` target을 `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`로 갱신.
+- 갱신 확인: `LastWriteTime` 2026-07-05 10:06:31, SHA256 `12A1328BEB4377791FFDD4F0D7BFB9F4A183B07C0206CD93B7787E07942989A4`.
