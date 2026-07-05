@@ -118,3 +118,15 @@
 - Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
 - 갱신 확인: `LastWriteTime` 2026-07-05 11:20:11, SHA256 `729C6E6641B2A1FB276E457325B60FCF50D3881E034B406E30A1EB616DD6BFAA`.
 - Cleanup note: `src-tauri\target\release\wmux.exe.bak-20260705111931` 삭제는 실행 중인 이전 프로세스가 파일을 잡고 있어 권한 거부됨.
+
+## 2026-07-05 Terminal Render Batching — Windows Deploy
+
+- Commit: `66f8f7e` (`feat/osc52-clipboard`).
+- 변경 범위: PTY output frame batching, terminal `fit()` coalescing, split drag ratio RAF throttling, divider hover inline mutation 제거.
+- `node --test tests\terminalWriteBuffer.test.ts tests\terminalOutput.test.ts`: 통과, 7 passed.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- `node --test tests/*.test.ts`: 148/151 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 render batching 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 통과.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 11:40:18, SHA256 `F5598ACA143FE188A503113423718E59667D3C14CF6D951C661708BA631289D9`.

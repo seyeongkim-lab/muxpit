@@ -22,3 +22,9 @@
 ## 2026-07-05 Top Tab Hover Animation
 
 - Manual smoke test needed: 상단 workspace tab과 Hosts/Monitor tab에 마우스를 올릴 때 scale/transition 없이 즉시 반응하는지 확인.
+
+## 2026-07-05 Terminal Render Batching
+
+- Manual smoke test needed: `yes | head -n 5000` 또는 큰 `git diff` 출력 시 UI가 덜 끊기는지 확인.
+- Manual smoke test needed: split divider를 빠르게 드래그할 때 terminal resize가 따라오되 cursor/레이아웃이 과하게 떨리지 않는지 확인.
+- Manual smoke test needed: 여러 pane이 있는 상태에서 workspace tab 전환, font size 변경, 창 resize 후 terminal fit이 정상인지 확인.
