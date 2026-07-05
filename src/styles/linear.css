@@ -83,6 +83,14 @@
   transition: none !important;
 }
 
+.wmux-split-divider {
+  background-color: #313244;
+}
+
+.wmux-split-divider:hover {
+  background-color: #89b4fa;
+}
+
 /* ---------- Sidebar list rows ---------- */
 
 .wmux-host-row {

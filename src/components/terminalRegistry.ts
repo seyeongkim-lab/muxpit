@@ -12,6 +12,7 @@ export interface TerminalInstance {
     onData: TerminalDisposable;
     onResize: TerminalDisposable;
     onPaste: TerminalDisposable;
+    writeBuffer?: TerminalDisposable;
   };
 }
 
@@ -29,6 +30,7 @@ export const destroyTerminal = (leafId: string) => {
   instance.cleanup.onData.dispose();
   instance.cleanup.onResize.dispose();
   instance.cleanup.onPaste.dispose();
+  instance.cleanup.writeBuffer?.dispose();
   instance.surface.dispose();
   terminalInstances.delete(leafId);
 };
