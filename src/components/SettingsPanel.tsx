@@ -73,6 +73,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     fontFamilies,
     themeName,
     customColors,
+    customThemes,
     prefixKey,
     dashboardLayout,
     enableWebglRenderer,
@@ -83,7 +84,8 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     enableExperimentalAgentSessionRestore,
     enableExperimentalAgentDangerousResume,
     sessionListMetadata,
-    setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
+    setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor,
+    addCustomTheme, removeCustomTheme, setPrefixKey,
     setDashboardLayout,
     setEnableWebglRenderer,
     setEnableNotifications,
@@ -103,10 +105,16 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   const [cliInstalling, setCliInstalling] = useState(false);
   const soundInputRef = useRef<HTMLInputElement | null>(null);
 
-  const baseTheme = getThemeByName(themeName).theme;
-  const resolvedTheme = getResolvedTheme(themeName, customColors);
+  const baseTheme = getThemeByName(themeName, customThemes).theme;
+  const resolvedTheme = getResolvedTheme(themeName, customColors, customThemes);
   const themeOverrides = customColors[themeName] ?? {};
   const hasCustomizations = Object.keys(themeOverrides).length > 0;
+  const [newThemeName, setNewThemeName] = useState("");
+
+  const handleAddTheme = useCallback(() => {
+    addCustomTheme(newThemeName, resolvedTheme);
+    setNewThemeName("");
+  }, [addCustomTheme, newThemeName, resolvedTheme]);
 
   const handleColorChange = useCallback(
     (key: ThemeColorKey, color: string) => setCustomColor(themeName, key, color),
@@ -392,41 +400,77 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
           <div style={styles.section}>
             <label style={styles.label}>Theme</label>
             <div style={styles.themeGrid}>
-              {THEMES.map((t) => (
-                <button
-                  key={t.name}
-                  onClick={() => setThemeName(t.name)}
-                  style={{
-                    ...styles.themeBtn,
-                    ...(themeName === t.name ? styles.themeBtnActive : {}),
-                  }}
-                >
-                  <div style={styles.themePreview}>
-                    {[t.theme.red, t.theme.green, t.theme.yellow, t.theme.blue, t.theme.magenta, t.theme.cyan].map(
-                      (color, i) => (
-                        <span
-                          key={i}
-                          style={{
-                            width: 8,
-                            height: 8,
-                            borderRadius: "50%",
-                            backgroundColor: color as string,
-                          }}
-                        />
-                      ),
-                    )}
-                  </div>
-                  <span style={{ ...styles.themeName, color: t.theme.foreground as string }}>
-                    {t.name}
-                  </span>
-                  <span
+              {[...THEMES, ...customThemes].map((t) => {
+                const isCustom = customThemes.some((c) => c.name === t.name);
+                return (
+                  <button
+                    key={t.name}
+                    onClick={() => setThemeName(t.name)}
                     style={{
-                      ...styles.themeBg,
-                      backgroundColor: t.theme.background as string,
+                      ...styles.themeBtn,
+                      ...(themeName === t.name ? styles.themeBtnActive : {}),
                     }}
-                  />
-                </button>
-              ))}
+                  >
+                    <div style={styles.themePreview}>
+                      {[t.theme.red, t.theme.green, t.theme.yellow, t.theme.blue, t.theme.magenta, t.theme.cyan].map(
+                        (color, i) => (
+                          <span
+                            key={i}
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              backgroundColor: color as string,
+                            }}
+                          />
+                        ),
+                      )}
+                    </div>
+                    <span style={{ ...styles.themeName, color: t.theme.foreground as string }}>
+                      {t.name}
+                    </span>
+                    {isCustom && (
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          removeCustomTheme(t.name);
+                        }}
+                        style={styles.themeDelete}
+                        title="Delete custom theme"
+                      >
+                        x
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        ...styles.themeBg,
+                        backgroundColor: t.theme.background as string,
+                      }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+            <div style={styles.newThemeRow}>
+              <input
+                type="text"
+                value={newThemeName}
+                onChange={(e) => setNewThemeName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddTheme();
+                }}
+                placeholder="New theme name"
+                style={styles.newThemeInput}
+              />
+              <button onClick={handleAddTheme} style={styles.btn} title="Save the current colors as a new theme">
+                + Add
+              </button>
+            </div>
+            <div style={styles.hint}>
+              Saves the current theme's colors (including your customizations) as a new
+              editable theme.
             </div>
           </div>
 
@@ -683,6 +727,17 @@ const styles: Record<string, React.CSSProperties> = {
   themePreview: { display: "flex", gap: 3 },
   themeName: { fontSize: 11, fontWeight: 500 },
   themeBg: { position: "absolute" as const, inset: 0, zIndex: -1, borderRadius: 6 },
+  themeDelete: {
+    position: "absolute" as const, top: 4, right: 6, zIndex: 1,
+    width: 16, height: 16, lineHeight: "15px", textAlign: "center" as const,
+    borderRadius: 3, background: "rgba(0, 0, 0, 0.35)", color: "#cdd6f4",
+    fontSize: 11, cursor: "pointer",
+  },
+  newThemeRow: { display: "flex", gap: 6, marginTop: 8 },
+  newThemeInput: {
+    flex: 1, minWidth: 0, background: "#181825", border: "1px solid #45475a",
+    borderRadius: 4, color: "#cdd6f4", fontSize: 12, padding: "4px 8px",
+  },
   empty: { color: "#585b70", fontSize: 12, padding: 12, textAlign: "center" as const },
   preview: {
     background: "#1e1e2e", border: "1px solid #313244", borderRadius: 4,

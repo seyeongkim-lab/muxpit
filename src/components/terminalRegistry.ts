@@ -41,8 +41,12 @@ export const destroyAllTerminals = (leafIds: string[]) => {
 
 // Apply theme changes to all existing terminals in real-time.
 useSettingsStore.subscribe((state, prev) => {
-  if (state.themeName !== prev.themeName || state.customColors !== prev.customColors) {
-    const theme = getResolvedTheme(state.themeName, state.customColors);
+  if (
+    state.themeName !== prev.themeName ||
+    state.customColors !== prev.customColors ||
+    state.customThemes !== prev.customThemes
+  ) {
+    const theme = getResolvedTheme(state.themeName, state.customColors, state.customThemes);
     terminalInstances.forEach(({ surface }) => {
       surface.setTheme(theme);
     });

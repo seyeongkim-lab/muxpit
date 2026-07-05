@@ -107,6 +107,31 @@ export const THEMES: ThemeEntry[] = [
     },
   },
   {
+    name: "Tokyo Night Storm",
+    theme: {
+      background: "#24283b",
+      foreground: "#c0caf5",
+      cursor: "#c0caf5",
+      selectionBackground: "#364a82",
+      black: "#1d202f",
+      red: "#f7768e",
+      green: "#9ece6a",
+      yellow: "#e0af68",
+      blue: "#7aa2f7",
+      magenta: "#bb9af7",
+      cyan: "#7dcfff",
+      white: "#a9b1d6",
+      brightBlack: "#4e5575",
+      brightRed: "#f7768e",
+      brightGreen: "#9ece6a",
+      brightYellow: "#e0af68",
+      brightBlue: "#7aa2f7",
+      brightMagenta: "#bb9af7",
+      brightCyan: "#7dcfff",
+      brightWhite: "#c0caf5",
+    },
+  },
+  {
     name: "Nord",
     theme: {
       background: "#2e3440",
@@ -183,8 +208,13 @@ export const THEMES: ThemeEntry[] = [
   },
 ];
 
-export const getThemeByName = (name: string): ThemeEntry =>
-  THEMES.find((t) => t.name === name) ?? THEMES[0];
+export const getThemeByName = (
+  name: string,
+  customThemes: ThemeEntry[] = [],
+): ThemeEntry =>
+  customThemes.find((t) => t.name === name) ??
+  THEMES.find((t) => t.name === name) ??
+  THEMES[0];
 
 // Only string-valued theme keys (excludes extendedAnsi which is string[])
 export type ThemeColorKey = Exclude<{
@@ -208,8 +238,12 @@ export const THEME_COLOR_GROUPS: { label: string; keys: ThemeColorKey[] }[] = [
 
 export type CustomColors = Record<string, Partial<Record<ThemeColorKey, string>>>;
 
-export const getResolvedTheme = (name: string, customColors: CustomColors): TerminalTheme => {
-  const base = getThemeByName(name).theme;
+export const getResolvedTheme = (
+  name: string,
+  customColors: CustomColors,
+  customThemes: ThemeEntry[] = [],
+): TerminalTheme => {
+  const base = getThemeByName(name, customThemes).theme;
   const overrides = customColors[name];
   if (!overrides) return base;
   return { ...base, ...overrides };

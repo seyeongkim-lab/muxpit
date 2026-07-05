@@ -147,6 +147,7 @@ export const App = () => {
   const uiFontSize = useSettingsStore((s) => s.fontSize);
   const themeName = useSettingsStore((s) => s.themeName);
   const customColors = useSettingsStore((s) => s.customColors);
+  const customThemes = useSettingsStore((s) => s.customThemes);
   const dashboardLayout = useSettingsStore((s) => s.dashboardLayout);
   const activeInfo = useWorkspaceInfoStore((s) => activeId ? s.info[activeId] : undefined);
   const fileLeaf = activeWs
@@ -167,8 +168,8 @@ export const App = () => {
   // Push resolved theme colours onto :root as CSS custom properties so the
   // sidebar/toolbar chrome stays in sync when the user switches themes.
   useEffect(() => {
-    applyThemeVars(getResolvedTheme(themeName, customColors));
-  }, [themeName, customColors]);
+    applyThemeVars(getResolvedTheme(themeName, customColors, customThemes));
+  }, [themeName, customColors, customThemes]);
 
   // Use Tauri's webview page-zoom (same mechanism as Ctrl+mouse-wheel in a browser).
   // The CSS `zoom` property scales pixels after layout, so DOM APIs like clientWidth
