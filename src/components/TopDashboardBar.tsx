@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore, collectLeafIds } from "../stores/workspace";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
+import { useTmuxSessionsStore } from "../stores/tmuxSessions";
+import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { destroyAllTerminals } from "./terminalRegistry";
 import type { SshConnection } from "../utils/sshConnection";
+import { buildWorkspaceTabView } from "../utils/workspaceTabTitle";
 
 interface SidebarMonitorInfo {
   monitorId: string;
@@ -83,90 +86,12 @@ export const TopDashboardBar = ({
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
   const setActive = useWorkspaceStore((s) => s.setActive);
   const sshHosts = useSshHostsStore((s) => s.hosts);
-  const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
-  const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
+  const infoMap = useWorkspaceInfoStore((s) => s.info);
+  const tmuxAttach = useTmuxSessionsStore((s) => s._attach);
+  const tmuxByWs = useTmuxSessionsStore((s) => s.byWs);
   const [hoveredTab, setHoveredTab] = useState<TopTab | null>(null);
   const [pinnedTab, setPinnedTab] = useState<TopTab | null>(null);
   const visibleTab = pinnedTab ?? hoveredTab;
-
-  useEffect(() => {
-    if (!monitor) return;
-    let active = true;
-    invoke("start_monitor", {
-      monitorId: monitor.monitorId,
-      sshCommand: monitor.sshCommand,
-      sshConnection: monitor.sshConnection ?? null,
-    }).catch((err) => {
-      if (active) console.error("start_monitor error:", err);
-    });
-
-    return () => {
-      active = false;
-      invoke("stop_monitor", { monitorId: monitor.monitorId }).catch(() => {});
-      useMonitorStore.getState().clearMonitor(monitor.monitorId);
-    };
-  }, [monitor]);
-
-  useEffect(() => {
-    if (!monitor) return;
-    const monitorId = monitor.monitorId;
-    const unlisten = listen<MonitorDataEvent>("monitor-data", (event) => {
-      const d = event.payload;
-      if (d.monitor_id !== monitorId) return;
-
-      useMonitorStore.getState().pushSnapshot(monitorId, {
-        cpuPercent: d.cpu_percent,
-        memTotalMb: d.mem_total_mb,
-        memUsedMb: d.mem_used_mb,
-        memPercent: d.mem_percent,
-        loadAvg: d.load_avg,
-        processes: d.processes.map((process) => ({
-          pid: process.pid,
-          user: process.user,
-          cpu: process.cpu,
-          mem: process.mem,
-          command: process.command,
-        })),
-        hostname: d.hostname,
-        timestamp: d.timestamp,
-        error: d.error,
-        net: d.net
-          ? {
-              rxBytesPerSec: d.net.rx_bytes_per_sec,
-              txBytesPerSec: d.net.tx_bytes_per_sec,
-              linkSpeedMbps: d.net.link_speed_mbps,
-            }
-          : null,
-        disks: (d.disks ?? []).map((disk) => ({
-          mount: disk.mount,
-          totalGb: disk.total_gb,
-          usedGb: disk.used_gb,
-          percent: disk.percent,
-        })),
-        claudeSessions: (d.claude_sessions ?? []).map((session) => ({
-          project: session.project,
-          projectPath: session.project_path,
-          sessionId: session.session_id,
-          startedAt: session.started_at,
-          lastActivity: session.last_activity,
-          messageCount: session.message_count,
-        })),
-      });
-    });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [monitor]);
-
-  const monitorSummary = useMemo(() => {
-    if (!monitor) return "off";
-    if (!latestSnapshot) return monitor.sshTarget;
-    const cpu = Number.isFinite(latestSnapshot.cpuPercent)
-      ? `${Math.round(latestSnapshot.cpuPercent)}%`
-      : "--";
-    return `${cpu} ${formatMemoryMb(latestSnapshot.memUsedMb)}`;
-  }, [latestSnapshot, monitor]);
 
   const closeWorkspace = (event: React.MouseEvent, id: string) => {
     event.stopPropagation();
@@ -190,6 +115,7 @@ export const TopDashboardBar = ({
 
   return (
     <div style={styles.wrapper} onMouseLeave={hideTab}>
+      <MonitorLifecycle monitor={monitor} />
       <div data-tauri-drag-region style={styles.bar} onDoubleClick={onWindowMaximize}>
         <div data-tauri-drag-region style={styles.brandGroup}>
           <span className="wmux-logo" style={styles.logo}>wmux</span>
@@ -197,17 +123,28 @@ export const TopDashboardBar = ({
         <div style={styles.sessionTabs} onDoubleClick={(event) => event.stopPropagation()}>
           {workspaces.map((workspace, index) => {
             const isActive = workspace.id === activeId;
-            const paneCount = collectLeafIds(workspace.layout).length;
+            const tabView = buildWorkspaceTabView(
+              workspace,
+              infoMap[workspace.id],
+              tmuxAttach[workspace.id],
+              tmuxByWs[workspace.id]?.sessions,
+            );
+            const paneCount = tabView.paneCount;
             return (
               <button
                 key={workspace.id}
                 className={`wmux-btn${isActive ? " wmux-ws-active" : ""}`}
                 onClick={() => setActive(workspace.id)}
                 style={{ ...styles.sessionTab, ...(isActive ? styles.sessionTabActive : {}) }}
-                title={`${workspace.name} - ${paneCount} pane${paneCount === 1 ? "" : "s"}`}
+                title={[
+                  tabView.title,
+                  workspace.name !== tabView.title ? workspace.name : null,
+                  tabView.detail,
+                  `${paneCount} pane${paneCount === 1 ? "" : "s"}`,
+                ].filter(Boolean).join(" - ")}
               >
                 <span style={styles.sessionIndex}>{index + 1}</span>
-                <span style={styles.sessionTabName}>{workspace.name}</span>
+                <span style={styles.sessionTabName}>{tabView.title}</span>
                 {paneCount > 1 && <span style={styles.sessionPaneCount}>{paneCount}</span>}
                 <span
                   role="button"
@@ -239,10 +176,9 @@ export const TopDashboardBar = ({
             onMouseEnter={() => showTab("hosts")}
             onClick={() => togglePinned("hosts")}
           />
-          <TopTabButton
+          <MonitorTabButton
+            monitor={monitor}
             active={visibleTab === "monitor"}
-            label="Monitor"
-            value={monitorSummary}
             onMouseEnter={() => showTab("monitor")}
             onClick={() => togglePinned("monitor")}
           />
@@ -336,38 +272,165 @@ export const TopDashboardBar = ({
             </div>
           )}
           {visibleTab === "monitor" && (
-            <div style={styles.monitorPanel}>
-              {!monitor && <div style={styles.statusText}>No SSH monitor</div>}
-              {monitor && (
-                <>
-                  <div style={styles.monitorTop}>
-                    <div>
-                      <span className="wmux-section-label">MONITOR</span>
-                      <div style={styles.monitorTarget}>{monitor.sshTarget}</div>
-                    </div>
-                    {onCloseMonitor && (
-                      <button className="wmux-btn" onClick={onCloseMonitor} style={styles.smallButton}>
-                        x
-                      </button>
-                    )}
-                  </div>
-                  {latestSnapshot ? (
-                    <div style={styles.monitorGrid}>
-                      <Metric label="CPU" value={`${Math.round(latestSnapshot.cpuPercent)}%`} />
-                      <Metric label="MEM" value={formatMemoryMb(latestSnapshot.memUsedMb)} />
-                      <Metric label="LOAD" value={latestSnapshot.loadAvg?.[0]?.toFixed(2) ?? "--"} />
-                    </div>
-                  ) : (
-                    <div style={styles.statusText}>waiting for data</div>
-                  )}
-                </>
-              )}
-            </div>
+            <MonitorPopover monitor={monitor} onCloseMonitor={onCloseMonitor} />
           )}
         </div>
       )}
     </div>
   );
+};
+
+const MonitorLifecycle = ({ monitor }: { monitor?: SidebarMonitorInfo | null }) => {
+  useEffect(() => {
+    if (!monitor) return;
+    let active = true;
+    invoke("start_monitor", {
+      monitorId: monitor.monitorId,
+      sshCommand: monitor.sshCommand,
+      sshConnection: monitor.sshConnection ?? null,
+    }).catch((err) => {
+      if (active) console.error("start_monitor error:", err);
+    });
+
+    return () => {
+      active = false;
+      invoke("stop_monitor", { monitorId: monitor.monitorId }).catch(() => {});
+      useMonitorStore.getState().clearMonitor(monitor.monitorId);
+    };
+  }, [monitor]);
+
+  useEffect(() => {
+    if (!monitor) return;
+    const monitorId = monitor.monitorId;
+    const unlisten = listen<MonitorDataEvent>("monitor-data", (event) => {
+      const d = event.payload;
+      if (d.monitor_id !== monitorId) return;
+
+      useMonitorStore.getState().pushSnapshot(monitorId, {
+        cpuPercent: d.cpu_percent,
+        memTotalMb: d.mem_total_mb,
+        memUsedMb: d.mem_used_mb,
+        memPercent: d.mem_percent,
+        loadAvg: d.load_avg,
+        processes: d.processes.map((process) => ({
+          pid: process.pid,
+          user: process.user,
+          cpu: process.cpu,
+          mem: process.mem,
+          command: process.command,
+        })),
+        hostname: d.hostname,
+        timestamp: d.timestamp,
+        error: d.error,
+        net: d.net
+          ? {
+              rxBytesPerSec: d.net.rx_bytes_per_sec,
+              txBytesPerSec: d.net.tx_bytes_per_sec,
+              linkSpeedMbps: d.net.link_speed_mbps,
+            }
+          : null,
+        disks: (d.disks ?? []).map((disk) => ({
+          mount: disk.mount,
+          totalGb: disk.total_gb,
+          usedGb: disk.used_gb,
+          percent: disk.percent,
+        })),
+        claudeSessions: (d.claude_sessions ?? []).map((session) => ({
+          project: session.project,
+          projectPath: session.project_path,
+          sessionId: session.session_id,
+          startedAt: session.started_at,
+          lastActivity: session.last_activity,
+          messageCount: session.message_count,
+        })),
+      });
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [monitor]);
+
+  return null;
+};
+
+const MonitorTabButton = ({
+  monitor,
+  active,
+  onMouseEnter,
+  onClick,
+}: {
+  monitor?: SidebarMonitorInfo | null;
+  active: boolean;
+  onMouseEnter: () => void;
+  onClick: () => void;
+}) => {
+  const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
+  const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
+  const value = monitorSummary(monitor, latestSnapshot);
+
+  return (
+    <TopTabButton
+      active={active}
+      label="Monitor"
+      value={value}
+      onMouseEnter={onMouseEnter}
+      onClick={onClick}
+    />
+  );
+};
+
+const MonitorPopover = ({
+  monitor,
+  onCloseMonitor,
+}: {
+  monitor?: SidebarMonitorInfo | null;
+  onCloseMonitor?: () => void;
+}) => {
+  const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
+  const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
+
+  return (
+    <div style={styles.monitorPanel}>
+      {!monitor && <div style={styles.statusText}>No SSH monitor</div>}
+      {monitor && (
+        <>
+          <div style={styles.monitorTop}>
+            <div>
+              <span className="wmux-section-label">MONITOR</span>
+              <div style={styles.monitorTarget}>{monitor.sshTarget}</div>
+            </div>
+            {onCloseMonitor && (
+              <button className="wmux-btn" onClick={onCloseMonitor} style={styles.smallButton}>
+                x
+              </button>
+            )}
+          </div>
+          {latestSnapshot ? (
+            <div style={styles.monitorGrid}>
+              <Metric label="CPU" value={`${Math.round(latestSnapshot.cpuPercent)}%`} />
+              <Metric label="MEM" value={formatMemoryMb(latestSnapshot.memUsedMb)} />
+              <Metric label="LOAD" value={latestSnapshot.loadAvg?.[0]?.toFixed(2) ?? "--"} />
+            </div>
+          ) : (
+            <div style={styles.statusText}>waiting for data</div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+const monitorSummary = (
+  monitor: SidebarMonitorInfo | null | undefined,
+  latestSnapshot: MonitorSnapshot | undefined,
+): string => {
+  if (!monitor) return "off";
+  if (!latestSnapshot) return monitor.sshTarget;
+  const cpu = Number.isFinite(latestSnapshot.cpuPercent)
+    ? `${Math.round(latestSnapshot.cpuPercent)}%`
+    : "--";
+  return `${cpu} ${formatMemoryMb(latestSnapshot.memUsedMb)}`;
 };
 
 const TopTabButton = ({
