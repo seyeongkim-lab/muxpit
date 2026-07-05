@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CustomColors, ThemeColorKey } from "../themes";
+import { THEMES, type CustomColors, type TerminalTheme, type ThemeColorKey, type ThemeEntry } from "../themes.ts";
 import { shouldEnableWebglRendererByDefault } from "../utils/runtimePlatform.ts";
 
 export type PrefixKey = "off" | "ctrl+b" | "ctrl+shift+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
@@ -65,6 +65,7 @@ interface SettingsState {
   fontFamily: string; // derived CSS/xterm stack string, kept in sync
   themeName: string;
   customColors: CustomColors;
+  customThemes: ThemeEntry[];
   prefixKey: PrefixKey;
   dashboardLayout: DashboardLayout;
   enableWebglRenderer: boolean;
@@ -85,6 +86,8 @@ interface SettingsState {
   setCustomColor: (themeName: string, key: ThemeColorKey, color: string) => void;
   resetCustomColors: (themeName: string) => void;
   resetSingleColor: (themeName: string, key: ThemeColorKey) => void;
+  addCustomTheme: (name: string, theme: TerminalTheme) => string;
+  removeCustomTheme: (name: string) => void;
   setPrefixKey: (key: PrefixKey) => void;
   setDashboardLayout: (layout: DashboardLayout) => void;
   setEnableWebglRenderer: (enabled: boolean) => void;
@@ -142,6 +145,21 @@ const savedFamilies: string[] = Array.isArray(saved.fontFamilies)
   ? saved.fontFamilies.filter((f: unknown): f is string => typeof f === "string" && f.length > 0)
   : [];
 const initialFamilies = savedFamilies.length > 0 ? savedFamilies : DEFAULT_FONT_FAMILIES;
+const isValidThemeEntry = (value: unknown): value is ThemeEntry => {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<ThemeEntry>;
+  return (
+    typeof entry.name === "string" &&
+    entry.name.trim() !== "" &&
+    !!entry.theme &&
+    typeof entry.theme === "object"
+  );
+};
+
+const initialCustomThemes: ThemeEntry[] = Array.isArray(saved.customThemes)
+  ? saved.customThemes.filter(isValidThemeEntry)
+  : [];
+
 const savedSessionListMetadata: Partial<SessionListMetadataSettings> =
   saved.sessionListMetadata && typeof saved.sessionListMetadata === "object"
     ? saved.sessionListMetadata as Partial<SessionListMetadataSettings>
@@ -164,6 +182,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontFamily: buildFontStack(initialFamilies),
   themeName: saved.themeName ?? "Catppuccin Mocha",
   customColors: saved.customColors ?? {},
+  customThemes: initialCustomThemes,
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
   dashboardLayout: storedDashboardLayout(saved.dashboardLayout),
   enableWebglRenderer: saved.enableWebglRenderer ?? defaultEnableWebglRenderer,
@@ -236,6 +255,37 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       next[themeName] = themeOverrides;
     }
     set({ customColors: next });
+    saveSettings(get());
+  },
+
+  addCustomTheme: (name: string, theme: TerminalTheme) => {
+    const trimmed = name.trim() || "Custom theme";
+    const taken = new Set([
+      ...THEMES.map((t) => t.name),
+      ...get().customThemes.map((t) => t.name),
+    ]);
+    let finalName = trimmed;
+    let suffix = 2;
+    while (taken.has(finalName)) finalName = `${trimmed} ${suffix++}`;
+    set((s) => ({
+      customThemes: [...s.customThemes, { name: finalName, theme }],
+      themeName: finalName,
+    }));
+    saveSettings(get());
+    return finalName;
+  },
+
+  removeCustomTheme: (name: string) => {
+    set((s) => {
+      if (!s.customThemes.some((t) => t.name === name)) return s;
+      const customColors = { ...s.customColors };
+      delete customColors[name];
+      return {
+        customThemes: s.customThemes.filter((t) => t.name !== name),
+        customColors,
+        themeName: s.themeName === name ? THEMES[0].name : s.themeName,
+      };
+    });
     saveSettings(get());
   },
 
@@ -314,6 +364,7 @@ const saveSettings = (state: SettingsState) => {
         fontFamilies: state.fontFamilies,
         themeName: state.themeName,
         customColors: state.customColors,
+        customThemes: state.customThemes,
         prefixKey: state.prefixKey,
         dashboardLayout: state.dashboardLayout,
         enableWebglRenderer: state.enableWebglRenderer,

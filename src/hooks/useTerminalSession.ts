@@ -90,7 +90,7 @@ const createConfiguredSurface = (clipboard: TerminalClipboardPort): TerminalSurf
   return createTerminalSurface({
     fontSize: settings.fontSize,
     fontFamily: settings.fontFamily,
-    theme: getResolvedTheme(settings.themeName, settings.customColors),
+    theme: getResolvedTheme(settings.themeName, settings.customColors, settings.customThemes),
     enableWebglRenderer: settings.enableWebglRenderer,
     clearStaleInputBufferAfterTextInput: SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT,
     openLink: (uri) => open(uri).catch(() => {}),
