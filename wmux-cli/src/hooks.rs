@@ -565,6 +565,9 @@ fn hook_session_params(
     ) {
         params.insert("cwd".to_string(), json!(cwd));
     }
+    if let Some(status) = hook_status_text(event, payload) {
+        params.insert("status".to_string(), json!(status));
+    }
     insert_env(&mut params, "workspace_id", "WMUX_WORKSPACE_ID");
     insert_env(&mut params, "surface_id", "WMUX_SURFACE_ID");
     insert_env(
@@ -573,6 +576,28 @@ fn hook_session_params(
         "WMUX_AGENT_SESSION_TOKEN",
     );
     Some(params)
+}
+
+fn hook_status_text(event: AgentHookEvent, payload: &Value) -> Option<String> {
+    let value = match event {
+        AgentHookEvent::UserPromptSubmit => payload_string(
+            payload,
+            &[
+                "prompt",
+                "user_prompt",
+                "userPrompt",
+                "message",
+                "text",
+                "input",
+            ],
+        ),
+        AgentHookEvent::Stop | AgentHookEvent::SubagentStop => {
+            payload_string(payload, &["message", "summary"]).or_else(|| Some("done".to_string()))
+        }
+        AgentHookEvent::Notification => payload_string(payload, &["message", "body", "text"]),
+        _ => None,
+    }?;
+    Some(value.chars().take(512).collect())
 }
 
 fn is_valid_agent_session_id(value: &str) -> bool {
@@ -1073,7 +1098,26 @@ mod tests {
             params.get("cwd").and_then(Value::as_str),
             Some("/home/me/codex-project")
         );
+        assert_eq!(params.get("status"), None);
         assert_eq!(params.get("transcript_path"), None);
+    }
+
+    #[test]
+    fn hook_session_params_extracts_prompt_status() {
+        let params = hook_session_params(
+            Agent::Codex,
+            AgentHookEvent::UserPromptSubmit,
+            &json!({
+                "session_id": "11111111-2222-3333-4444-555555555555",
+                "prompt": "Implement AI tab status"
+            }),
+        )
+        .expect("session params");
+
+        assert_eq!(
+            params.get("status").and_then(Value::as_str),
+            Some("Implement AI tab status")
+        );
     }
 
     #[test]
@@ -1112,6 +1156,7 @@ mod tests {
             &json!({
                 "sessionId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
                 "workspacePaths": ["/home/me/claude-project"],
+                "prompt": "Review the failing test",
                 "transcriptPath": "/home/me/.claude/projects/session.jsonl"
             }),
         )
@@ -1129,6 +1174,10 @@ mod tests {
         assert_eq!(
             params.get("cwd").and_then(Value::as_str),
             Some("/home/me/claude-project")
+        );
+        assert_eq!(
+            params.get("status").and_then(Value::as_str),
+            Some("Review the failing test")
         );
         assert_eq!(params.get("transcript_path"), None);
 

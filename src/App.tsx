@@ -42,7 +42,10 @@ import { shouldShowNotificationForTarget } from "./utils/notificationRouting";
 import { playNotificationSound } from "./utils/notificationSound";
 import { matchesPrefixKey } from "./utils/prefixKey";
 import { getRuntimePlatform } from "./utils/runtimePlatform";
-import { aiStatusFromHookNotification } from "./utils/aiTerminalStatus";
+import {
+  aiStatusFromAgentSessionEvent,
+  aiStatusFromHookNotification,
+} from "./utils/aiTerminalStatus";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
 import { isAgentSessionEndEvent } from "./utils/agentSession";
@@ -469,12 +472,26 @@ export const App = () => {
       surface_id?: string;
       session_id?: string;
       cwd?: string;
+      status?: string;
     }>(
       "wmux-agent-session",
       (event) => {
         const { source, workspace_id, surface_id, session_id } = event.payload;
         if ((source !== "codex" && source !== "claude") || !workspace_id || !surface_id || !session_id) {
           return;
+        }
+
+        const aiStatus = aiStatusFromAgentSessionEvent(
+          source,
+          event.payload.event,
+          event.payload.status,
+        );
+        if (aiStatus) {
+          useWorkspaceInfoStore.getState().patchInfo(workspace_id, {
+            aiStatusLabel: aiStatus.label,
+            aiStatusKind: aiStatus.kind,
+            aiStatusUpdatedAt: aiStatus.updatedAt,
+          });
         }
 
         if (isAgentSessionEndEvent(event.payload.event)) {
