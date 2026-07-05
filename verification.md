@@ -89,3 +89,12 @@
 - Build: `pnpm tauri build --no-bundle` 통과. 첫 시도는 Tauri CLI가 `cargo`를 PATH에서 못 찾아 실패했고, `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
 - Shortcut fix: `C:\Users\one\Desktop\wmux.lnk` target을 `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`로 갱신.
 - 갱신 확인: `LastWriteTime` 2026-07-05 10:06:31, SHA256 `12A1328BEB4377791FFDD4F0D7BFB9F4A183B07C0206CD93B7787E07942989A4`.
+
+## 2026-07-05 Single-Line Top Dashboard — Windows Deploy
+
+- Commit: `f4b53a1` (`feat/osc52-clipboard`).
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- Build: `pnpm tauri build --no-bundle` 통과.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 10:38:28, SHA256 `2CDD2DCA4D2085EAED23FCEEA4819820848777147B71F4D2E7EA1AAB5E2AD682`.
