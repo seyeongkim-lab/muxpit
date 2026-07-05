@@ -18,3 +18,7 @@
 - Manual smoke test needed: 터미널에서 `printf '\033]0;nvim package.json\007'` 같은 OSC title을 보낸 뒤 상단 session tab 제목이 바뀌는지 확인.
 - Manual smoke test needed: Codex/Claude/SSH/tmux workspace에서 tab 제목이 `codex: cwd`, `ssh target`, `tmux: session` 형태로 표시되는지 확인.
 - Manual smoke test needed: SSH monitor가 켜진 상태에서 Monitor 숫자가 갱신되어도 session tab 전환/hover가 끊기지 않는지 확인.
+
+## 2026-07-05 Top Tab Hover Animation
+
+- Manual smoke test needed: 상단 workspace tab과 Hosts/Monitor tab에 마우스를 올릴 때 scale/transition 없이 즉시 반응하는지 확인.

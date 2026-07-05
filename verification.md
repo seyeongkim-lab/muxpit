@@ -109,3 +109,12 @@
 - Build: `pnpm tauri build --no-bundle` 첫 시도는 Tauri CLI가 `cargo`를 PATH에서 못 찾아 실패했고, `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
 - Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
 - 갱신 확인: `LastWriteTime` 2026-07-05 11:05:49, SHA256 `EEC19FECE49F2B97CE158B48D2BAEE07080F74D38ACE5E030D374DA2D72E3641`.
+
+## 2026-07-05 Top Tab Hover Animation — Windows Deploy
+
+- Commit: `0a768e7` (`feat/osc52-clipboard`).
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- Build: `pnpm tauri build --no-bundle` 첫 시도는 실행 중인 `wmux.exe` 파일 잠금으로 실패했고, 기존 exe를 같은 release 폴더의 `.bak-20260705111931`로 이동 후 재실행 성공.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 11:20:11, SHA256 `729C6E6641B2A1FB276E457325B60FCF50D3881E034B406E30A1EB616DD6BFAA`.
+- Cleanup note: `src-tauri\target\release\wmux.exe.bak-20260705111931` 삭제는 실행 중인 이전 프로세스가 파일을 잡고 있어 권한 거부됨.
