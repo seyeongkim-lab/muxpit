@@ -38,6 +38,11 @@ const pathBaseName = (path: string | null | undefined): string | null => {
   return parts[parts.length - 1] ?? compactPath(trimmed);
 };
 
+const isWindowsLocalPath = (path: string | null | undefined): boolean => {
+  const trimmed = path?.trim();
+  return !!trimmed && (/^[A-Za-z]:[\\/]/.test(trimmed) || /^\\\\/.test(trimmed));
+};
+
 const usefulTitle = (title: string | null | undefined): string | null => {
   const trimmed = title?.trim();
   if (!trimmed || trimmed.length < 3) return null;
@@ -78,6 +83,9 @@ const sshTargetForLeaf = (leaf: LeafNode | null): string | null => {
   const parsed = parseSshCommandLine(leaf.sshCommand ?? leaf.command);
   return parsed?.connection.target ?? leaf.aiSshTarget ?? null;
 };
+
+const sshCwdDetail = (path: string | null | undefined): string | null =>
+  isWindowsLocalPath(path) ? null : pathBaseName(path);
 
 const tmuxSessionName = (
   attach: AttachInfo | undefined,
@@ -131,11 +139,6 @@ export const buildWorkspaceTabView = (
     };
   }
 
-  const title = usefulTitle(info?.terminalTitle);
-  if (title) {
-    return { title, detail: cwdBase, paneCount };
-  }
-
   const tmuxName = tmuxSessionName(attach, tmuxSessions);
   if (tmuxName) {
     return {
@@ -149,9 +152,14 @@ export const buildWorkspaceTabView = (
   if (sshTarget || info?.agent === "ssh") {
     return {
       title: sshTarget ?? "ssh",
-      detail: cwdBase,
+      detail: sshCwdDetail(info?.cwd ?? focusedLeaf?.lastCwd),
       paneCount,
     };
+  }
+
+  const title = usefulTitle(info?.terminalTitle);
+  if (title) {
+    return { title, detail: cwdBase, paneCount };
   }
 
   const process = usefulProcess(info?.processName);
