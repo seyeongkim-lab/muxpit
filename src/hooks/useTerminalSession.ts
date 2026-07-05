@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "../stores/workspace";
 import { getResolvedTheme } from "../themes";
 import { useWorkspaceInfoStore } from "./useWorkspaceInfo";
 import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
+import { parseAiTerminalStatus } from "../utils/aiTerminalStatus";
 import { playNotificationSound } from "../utils/notificationSound";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { type PtyExit, type PtyOutput, spawnTerminalPty } from "../utils/ptyBackend";
@@ -205,6 +206,27 @@ export const useTerminalSession = ({
     const tmuxSession = findTerminalTmuxSession(getWorkspaces(), workspaceId, leafId);
     const outputParser = new TerminalOutputParser({ platform: TERMINAL_INPUT_PLATFORM });
     const writeBuffer = createTerminalWriteBuffer((data) => surface.write(data));
+    let aiStatusSnapshotFrame: number | null = null;
+    const cancelAiStatusSnapshot = () => {
+      if (aiStatusSnapshotFrame === null) return;
+      window.cancelAnimationFrame(aiStatusSnapshotFrame);
+      aiStatusSnapshotFrame = null;
+    };
+    const scheduleAiStatusSnapshot = () => {
+      if (aiStatusSnapshotFrame !== null) return;
+      aiStatusSnapshotFrame = window.requestAnimationFrame(() => {
+        aiStatusSnapshotFrame = null;
+        const aiKind = findTerminalAiKind(getWorkspaces(), workspaceId, leafId);
+        if (!aiKind) return;
+        const status = parseAiTerminalStatus(surface.getVisibleText(24));
+        if (!status) return;
+        useWorkspaceInfoStore.getState().patchInfo(workspaceId, {
+          aiStatusLabel: status.label,
+          aiStatusKind: status.kind,
+          aiStatusUpdatedAt: status.updatedAt,
+        });
+      });
+    };
     const writeImmediate = (data: string) => {
       writeBuffer.flush();
       surface.write(data);
@@ -215,6 +237,9 @@ export const useTerminalSession = ({
       writeBuffer.write(data);
       for (const event of outputParser.parse(data)) {
         handleTerminalOutputEvent(event, workspaceId, leafId);
+      }
+      if (findTerminalAiKind(getWorkspaces(), workspaceId, leafId)) {
+        scheduleAiStatusSnapshot();
       }
     };
 
@@ -325,6 +350,7 @@ export const useTerminalSession = ({
       onData.dispose();
       onResize.dispose();
       onPaste.dispose();
+      cancelAiStatusSnapshot();
       writeBuffer.dispose();
       surface.dispose();
     };

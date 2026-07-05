@@ -1,12 +1,14 @@
 import type { WorkspaceInfo } from "../hooks/useWorkspaceInfo.ts";
 import type { AttachInfo, TmuxSession } from "../stores/tmuxSessions.ts";
 import type { LeafNode, LayoutNode, Workspace } from "../stores/workspace.ts";
+import type { AiTerminalStatusKind } from "./aiTerminalStatus.ts";
 import { parseSshCommandLine } from "./sshConnection.ts";
 
 export interface WorkspaceTabView {
   title: string;
   detail: string | null;
   paneCount: number;
+  statusKind?: AiTerminalStatusKind | null;
 }
 
 const SHELL_NAMES = new Set([
@@ -54,6 +56,12 @@ const usefulProcess = (processName: string | null | undefined): string | null =>
   return trimmed;
 };
 
+const usefulAiStatus = (label: string | null | undefined): string | null => {
+  const trimmed = label?.trim();
+  if (!trimmed || trimmed.length < 2) return null;
+  return trimmed;
+};
+
 const collectLeafViews = (node: LayoutNode): LeafNode[] => {
   if (node.type === "leaf") return [node];
   if (node.type === "split") return [...collectLeafViews(node.children[0]), ...collectLeafViews(node.children[1])];
@@ -95,18 +103,39 @@ export const buildWorkspaceTabView = (
   const paneCount = leaves.length;
   const focusedLeaf = findFocusedLeaf(workspace.layout, workspace.focusedLeafId) ?? leaves[0] ?? null;
   const cwdBase = pathBaseName(info?.cwd || focusedLeaf?.lastCwd);
-  const title = usefulTitle(info?.terminalTitle);
-  if (title) {
-    return { title, detail: cwdBase, paneCount };
-  }
-
   const agent = focusedLeaf?.aiKind ?? info?.agent ?? null;
   if (agent && AI_NAMES.has(agent)) {
+    const aiStatus = usefulAiStatus(info?.aiStatusLabel);
+    if (aiStatus) {
+      return {
+        title: `${agent}: ${aiStatus}`,
+        detail: cwdBase ?? usefulProcess(info?.processName),
+        paneCount,
+        statusKind: info?.aiStatusKind ?? null,
+      };
+    }
+
+    const aiTitle = usefulTitle(info?.terminalTitle);
+    if (aiTitle) {
+      return {
+        title: aiTitle,
+        detail: cwdBase,
+        paneCount,
+        statusKind: info?.aiStatusKind ?? null,
+      };
+    }
+
     return {
       title: cwdBase ? `${agent}: ${cwdBase}` : agent,
       detail: usefulProcess(info?.processName),
       paneCount,
+      statusKind: info?.aiStatusKind ?? null,
     };
+  }
+
+  const title = usefulTitle(info?.terminalTitle);
+  if (title) {
+    return { title, detail: cwdBase, paneCount };
   }
 
   const tmuxName = tmuxSessionName(attach, tmuxSessions);
