@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { memo, useRef, useCallback } from "react";
 import { LayoutNode, useWorkspaceStore } from "../stores/workspace";
 import { TerminalLeaf } from "./Terminal";
 import { BrowserPane } from "./BrowserPane";
@@ -11,7 +11,7 @@ interface SplitPaneProps {
   workspaceId: string;
 }
 
-export const SplitPane = ({ node, workspaceId }: SplitPaneProps) => {
+const SplitPaneImpl = ({ node, workspaceId }: SplitPaneProps) => {
   if (node.type === "leaf") {
     if (node.aiKind && node.aiSshTarget) {
       // Wrap the terminal so the toolbar sits above it without breaking xterm's
@@ -55,6 +55,8 @@ export const SplitPane = ({ node, workspaceId }: SplitPaneProps) => {
   );
 };
 
+export const SplitPane = memo(SplitPaneImpl);
+
 interface SplitContainerProps {
   node: LayoutNode & { type: "split" };
   workspaceId: string;
@@ -72,17 +74,37 @@ const SplitContainer = ({ node, workspaceId }: SplitContainerProps) => {
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
+      let pendingRatio = node.ratio;
+      let frameId: number | null = null;
+
+      const commitRatio = () => {
+        frameId = null;
+        setSplitRatio(workspaceId, node.id, pendingRatio);
+      };
+
+      const queueRatio = (ratio: number) => {
+        if (!Number.isFinite(ratio)) return;
+        pendingRatio = ratio;
+        if (frameId === null) {
+          frameId = requestAnimationFrame(commitRatio);
+        }
+      };
 
       const onMouseMove = (ev: MouseEvent) => {
         const ratio = isHorizontal
           ? (ev.clientX - rect.left) / rect.width
           : (ev.clientY - rect.top) / rect.height;
-        setSplitRatio(workspaceId, node.id, ratio);
+        queueRatio(ratio);
       };
 
       const onMouseUp = () => {
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", onMouseUp);
+        if (frameId !== null) {
+          cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+        setSplitRatio(workspaceId, node.id, pendingRatio);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
       };
@@ -115,19 +137,12 @@ const SplitContainer = ({ node, workspaceId }: SplitContainerProps) => {
       {/* Divider */}
       <div
         onMouseDown={handleMouseDown}
+        className="wmux-split-divider"
         style={{
           width: isHorizontal ? 4 : "100%",
           height: isHorizontal ? "100%" : 4,
-          backgroundColor: "#313244",
           cursor: isHorizontal ? "col-resize" : "row-resize",
           flexShrink: 0,
-          transition: "background-color 0.15s",
-        }}
-        onMouseEnter={(e) => {
-          (e.target as HTMLElement).style.backgroundColor = "#89b4fa";
-        }}
-        onMouseLeave={(e) => {
-          (e.target as HTMLElement).style.backgroundColor = "#313244";
         }}
       />
 
