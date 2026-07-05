@@ -42,6 +42,7 @@ import { shouldShowNotificationForTarget } from "./utils/notificationRouting";
 import { playNotificationSound } from "./utils/notificationSound";
 import { matchesPrefixKey } from "./utils/prefixKey";
 import { getRuntimePlatform } from "./utils/runtimePlatform";
+import { aiStatusFromHookNotification } from "./utils/aiTerminalStatus";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
 import { isAgentSessionEndEvent } from "./utils/agentSession";
@@ -433,6 +434,19 @@ export const App = () => {
         }
 
         const wsId = event.payload.workspace_id ?? activeId ?? "";
+        const aiStatus = aiStatusFromHookNotification(
+          event.payload.source,
+          event.payload.event,
+          body,
+        );
+        if (aiStatus && wsId) {
+          useWorkspaceInfoStore.getState().patchInfo(wsId, {
+            aiStatusLabel: aiStatus.label,
+            aiStatusKind: aiStatus.kind,
+            aiStatusUpdatedAt: aiStatus.updatedAt,
+          });
+        }
+
         useNotificationStore.getState().addNotification(wsId, title, body);
         playNotificationSound();
 
