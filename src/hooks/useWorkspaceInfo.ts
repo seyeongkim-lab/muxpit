@@ -58,6 +58,16 @@ const emptyInfo = (prev?: WorkspaceInfo): WorkspaceInfo => ({
   aiStatusUpdatedAt: prev?.aiStatusUpdatedAt ?? null,
 });
 
+const sshInfo = (prev?: WorkspaceInfo): WorkspaceInfo => ({
+  ...emptyInfo(),
+  cwd: prev?.agent === "ssh" ? prev.cwd : "",
+  terminalTitle: prev?.agent === "ssh" ? prev.terminalTitle : null,
+  agent: "ssh",
+  aiStatusLabel: null,
+  aiStatusKind: null,
+  aiStatusUpdatedAt: null,
+});
+
 interface WorkspaceInfoState {
   info: Record<string, WorkspaceInfo>; // keyed by workspace id
   setInfo: (wsId: string, info: WorkspaceInfo) => void;
@@ -173,7 +183,7 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
 
           if (isSshLeaf(leaf)) {
             const prev = useWorkspaceInfoStore.getState().info[ws.id];
-            setInfo(ws.id, { ...emptyInfo(prev), agent: "ssh" });
+            setInfo(ws.id, sshInfo(prev));
             await Promise.all(
               collectTerminalLeaves(workspace.layout)
                 .filter((candidate) => candidate.id !== leaf.id)
