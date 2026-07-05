@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { useWorkspaceStore } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
 import { useTerminalSession } from "../hooks/useTerminalSession";
@@ -9,9 +9,10 @@ interface TerminalLeafProps {
   leafId: string;
 }
 
-export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
+export const TerminalLeaf = memo(function TerminalLeaf({ workspaceId, leafId }: TerminalLeafProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
+  const fitFrameRef = useRef<number | null>(null);
   const setFocusedLeaf = useWorkspaceStore((s) => s.setFocusedLeaf);
   const fontSize = useSettingsStore((s) => s.fontSize);
   const fontFamily = useSettingsStore((s) => s.fontFamily);
@@ -20,6 +21,22 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
   );
 
   useTerminalSession({ workspaceId, leafId, containerRef, initializedRef });
+
+  const scheduleFit = useCallback(() => {
+    if (fitFrameRef.current !== null) return;
+    fitFrameRef.current = requestAnimationFrame(() => {
+      fitFrameRef.current = null;
+      const instance = terminalInstances.get(leafId);
+      if (instance) instance.surface.fit();
+    });
+  }, [leafId]);
+
+  useEffect(() => () => {
+    if (fitFrameRef.current !== null) {
+      cancelAnimationFrame(fitFrameRef.current);
+      fitFrameRef.current = null;
+    }
+  }, []);
 
   // Apply font settings changes to existing terminals.
   // The current terminal surface renders its own canvas, so Chromium's `zoom` on <html> (used by App.tsx to
@@ -31,20 +48,19 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
     const instance = terminalInstances.get(leafId);
     if (instance) {
       instance.surface.setFont(fontSize, fontFamily);
-      requestAnimationFrame(() => instance.surface.fit());
+      scheduleFit();
     }
-  }, [fontSize, fontFamily, leafId]);
+  }, [fontSize, fontFamily, leafId, scheduleFit]);
 
   // Resize observer
   useEffect(() => {
     if (!containerRef.current) return;
     const resizeObserver = new ResizeObserver(() => {
-      const instance = terminalInstances.get(leafId);
-      if (instance) requestAnimationFrame(() => instance.surface.fit());
+      scheduleFit();
     });
     resizeObserver.observe(containerRef.current);
     return () => resizeObserver.disconnect();
-  }, [leafId]);
+  }, [scheduleFit]);
 
   // Focus management — only force-focus when the browser focus is NOT already
   // inside this terminal. A mousedown on an unfocused pane triggers
@@ -78,4 +94,4 @@ export const TerminalLeaf = ({ workspaceId, leafId }: TerminalLeafProps) => {
       }}
     />
   );
-};
+});

@@ -40,6 +40,7 @@ import {
 } from "../utils/terminalSessionLayout";
 import { buildTerminalSpawnPlan } from "../utils/terminalSpawnPlan";
 import { TerminalOutputParser, type TerminalOutputEvent } from "../utils/terminalOutput";
+import { createTerminalWriteBuffer } from "../utils/terminalWriteBuffer";
 import { terminalInstances } from "../components/terminalRegistry";
 import { createTerminalSurface, type TerminalSurface } from "../components/terminalSurface";
 
@@ -203,10 +204,15 @@ export const useTerminalSession = ({
     const reconnectExit: PtyExit[] = [];
     const tmuxSession = findTerminalTmuxSession(getWorkspaces(), workspaceId, leafId);
     const outputParser = new TerminalOutputParser({ platform: TERMINAL_INPUT_PLATFORM });
+    const writeBuffer = createTerminalWriteBuffer((data) => surface.write(data));
+    const writeImmediate = (data: string) => {
+      writeBuffer.flush();
+      surface.write(data);
+    };
 
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
-      surface.write(data);
+      writeBuffer.write(data);
       for (const event of outputParser.parse(data)) {
         handleTerminalOutputEvent(event, workspaceId, leafId);
       }
@@ -231,7 +237,7 @@ export const useTerminalSession = ({
       try {
         for (let i = 0; i < RECONNECT_BACKOFF_MS.length; i++) {
           const delay = RECONNECT_BACKOFF_MS[i];
-          surface.write(
+          writeImmediate(
             `\r\n\x1b[33m[disconnected - reconnecting in ${delay / 1000}s ` +
               `(attempt ${i + 1}/${RECONNECT_BACKOFF_MS.length})]\x1b[0m\r\n`,
           );
@@ -267,16 +273,16 @@ export const useTerminalSession = ({
             if (exits.length > 0) {
               throw new Error(describePtyExit(exits[0].code));
             }
-            surface.write(`\x1b[32m[reconnected]\x1b[0m\r\n`);
+            writeImmediate(`\x1b[32m[reconnected]\x1b[0m\r\n`);
             return;
           } catch (err) {
             reconnectOutput.length = 0;
             reconnectExit.length = 0;
             const msg = err instanceof Error ? err.message : String(err);
-            surface.write(`\x1b[31m[reconnect attempt failed: ${msg}]\x1b[0m\r\n`);
+            writeImmediate(`\x1b[31m[reconnect attempt failed: ${msg}]\x1b[0m\r\n`);
           }
         }
-        surface.write(`\r\n\x1b[31m[reconnect gave up after ${RECONNECT_BACKOFF_MS.length} attempts]\x1b[0m\r\n`);
+        writeImmediate(`\r\n\x1b[31m[reconnect gave up after ${RECONNECT_BACKOFF_MS.length} attempts]\x1b[0m\r\n`);
       } finally {
         reconnecting = false;
       }
@@ -286,7 +292,7 @@ export const useTerminalSession = ({
       if (tmuxSession && spawnCommand) {
         tryReconnect(spawnCommand, tmuxSession);
       } else {
-        surface.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
+        writeImmediate("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
       }
     };
 
@@ -319,6 +325,7 @@ export const useTerminalSession = ({
       onData.dispose();
       onResize.dispose();
       onPaste.dispose();
+      writeBuffer.dispose();
       surface.dispose();
     };
 
@@ -394,9 +401,9 @@ export const useTerminalSession = ({
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      surface.write(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
+      writeImmediate(`\r\n\x1b[31m[spawn failed: ${msg}]\x1b[0m\r\n`);
       if (spawnCommand) {
-        surface.write(`\x1b[33m[retrying with default shell]\x1b[0m\r\n`);
+        writeImmediate(`\x1b[33m[retrying with default shell]\x1b[0m\r\n`);
         try {
           ptyId = await tauriPtyBackend.spawn({
             rows: Math.max(surface.rows, 1),
@@ -414,12 +421,13 @@ export const useTerminalSession = ({
           }
         } catch (err2) {
           const msg2 = err2 instanceof Error ? err2.message : String(err2);
-          surface.write(`\r\n\x1b[31m[default shell also failed: ${msg2}]\x1b[0m\r\n`);
+          writeImmediate(`\r\n\x1b[31m[default shell also failed: ${msg2}]\x1b[0m\r\n`);
           unlistenOutput();
           unlistenExit();
           onData.dispose();
           onResize.dispose();
           onPaste.dispose();
+          writeBuffer.dispose();
           return;
         }
       } else {
@@ -428,6 +436,7 @@ export const useTerminalSession = ({
         onData.dispose();
         onResize.dispose();
         onPaste.dispose();
+        writeBuffer.dispose();
         return;
       }
     }
@@ -453,7 +462,7 @@ export const useTerminalSession = ({
     terminalInstances.set(leafId, {
       surface,
       ptyId,
-      cleanup: { unlistenOutput, unlistenExit, onData, onResize, onPaste },
+      cleanup: { unlistenOutput, unlistenExit, onData, onResize, onPaste, writeBuffer },
     });
 
     setPtyId(workspaceId, leafId, ptyId);

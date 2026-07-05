@@ -76,6 +76,21 @@
   transform: scale(0.96);
 }
 
+.wmux-top-tab,
+.wmux-top-tab:hover,
+.wmux-top-tab:active {
+  transform: none !important;
+  transition: none !important;
+}
+
+.wmux-split-divider {
+  background-color: #313244;
+}
+
+.wmux-split-divider:hover {
+  background-color: #89b4fa;
+}
+
 /* ---------- Sidebar list rows ---------- */
 
 .wmux-host-row {

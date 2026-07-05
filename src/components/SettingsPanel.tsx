@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSettingsStore, PREFIX_KEY_CHOICES, SESSION_LIST_METADATA_OPTIONS, type PrefixKey } from "../stores/settings";
+import { useSettingsStore, PREFIX_KEY_CHOICES, DASHBOARD_LAYOUT_CHOICES, SESSION_LIST_METADATA_OPTIONS, type DashboardLayout, type PrefixKey } from "../stores/settings";
 import { useWorkspaceStore } from "../stores/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
@@ -74,6 +74,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     themeName,
     customColors,
     prefixKey,
+    dashboardLayout,
     enableWebglRenderer,
     enableNotifications,
     enableNotificationSound,
@@ -83,6 +84,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     enableExperimentalAgentDangerousResume,
     sessionListMetadata,
     setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor, setPrefixKey,
+    setDashboardLayout,
     setEnableWebglRenderer,
     setEnableNotifications,
     setEnableNotificationSound,
@@ -312,6 +314,20 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               ))}
             </div>
             <div style={styles.hint}>SSH sessions show only local routing metadata such as target, panes, and tmux session.</div>
+          </div>
+
+          {/* Dashboard */}
+          <div style={styles.section}>
+            <label style={styles.label}>Dashboard</label>
+            <select
+              value={dashboardLayout}
+              onChange={(e) => setDashboardLayout(e.target.value as DashboardLayout)}
+              style={styles.select}
+            >
+              {DASHBOARD_LAYOUT_CHOICES.map((choice) => (
+                <option key={choice.value} value={choice.value}>{choice.label}</option>
+              ))}
+            </select>
           </div>
 
           {/* Experimental */}

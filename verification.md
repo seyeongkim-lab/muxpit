@@ -78,3 +78,68 @@
 - Build: `pnpm tauri build --no-bundle` 통과 (release, 37.92s). Vite chunk size warning만 잔존.
 - 갱신 확인: `LastWriteTime` 2026-06-12 13:44:44, SHA256 `FC65D4A36801AADD14F815D0A9616D0F9CA52AF3C679BAE24B82710B028882CA`.
 - 미수행 (수동 검증 필요): 실제 앱에서 Win+Shift+S 후 SSH pane Ctrl+V — WebView2의 `navigator.clipboard.read()` 권한 자동 허용 여부 확인. 거부 시 텍스트 paste로 폴백.
+
+## 2026-07-05 Top Dashboard Files Rail — Windows Deploy
+
+- Commit: `3494d75` (`feat/osc52-clipboard`). Push to `origin/feat/osc52-clipboard` was blocked by approval policy because it would send code to GitHub.
+- `cargo check` (src-tauri): 통과.
+- `cargo test` (src-tauri): 통과, 66 passed.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `pnpm run test:ts`: 140/143 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 dashboard/files 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 통과. 첫 시도는 Tauri CLI가 `cargo`를 PATH에서 못 찾아 실패했고, `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
+- Shortcut fix: `C:\Users\one\Desktop\wmux.lnk` target을 `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`로 갱신.
+- 갱신 확인: `LastWriteTime` 2026-07-05 10:06:31, SHA256 `12A1328BEB4377791FFDD4F0D7BFB9F4A183B07C0206CD93B7787E07942989A4`.
+
+## 2026-07-05 Single-Line Top Dashboard — Windows Deploy
+
+- Commit: `f4b53a1` (`feat/osc52-clipboard`).
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- Build: `pnpm tauri build --no-bundle` 통과.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 10:38:28, SHA256 `2CDD2DCA4D2085EAED23FCEEA4819820848777147B71F4D2E7EA1AAB5E2AD682`.
+
+## 2026-07-05 Top Tab Activity Labels — Windows Deploy
+
+- Commit: `5670ba2` (`feat/osc52-clipboard`).
+- `node --test tests\workspaceTabTitle.test.ts`: 통과, 5 passed.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- `pnpm run test:ts`: 145/148 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 top-tab 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 첫 시도는 Tauri CLI가 `cargo`를 PATH에서 못 찾아 실패했고, `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 11:05:49, SHA256 `EEC19FECE49F2B97CE158B48D2BAEE07080F74D38ACE5E030D374DA2D72E3641`.
+
+## 2026-07-05 Top Tab Hover Animation — Windows Deploy
+
+- Commit: `0a768e7` (`feat/osc52-clipboard`).
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- Build: `pnpm tauri build --no-bundle` 첫 시도는 실행 중인 `wmux.exe` 파일 잠금으로 실패했고, 기존 exe를 같은 release 폴더의 `.bak-20260705111931`로 이동 후 재실행 성공.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 11:20:11, SHA256 `729C6E6641B2A1FB276E457325B60FCF50D3881E034B406E30A1EB616DD6BFAA`.
+- Cleanup note: `src-tauri\target\release\wmux.exe.bak-20260705111931` 삭제는 실행 중인 이전 프로세스가 파일을 잡고 있어 권한 거부됨.
+
+## 2026-07-05 Terminal Render Batching — Windows Deploy
+
+- Commit: `66f8f7e` (`feat/osc52-clipboard`).
+- 변경 범위: PTY output frame batching, terminal `fit()` coalescing, split drag ratio RAF throttling, divider hover inline mutation 제거.
+- `node --test tests\terminalWriteBuffer.test.ts tests\terminalOutput.test.ts`: 통과, 7 passed.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- `node --test tests/*.test.ts`: 148/151 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 render batching 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 통과.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 11:40:18, SHA256 `F5598ACA143FE188A503113423718E59667D3C14CF6D951C661708BA631289D9`.
+
+## 2026-07-05 Windows IPC Collision Launch Fix — Windows Deploy
+
+- Symptom: app appeared and immediately closed.
+- Cause: stale hidden `wmux.exe` process had `MainWindowHandle = 0` and held the Windows IPC singleton mutex; new app hit `AlreadyRunning` and called `app.exit(0)`.
+- Recovery: stopped hidden process PID `60076`; launching `wmux.exe` then produced a responsive process with a real window handle.
+- Commit: `bcd2f58` (`feat/osc52-clipboard`).
+- `cargo check` (src-tauri): 통과.
+- `cargo test platform` (src-tauri): 통과, 16 passed.
+- Fix verification: with an existing wmux process present, launching the rebuilt exe stayed open and reported `MainWindowHandle = 48434618`, `Responding = True`.
+- Build: `pnpm tauri build --no-bundle` 통과.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 12:35:32, SHA256 `6E203873C670A886F53CFE8FAB598A3AD3C1158B848156FFDFCA0BBE3EF0BAEA`.
