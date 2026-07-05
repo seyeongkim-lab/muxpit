@@ -76,6 +76,13 @@
   transform: scale(0.96);
 }
 
+.wmux-top-tab,
+.wmux-top-tab:hover,
+.wmux-top-tab:active {
+  transform: none !important;
+  transition: none !important;
+}
+
 /* ---------- Sidebar list rows ---------- */
 
 .wmux-host-row {
