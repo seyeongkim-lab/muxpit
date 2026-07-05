@@ -1,3 +1,4 @@
+mod file_tree;
 mod monitor;
 mod pasted_image;
 mod platform;
@@ -145,11 +146,11 @@ async fn pty_has_agent_process(
 ) -> Result<bool, String> {
     let pid = state.get_child_pid(id)?;
     match pid {
-        Some(p) => tauri::async_runtime::spawn_blocking(move || {
-            process_tree_contains_agent(p, &agent)
-        })
-        .await
-        .map_err(|e| format!("Task join error: {e}")),
+        Some(p) => {
+            tauri::async_runtime::spawn_blocking(move || process_tree_contains_agent(p, &agent))
+                .await
+                .map_err(|e| format!("Task join error: {e}"))
+        }
         None => Ok(false),
     }
 }
@@ -159,6 +160,26 @@ async fn list_fonts() -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(platform::fonts::list_fonts_sync)
         .await
         .map_err(|e| format!("Task join error: {e}"))
+}
+
+#[tauri::command]
+async fn read_dir(path: Option<String>) -> Result<file_tree::DirListing, String> {
+    tauri::async_runtime::spawn_blocking(move || file_tree::list_local_dir(path.as_deref()))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn remote_read_dir(
+    path: String,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<file_tree::DirListing, String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || file_tree::list_remote_dir(&ssh, &path))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 #[tauri::command]
@@ -483,6 +504,8 @@ pub fn run() {
             get_session_metadata,
             pty_has_agent_process,
             list_fonts,
+            read_dir,
+            remote_read_dir,
             check_remote_clis,
             check_remote_tmux,
             save_image_locally,
