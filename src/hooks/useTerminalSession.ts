@@ -9,7 +9,7 @@ import { useWorkspaceStore } from "../stores/workspace";
 import { getResolvedTheme } from "../themes";
 import { useWorkspaceInfoStore } from "./useWorkspaceInfo";
 import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
-import { parseAiTerminalStatus } from "../utils/aiTerminalStatus";
+import { detectAiAgentName, parseAiTerminalStatus } from "../utils/aiTerminalStatus";
 import { playNotificationSound } from "../utils/notificationSound";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { type PtyExit, type PtyOutput, spawnTerminalPty } from "../utils/ptyBackend";
@@ -206,6 +206,11 @@ export const useTerminalSession = ({
     const tmuxSession = findTerminalTmuxSession(getWorkspaces(), workspaceId, leafId);
     const outputParser = new TerminalOutputParser({ platform: TERMINAL_INPUT_PLATFORM });
     const writeBuffer = createTerminalWriteBuffer((data) => surface.write(data));
+    const isAiTerminal = (data?: string): boolean => {
+      const info = useWorkspaceInfoStore.getState().info[workspaceId];
+      return !!findTerminalAiKind(getWorkspaces(), workspaceId, leafId) ||
+        !!detectAiAgentName(info?.agent, info?.processName, info?.command, data);
+    };
     let aiStatusSnapshotFrame: number | null = null;
     const cancelAiStatusSnapshot = () => {
       if (aiStatusSnapshotFrame === null) return;
@@ -216,9 +221,10 @@ export const useTerminalSession = ({
       if (aiStatusSnapshotFrame !== null) return;
       aiStatusSnapshotFrame = window.requestAnimationFrame(() => {
         aiStatusSnapshotFrame = null;
-        const aiKind = findTerminalAiKind(getWorkspaces(), workspaceId, leafId);
-        if (!aiKind) return;
-        const status = parseAiTerminalStatus(surface.getVisibleText(24));
+        if (!isAiTerminal()) return;
+        const status = parseAiTerminalStatus(surface.getVisibleText(24), Date.now(), {
+          allowFallback: true,
+        });
         if (!status) return;
         useWorkspaceInfoStore.getState().patchInfo(workspaceId, {
           aiStatusLabel: status.label,
@@ -238,7 +244,7 @@ export const useTerminalSession = ({
       for (const event of outputParser.parse(data)) {
         handleTerminalOutputEvent(event, workspaceId, leafId);
       }
-      if (findTerminalAiKind(getWorkspaces(), workspaceId, leafId)) {
+      if (isAiTerminal(data)) {
         scheduleAiStatusSnapshot();
       }
     };

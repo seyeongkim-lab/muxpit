@@ -6,7 +6,10 @@ export interface AiTerminalStatus {
   updatedAt: number;
 }
 
+export type AiAgentName = "claude" | "codex" | "gemini" | "copilot";
+
 const AI_NAME_RE = /\b(?:claude(?: code)?|codex|gemini|copilot)\b/i;
+const AI_AGENT_NAMES: AiAgentName[] = ["claude", "codex", "gemini", "copilot"];
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/g;
 const BOX_RE = /[\u2500-\u257f]/g;
@@ -33,6 +36,23 @@ const NOISE_RE_LIST = [
 
 const matchesAny = (value: string, patterns: RegExp[]): boolean =>
   patterns.some((pattern) => pattern.test(value));
+
+export const detectAiAgentName = (
+  ...values: Array<string | null | undefined>
+): AiAgentName | null => {
+  for (const value of values) {
+    if (!value) continue;
+    const normalized = value.slice(0, 4096).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/i, "");
+    for (const agent of AI_AGENT_NAMES) {
+      if (normalized
+        .split(/[^a-z0-9_-]+/i)
+        .some((part) => part === agent || (agent === "claude" && part === "claude-code"))) {
+        return agent;
+      }
+    }
+  }
+  return null;
+};
 
 const normalizeLine = (line: string): string =>
   line
@@ -62,6 +82,7 @@ const candidateLines = (lines: readonly string[]): string[] =>
 export const parseAiTerminalStatus = (
   lines: readonly string[],
   updatedAt = Date.now(),
+  options: { allowFallback?: boolean } = {},
 ): AiTerminalStatus | null => {
   const candidates = candidateLines(lines);
 
@@ -87,6 +108,49 @@ export const parseAiTerminalStatus = (
     }
   }
 
+  if (options.allowFallback) {
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const line = compactAiStatusLabel(candidates[i]);
+      if (line.length >= 3 && !AI_NAME_RE.test(line)) {
+        return {
+          label: line,
+          kind: "active",
+          updatedAt,
+        };
+      }
+    }
+  }
+
+  return null;
+};
+
+export const aiStatusFromAgentSessionEvent = (
+  source: string | undefined,
+  event: string | undefined,
+  status: string | undefined,
+  updatedAt = Date.now(),
+): AiTerminalStatus | null => {
+  const agent = detectAiAgentName(source);
+  if (!agent) return null;
+  const normalizedEvent = event?.trim().toLowerCase().replace(/[_-]/g, "");
+  const label = compactAiStatusLabel(status?.trim() || event?.trim() || "ready");
+
+  if (normalizedEvent === "userpromptsubmit") {
+    return {
+      label,
+      kind: "active",
+      updatedAt,
+    };
+  }
+
+  if (normalizedEvent === "stop" || normalizedEvent === "sessionend" || normalizedEvent === "notification") {
+    return {
+      label: status ? label : "done",
+      kind: "ready",
+      updatedAt,
+    };
+  }
+
   return null;
 };
 
@@ -96,7 +160,8 @@ export const aiStatusFromHookNotification = (
   body: string | undefined,
   updatedAt = Date.now(),
 ): AiTerminalStatus | null => {
-  if (!source || !AI_NAME_RE.test(source)) return null;
+  const agent = detectAiAgentName(source);
+  if (!agent) return null;
   const normalizedEvent = event?.trim().toLowerCase().replace(/[_-]/g, "");
   const rawLabel = body?.trim() || event?.trim() || "ready";
 
@@ -116,6 +181,6 @@ export const aiStatusFromHookNotification = (
     };
   }
 
-  const parsed = parseAiTerminalStatus([source, rawLabel], updatedAt);
+  const parsed = parseAiTerminalStatus([agent, rawLabel], updatedAt);
   return parsed;
 };

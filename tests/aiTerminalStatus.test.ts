@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  aiStatusFromAgentSessionEvent,
   aiStatusFromHookNotification,
+  detectAiAgentName,
   parseAiTerminalStatus,
 } from "../src/utils/aiTerminalStatus.ts";
 
@@ -46,4 +48,38 @@ test("AI hook notifications map permission requests to ready status", () => {
     kind: "ready",
     updatedAt: 789,
   });
+});
+
+test("AI session prompt events map prompt text to active status", () => {
+  const status = aiStatusFromAgentSessionEvent(
+    "codex",
+    "UserPromptSubmit",
+    "Implement tab status for AI work",
+    900,
+  );
+
+  assert.deepEqual(status, {
+    label: "Implement tab status for AI work",
+    kind: "active",
+    updatedAt: 900,
+  });
+});
+
+test("AI terminal status parser can fall back to last visible content", () => {
+  const status = parseAiTerminalStatus([
+    "Codex",
+    "Reviewing src/App.tsx and terminal hooks",
+  ], 901, { allowFallback: true });
+
+  assert.deepEqual(status, {
+    label: "Reviewing src/App.tsx and terminal hooks",
+    kind: "active",
+    updatedAt: 901,
+  });
+});
+
+test("AI agent detection handles wrappers and commands", () => {
+  assert.equal(detectAiAgentName("node", "/home/me/.npm/bin/codex.js"), "codex");
+  assert.equal(detectAiAgentName("claude-code.cmd"), "claude");
+  assert.equal(detectAiAgentName("bash", "echo codec"), null);
 });

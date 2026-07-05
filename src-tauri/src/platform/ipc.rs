@@ -115,6 +115,7 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             let event = req.params.get("event").and_then(|v| v.as_str());
             let session_id = req.params.get("session_id").and_then(|v| v.as_str());
             let cwd = req.params.get("cwd").and_then(|v| v.as_str());
+            let status = req.params.get("status").and_then(|v| v.as_str());
             let token = req
                 .params
                 .get("agent_session_token")
@@ -151,6 +152,7 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             insert_optional_string(&mut payload, "event", event);
             insert_optional_string(&mut payload, "session_id", Some(session_id));
             insert_optional_string(&mut payload, "cwd", cwd);
+            insert_optional_string(&mut payload, "status", status);
 
             let _ = app.emit("wmux-agent-session", serde_json::Value::Object(payload));
 

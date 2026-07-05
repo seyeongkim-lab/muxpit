@@ -76,6 +76,23 @@ test("workspace tab title shows AI terminal status before cwd", () => {
   assert.equal(view.statusKind, "ready");
 });
 
+test("workspace tab title detects manually launched AI processes", () => {
+  const view = buildWorkspaceTabView(
+    makeWorkspace(),
+    makeInfo({
+      cwd: "/home/me/wmux",
+      processName: "node",
+      command: "/home/me/.npm/bin/codex.js",
+      aiStatusLabel: "Implement tab status",
+      aiStatusKind: "active",
+      aiStatusUpdatedAt: 100,
+    }),
+  );
+
+  assert.equal(view.title, "codex: Implement tab status");
+  assert.equal(view.statusKind, "active");
+});
+
 test("workspace tab title shows SSH target", () => {
   const view = buildWorkspaceTabView(makeWorkspace({ command: "ssh me@host" }));
 
