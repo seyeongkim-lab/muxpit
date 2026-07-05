@@ -3,6 +3,7 @@ import type { CustomColors, ThemeColorKey } from "../themes";
 import { shouldEnableWebglRendererByDefault } from "../utils/runtimePlatform.ts";
 
 export type PrefixKey = "off" | "ctrl+b" | "ctrl+shift+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
+export type DashboardLayout = "left" | "top";
 export type SessionListMetadataKey =
   | "agent"
   | "cwd"
@@ -25,6 +26,11 @@ export const PREFIX_KEY_CHOICES: { value: PrefixKey; label: string }[] = [
   { value: "ctrl+q", label: "Ctrl+Q" },
   { value: "ctrl+\\", label: "Ctrl+\\" },
   { value: "off", label: "Off (disabled)" },
+];
+
+export const DASHBOARD_LAYOUT_CHOICES: { value: DashboardLayout; label: string }[] = [
+  { value: "left", label: "Left dashboard" },
+  { value: "top", label: "Top tabs + files" },
 ];
 
 export const SESSION_LIST_METADATA_OPTIONS: { key: SessionListMetadataKey; label: string }[] = [
@@ -60,6 +66,7 @@ interface SettingsState {
   themeName: string;
   customColors: CustomColors;
   prefixKey: PrefixKey;
+  dashboardLayout: DashboardLayout;
   enableWebglRenderer: boolean;
   enableNotifications: boolean;
   enableNotificationSound: boolean;
@@ -79,6 +86,7 @@ interface SettingsState {
   resetCustomColors: (themeName: string) => void;
   resetSingleColor: (themeName: string, key: ThemeColorKey) => void;
   setPrefixKey: (key: PrefixKey) => void;
+  setDashboardLayout: (layout: DashboardLayout) => void;
   setEnableWebglRenderer: (enabled: boolean) => void;
   setEnableNotifications: (enabled: boolean) => void;
   setEnableNotificationSound: (enabled: boolean) => void;
@@ -122,6 +130,8 @@ const loadSaved = () => {
 const saved = loadSaved();
 const defaultEnableWebglRenderer = shouldEnableWebglRendererByDefault();
 export const storedBoolean = (value: unknown): boolean => value === true;
+const storedDashboardLayout = (value: unknown): DashboardLayout =>
+  value === "top" ? "top" : "left";
 const initialExperimentalAgentSessionRestore =
   storedBoolean(saved.enableExperimentalAgentSessionRestore);
 
@@ -155,6 +165,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   themeName: saved.themeName ?? "Catppuccin Mocha",
   customColors: saved.customColors ?? {},
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
+  dashboardLayout: storedDashboardLayout(saved.dashboardLayout),
   enableWebglRenderer: saved.enableWebglRenderer ?? defaultEnableWebglRenderer,
   enableNotifications: saved.enableNotifications ?? true,
   enableNotificationSound: saved.enableNotificationSound ?? true,
@@ -233,6 +244,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     saveSettings(get());
   },
 
+  setDashboardLayout: (layout: DashboardLayout) => {
+    set({ dashboardLayout: layout });
+    saveSettings(get());
+  },
+
   setEnableWebglRenderer: (enabled: boolean) => {
     set({ enableWebglRenderer: enabled });
     saveSettings(get());
@@ -299,6 +315,7 @@ const saveSettings = (state: SettingsState) => {
         themeName: state.themeName,
         customColors: state.customColors,
         prefixKey: state.prefixKey,
+        dashboardLayout: state.dashboardLayout,
         enableWebglRenderer: state.enableWebglRenderer,
         enableNotifications: state.enableNotifications,
         enableNotificationSound: state.enableNotificationSound,
