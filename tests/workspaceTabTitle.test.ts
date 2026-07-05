@@ -33,6 +33,9 @@ const makeInfo = (patch: Partial<WorkspaceInfo>): WorkspaceInfo => ({
   cpuPercent: 0,
   descendantCount: 0,
   terminalTitle: null,
+  aiStatusLabel: null,
+  aiStatusKind: null,
+  aiStatusUpdatedAt: null,
   ...patch,
 });
 
@@ -54,6 +57,23 @@ test("workspace tab title shows AI agent and cwd", () => {
 
   assert.equal(view.title, "codex: wmux");
   assert.equal(view.detail, "codex");
+});
+
+test("workspace tab title shows AI terminal status before cwd", () => {
+  const view = buildWorkspaceTabView(
+    makeWorkspace({ aiKind: "codex" }),
+    makeInfo({
+      cwd: "/home/me/wmux",
+      processName: "codex",
+      aiStatusLabel: "permission: cargo check",
+      aiStatusKind: "ready",
+      aiStatusUpdatedAt: 100,
+    }),
+  );
+
+  assert.equal(view.title, "codex: permission: cargo check");
+  assert.equal(view.detail, "wmux");
+  assert.equal(view.statusKind, "ready");
 });
 
 test("workspace tab title shows SSH target", () => {

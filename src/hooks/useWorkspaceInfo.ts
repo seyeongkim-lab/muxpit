@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
 import { useSettingsStore } from "../stores/settings";
+import type { AiTerminalStatusKind } from "../utils/aiTerminalStatus";
 
 const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
   if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") && node.id === id) return node;
@@ -22,6 +23,9 @@ export interface WorkspaceInfo {
   cpuPercent: number;
   descendantCount: number;
   terminalTitle: string | null;
+  aiStatusLabel: string | null;
+  aiStatusKind: AiTerminalStatusKind | null;
+  aiStatusUpdatedAt: number | null;
 }
 
 interface SessionMetadata {
@@ -49,6 +53,9 @@ const emptyInfo = (prev?: WorkspaceInfo): WorkspaceInfo => ({
   cpuPercent: 0,
   descendantCount: 0,
   terminalTitle: prev?.terminalTitle ?? null,
+  aiStatusLabel: prev?.aiStatusLabel ?? null,
+  aiStatusKind: prev?.aiStatusKind ?? null,
+  aiStatusUpdatedAt: prev?.aiStatusUpdatedAt ?? null,
 });
 
 interface WorkspaceInfoState {
@@ -194,6 +201,9 @@ export const useWorkspaceInfoPoller = (intervalMs = 3000) => {
               cpuPercent: metadata.cpu_percent,
               descendantCount: metadata.descendant_count,
               terminalTitle: prev?.terminalTitle ?? null,
+              aiStatusLabel: prev?.aiStatusLabel ?? null,
+              aiStatusKind: prev?.aiStatusKind ?? null,
+              aiStatusUpdatedAt: prev?.aiStatusUpdatedAt ?? null,
             };
             setInfo(ws.id, nextInfo);
             if (cwdRestoreEnabled) {

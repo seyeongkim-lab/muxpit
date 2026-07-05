@@ -39,6 +39,7 @@ export interface TerminalSurface {
   containsActiveElement(activeElement: Element | null): boolean;
   write(data: string): void;
   paste(data: string): void;
+  getVisibleText(maxRows?: number): string[];
   getSelection(): string;
   clearSelection(): void;
   onData(callback: (data: string) => void): TerminalDisposable;
@@ -155,6 +156,21 @@ class XtermTerminalSurface implements TerminalSurface {
 
   paste(data: string) {
     this.term.paste(data);
+  }
+
+  getVisibleText(maxRows = 24) {
+    const buffer = this.term.buffer.active;
+    const rowCount = Math.max(1, Math.min(maxRows, this.term.rows));
+    const end = Math.min(buffer.length, buffer.baseY + this.term.rows);
+    const start = Math.max(0, end - rowCount);
+    const lines: string[] = [];
+
+    for (let y = start; y < end; y++) {
+      const line = buffer.getLine(y);
+      if (line) lines.push(line.translateToString(true));
+    }
+
+    return lines;
   }
 
   getSelection() {

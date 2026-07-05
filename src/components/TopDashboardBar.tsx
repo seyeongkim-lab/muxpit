@@ -144,6 +144,16 @@ export const TopDashboardBar = ({
                 ].filter(Boolean).join(" - ")}
               >
                 <span style={styles.sessionIndex}>{index + 1}</span>
+                {tabView.statusKind && (
+                  <span
+                    style={{
+                      ...styles.sessionStatusDot,
+                      ...(tabView.statusKind === "ready"
+                        ? styles.sessionStatusReady
+                        : styles.sessionStatusActive),
+                    }}
+                  />
+                )}
                 <span style={styles.sessionTabName}>{tabView.title}</span>
                 {paneCount > 1 && <span style={styles.sessionPaneCount}>{paneCount}</span>}
                 <span
@@ -527,6 +537,20 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 10,
     flexShrink: 0,
+  },
+  sessionStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: "50%",
+    flexShrink: 0,
+  },
+  sessionStatusReady: {
+    backgroundColor: "#3fb950",
+    boxShadow: "0 0 0 1px rgba(63, 185, 80, 0.32)",
+  },
+  sessionStatusActive: {
+    backgroundColor: "var(--wmux-accent)",
+    boxShadow: "0 0 0 1px var(--wmux-accent-mid)",
   },
   sessionTabName: {
     minWidth: 0,
