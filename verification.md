@@ -130,3 +130,16 @@
 - Build: `pnpm tauri build --no-bundle` 통과.
 - Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
 - 갱신 확인: `LastWriteTime` 2026-07-05 11:40:18, SHA256 `F5598ACA143FE188A503113423718E59667D3C14CF6D951C661708BA631289D9`.
+
+## 2026-07-05 Windows IPC Collision Launch Fix — Windows Deploy
+
+- Symptom: app appeared and immediately closed.
+- Cause: stale hidden `wmux.exe` process had `MainWindowHandle = 0` and held the Windows IPC singleton mutex; new app hit `AlreadyRunning` and called `app.exit(0)`.
+- Recovery: stopped hidden process PID `60076`; launching `wmux.exe` then produced a responsive process with a real window handle.
+- Commit: `bcd2f58` (`feat/osc52-clipboard`).
+- `cargo check` (src-tauri): 통과.
+- `cargo test platform` (src-tauri): 통과, 16 passed.
+- Fix verification: with an existing wmux process present, launching the rebuilt exe stayed open and reported `MainWindowHandle = 48434618`, `Responding = True`.
+- Build: `pnpm tauri build --no-bundle` 통과.
+- Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- 갱신 확인: `LastWriteTime` 2026-07-05 12:35:32, SHA256 `6E203873C670A886F53CFE8FAB598A3AD3C1158B848156FFDFCA0BBE3EF0BAEA`.

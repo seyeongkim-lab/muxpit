@@ -28,3 +28,8 @@
 - Manual smoke test needed: `yes | head -n 5000` 또는 큰 `git diff` 출력 시 UI가 덜 끊기는지 확인.
 - Manual smoke test needed: split divider를 빠르게 드래그할 때 terminal resize가 따라오되 cursor/레이아웃이 과하게 떨리지 않는지 확인.
 - Manual smoke test needed: 여러 pane이 있는 상태에서 workspace tab 전환, font size 변경, 창 resize 후 terminal fit이 정상인지 확인.
+
+## 2026-07-05 Windows IPC Collision Launch Fix
+
+- Manual smoke test needed: 작업표시줄 아이콘으로 wmux를 다시 실행했을 때 창이 바로 닫히지 않는지 확인.
+- Manual smoke test needed: 기존 wmux 창이 이미 떠 있는 상태에서 한 번 더 실행했을 때 새 창이 유지되는지 확인.
