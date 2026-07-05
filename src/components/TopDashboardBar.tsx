@@ -133,7 +133,7 @@ export const TopDashboardBar = ({
             return (
               <button
                 key={workspace.id}
-                className={`wmux-btn${isActive ? " wmux-ws-active" : ""}`}
+                className={`wmux-btn wmux-top-tab${isActive ? " wmux-ws-active" : ""}`}
                 onClick={() => setActive(workspace.id)}
                 style={{ ...styles.sessionTab, ...(isActive ? styles.sessionTabActive : {}) }}
                 title={[
@@ -447,7 +447,7 @@ const TopTabButton = ({
   onClick: () => void;
 }) => (
   <button
-    className="wmux-btn"
+    className="wmux-btn wmux-top-tab"
     onMouseEnter={onMouseEnter}
     onClick={onClick}
     style={{ ...styles.tabButton, ...(active ? styles.tabButtonActive : {}) }}
