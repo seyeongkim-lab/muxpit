@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSettingsStore, PREFIX_KEY_CHOICES, DASHBOARD_LAYOUT_CHOICES, SESSION_LIST_METADATA_OPTIONS, type DashboardLayout, type PrefixKey } from "../stores/settings";
 import { useWorkspaceStore } from "../stores/workspace";
 import { invoke } from "@tauri-apps/api/core";
@@ -23,6 +23,10 @@ const isLikelyMonospace = (name: string) => {
   const lower = name.toLowerCase();
   return MONO_HINTS.some((h) => lower.includes(h));
 };
+
+// Cap the rendered font list. Each button previews its own typeface, so an
+// unbounded list forces the webview to load hundreds of fonts at once.
+const FONT_LIST_LIMIT = 120;
 
 const COLOR_LABELS: Partial<Record<ThemeColorKey, string>> = {
   background: "BG", foreground: "FG", cursor: "Cursor", selectionBackground: "Selection",
@@ -101,6 +105,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   const [monoOnly, setMonoOnly] = useState(true);
   const [search, setSearch] = useState("");
   const [colorOpen, setColorOpen] = useState(false);
+  const [fontListOpen, setFontListOpen] = useState(false);
   const [cliInstallStatus, setCliInstallStatus] = useState<string | null>(null);
   const [cliInstalling, setCliInstalling] = useState(false);
   const soundInputRef = useRef<HTMLInputElement | null>(null);
@@ -147,11 +152,21 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     [setEnableExperimentalAgentDangerousResume, setEnableExperimentalAgentSessionRestore],
   );
 
+  // Enumerating fonts spawns a slow PowerShell/fc-list call and the browse list
+  // renders one preview per typeface, so defer both until the user opens it.
   useEffect(() => {
-    if (open && allFonts.length === 0) {
+    if (open && fontListOpen && allFonts.length === 0) {
       invoke<string[]>("list_fonts").then(setAllFonts).catch(() => {});
     }
-  }, [open, allFonts.length]);
+  }, [open, fontListOpen, allFonts.length]);
+
+  const displayFonts = useMemo(
+    () =>
+      allFonts
+        .filter((f) => !monoOnly || isLikelyMonospace(f))
+        .filter((f) => !search || f.toLowerCase().includes(search.toLowerCase())),
+    [allFonts, monoOnly, search],
+  );
 
   const installCli = useCallback(async () => {
     setCliInstalling(true);
@@ -167,10 +182,6 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
   }, []);
 
   if (!open) return null;
-
-  const displayFonts = allFonts
-    .filter((f) => !monoOnly || isLikelyMonospace(f))
-    .filter((f) => !search || f.toLowerCase().includes(search.toLowerCase()));
 
   const addFont = (f: string) => {
     if (!fontFamilies.includes(f)) setFontFamilies([...fontFamilies, f]);
@@ -526,7 +537,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
             </label>
             <div style={styles.selectedList}>
               {fontFamilies.length === 0 && (
-                <div style={styles.empty}>No fonts selected — add from the list below</div>
+                <div style={styles.empty}>No fonts selected — add from Browse fonts</div>
               )}
               {fontFamilies.map((f, i) => (
                 <div key={f} style={styles.selectedRow}>
@@ -561,46 +572,64 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
                 </div>
               ))}
             </div>
-            <div style={styles.filterRow}>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Add a font — search..."
-                style={styles.input}
-              />
-              <label style={styles.checkLabel}>
-                <input
-                  type="checkbox"
-                  checked={monoOnly}
-                  onChange={(e) => setMonoOnly(e.target.checked)}
-                />
-                Mono only
-              </label>
-            </div>
-            <div style={styles.fontList}>
-              {displayFonts.length === 0 && (
-                <div style={styles.empty}>
-                  {allFonts.length === 0 ? "Loading fonts..." : "No fonts found"}
+            <button
+              onClick={() => setFontListOpen(!fontListOpen)}
+              style={styles.colorToggle}
+            >
+              <span style={{ transform: fontListOpen ? "rotate(90deg)" : "none", display: "inline-block", transition: "transform 0.15s" }}>
+                ▸
+              </span>
+              {" "}Browse fonts
+            </button>
+            {fontListOpen && (
+              <>
+                <div style={styles.filterRow}>
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Add a font — search..."
+                    style={styles.input}
+                  />
+                  <label style={styles.checkLabel}>
+                    <input
+                      type="checkbox"
+                      checked={monoOnly}
+                      onChange={(e) => setMonoOnly(e.target.checked)}
+                    />
+                    Mono only
+                  </label>
                 </div>
-              )}
-              {displayFonts.map((font) => {
-                const selected = fontFamilies.includes(font);
-                return (
-                  <button
-                    key={font}
-                    onClick={() => (selected ? removeFont(font) : addFont(font))}
-                    style={{
-                      ...styles.fontBtn,
-                      ...(selected ? styles.fontBtnActive : {}),
-                      fontFamily: `'${font}', monospace`,
-                    }}
-                  >
-                    <span style={styles.fontBtnMark}>{selected ? "✓" : "+"}</span>
-                    {font}
-                  </button>
-                );
-              })}
-            </div>
+                <div style={styles.fontList}>
+                  {displayFonts.length === 0 && (
+                    <div style={styles.empty}>
+                      {allFonts.length === 0 ? "Loading fonts..." : "No fonts found"}
+                    </div>
+                  )}
+                  {displayFonts.slice(0, FONT_LIST_LIMIT).map((font) => {
+                    const selected = fontFamilies.includes(font);
+                    return (
+                      <button
+                        key={font}
+                        onClick={() => (selected ? removeFont(font) : addFont(font))}
+                        style={{
+                          ...styles.fontBtn,
+                          ...(selected ? styles.fontBtnActive : {}),
+                          fontFamily: `'${font}', monospace`,
+                        }}
+                      >
+                        <span style={styles.fontBtnMark}>{selected ? "✓" : "+"}</span>
+                        {font}
+                      </button>
+                    );
+                  })}
+                </div>
+                {displayFonts.length > FONT_LIST_LIMIT && (
+                  <div style={styles.hint}>
+                    Showing first {FONT_LIST_LIMIT} of {displayFonts.length} — search to narrow.
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* Preview */}
