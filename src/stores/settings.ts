@@ -69,6 +69,7 @@ interface SettingsState {
   prefixKey: PrefixKey;
   dashboardLayout: DashboardLayout;
   enableWebglRenderer: boolean;
+  enableWebglRendererUserSet: boolean;
   enableNotifications: boolean;
   enableNotificationSound: boolean;
   notificationSoundDataUrl: string | null;
@@ -137,6 +138,11 @@ const storedDashboardLayout = (value: unknown): DashboardLayout =>
   value === "top" ? "top" : "left";
 const initialExperimentalAgentSessionRestore =
   storedBoolean(saved.enableExperimentalAgentSessionRestore);
+const initialEnableWebglRendererUserSet = storedBoolean(saved.enableWebglRendererUserSet);
+const initialEnableWebglRenderer =
+  initialEnableWebglRendererUserSet && typeof saved.enableWebglRenderer === "boolean"
+    ? saved.enableWebglRenderer
+    : defaultEnableWebglRenderer;
 
 // Resolve the ordered font family list. Prefer the new array model; otherwise
 // start from defaults (Sarasa-led CJK). Legacy `fontFamily` stack strings are not
@@ -185,7 +191,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   customThemes: initialCustomThemes,
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
   dashboardLayout: storedDashboardLayout(saved.dashboardLayout),
-  enableWebglRenderer: saved.enableWebglRenderer ?? defaultEnableWebglRenderer,
+  enableWebglRenderer: initialEnableWebglRenderer,
+  enableWebglRendererUserSet: initialEnableWebglRendererUserSet,
   enableNotifications: saved.enableNotifications ?? true,
   enableNotificationSound: saved.enableNotificationSound ?? true,
   notificationSoundDataUrl:
@@ -300,7 +307,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setEnableWebglRenderer: (enabled: boolean) => {
-    set({ enableWebglRenderer: enabled });
+    set({ enableWebglRenderer: enabled, enableWebglRendererUserSet: true });
     saveSettings(get());
   },
 
@@ -368,6 +375,7 @@ const saveSettings = (state: SettingsState) => {
         prefixKey: state.prefixKey,
         dashboardLayout: state.dashboardLayout,
         enableWebglRenderer: state.enableWebglRenderer,
+        enableWebglRendererUserSet: state.enableWebglRendererUserSet,
         enableNotifications: state.enableNotifications,
         enableNotificationSound: state.enableNotificationSound,
         notificationSoundDataUrl: state.notificationSoundDataUrl,

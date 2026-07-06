@@ -36,8 +36,12 @@ export const isLinuxWebKitRuntime = (nav = currentNavigator()): boolean => {
   );
 };
 
-export const shouldEnableWebglRendererByDefault = (): boolean =>
-  typeof navigator === "undefined" ? true : !isLinuxPlatform();
+export const shouldEnableWebglRendererByDefault = (
+  platform = currentNavigator()?.platform,
+): boolean => {
+  if (platform === undefined) return true;
+  return !isLinuxPlatform(platform) && !isWindowsPlatform(platform);
+};
 
 export const isPowerShellCommand = (command: string): boolean =>
   /\b(pwsh|powershell|cmd(?:\.exe)?)\b/i.test(command);
