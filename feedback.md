@@ -33,3 +33,26 @@
 
 - Manual smoke test needed: 작업표시줄 아이콘으로 wmux를 다시 실행했을 때 창이 바로 닫히지 않는지 확인.
 - Manual smoke test needed: 기존 wmux 창이 이미 떠 있는 상태에서 한 번 더 실행했을 때 새 창이 유지되는지 확인.
+
+## 2026-07-05 SSH Tab Title Local Cwd Fix
+
+- Manual smoke test needed: SSH workspace에서 로컬 cwd가 바뀌어도 tab title이 stale local cwd로 덮이지 않는지 확인.
+- Manual smoke test needed: 데스크톱/작업표시줄 shortcut 실행이 최신 `wmux.exe`로 열리는지 `one` 사용자 세션에서 확인.
+
+## 2026-07-06 Tab Drag-Reorder + Resizable Files Rail
+
+- Manual smoke test needed: top dashboard 레이아웃에서 워크스페이스 탭을 드래그해 순서가 바뀌고, 드롭 대상 탭이 강조되는지 확인.
+- Manual smoke test needed: 파일 레일 우측 경계 핸들을 드래그해 폭이 180-640px 범위에서 조절되고, 앱 재시작 후 폭이 유지되는지 확인.
+- Not covered by automated tests: 드래그 상호작용은 실제 Tauri 앱에서만 검증 가능 (unit 테스트는 clampFilesRailWidth 순수 로직만 커버).
+
+## 2026-07-06 Tokyo Night Storm + Custom Themes
+
+- Manual smoke test needed: Settings > Theme 에서 Tokyo Night Storm 선택 시 터미널/크롬 색이 바뀌는지 확인.
+- Manual smoke test needed: "New theme name" 입력 후 + Add → 새 테마가 목록에 뜨고 선택되며, 재시작 후에도 유지되는지 확인. 커스텀 테마 타일의 x로 삭제 확인.
+- Design note: 커스텀 테마는 별도 base 팔레트로 저장하고, 색 편집은 기존 customColors override 메커니즘을 그대로 재사용. rename은 미구현(삭제 후 재생성). 이름 충돌 시 " 2", " 3" suffix.
+
+## 2026-07-06 Long-Run Exit Mitigation
+
+- Manual soak test needed: 여러 pane/workspace를 열어 1시간 이상 둔 뒤 앱이 유지되는지 확인.
+- If it dies again: inspect `C:\Users\one\AppData\Local\com.wmux.terminal\logs\wmux.log` tail first, then Windows Event Viewer/WER. The new log should distinguish manual close/beforeunload, frontend JS failure, Rust panic, PTY exits, and silent process loss.
+- Manual settings check: Windows에서 Settings의 WebGL renderer가 기본 off로 내려갔는지 확인. 성능이 필요하면 Settings에서 다시 켤 수 있고, 그 선택은 이후 저장된다.

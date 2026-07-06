@@ -348,6 +348,7 @@ impl PtyManager {
         std::thread::spawn(move || {
             let status = child.wait();
             let code = status.ok().map(|s| s.exit_code() as i32);
+            log::info!("pty child exited id={pty_id2} code={code:?}");
             let _ = app_clone2.emit(
                 "pty-exit",
                 PtyExit {
@@ -363,6 +364,8 @@ impl PtyManager {
             .take_writer()
             .map_err(|e| format!("Failed to take writer: {e}"))?;
 
+        let workspace_id_log = wmux_context.workspace_id.clone();
+        let surface_id_log = wmux_context.surface_id.clone();
         {
             let mut instances = self.instances.lock().unwrap();
             instances.insert(
@@ -378,6 +381,21 @@ impl PtyManager {
                 },
             );
         }
+        log::info!(
+            "pty spawned id={} pid={:?} workspace={:?} surface={:?} tmux={} command_kind={}",
+            id,
+            child_pid,
+            workspace_id_log,
+            surface_id_log,
+            tmux_cc,
+            if command_argv.is_some() {
+                "argv"
+            } else if command.is_some() {
+                "command"
+            } else {
+                "default"
+            }
+        );
         pending_agent_session_token.finish();
 
         Ok(id)
@@ -567,6 +585,7 @@ fn emit_reader_exit(
     if let Some(tx) = output_tx {
         let _ = tx.send(OutputMsg::Exit(None));
     } else {
+        log::info!("pty reader exited id={pty_id}");
         let _ = app.emit(
             "pty-exit",
             PtyExit {

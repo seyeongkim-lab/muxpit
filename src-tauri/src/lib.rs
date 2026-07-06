@@ -20,6 +20,7 @@ use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
 use tauri::{AppHandle, State};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 #[tauri::command]
 fn spawn_pty(
@@ -487,6 +488,10 @@ fn install_cli_symlink() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    std::panic::set_hook(Box::new(|panic_info| {
+        log::error!("panic: {panic_info}");
+    }));
+
     tauri::Builder::default()
         .manage(PtyManager::new())
         .manage(MonitorManager::new())
@@ -521,17 +526,26 @@ pub fn run() {
             start_monitor,
             stop_monitor,
         ])
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .targets([Target::new(TargetKind::LogDir {
+                    file_name: Some("wmux".into()),
+                })])
+                .rotation_strategy(RotationStrategy::KeepSome(8))
+                .timezone_strategy(TimezoneStrategy::UseLocal)
+                .max_file_size(1_000_000)
+                .build(),
+        )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            log::info!(
+                "wmux setup complete version={} debug={}",
+                app.package_info().version,
+                cfg!(debug_assertions)
+            );
             // Start local IPC server for wmux-cli and shell hooks.
             platform::ipc::start_ipc_server(app.handle().clone());
             Ok(())
