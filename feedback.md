@@ -56,3 +56,9 @@
 - Manual soak test needed: 여러 pane/workspace를 열어 1시간 이상 둔 뒤 앱이 유지되는지 확인.
 - If it dies again: inspect `C:\Users\one\AppData\Local\com.wmux.terminal\logs\wmux.log` tail first, then Windows Event Viewer/WER. The new log should distinguish manual close/beforeunload, frontend JS failure, Rust panic, PTY exits, and silent process loss.
 - Manual settings check: Windows에서 Settings의 WebGL renderer가 기본 off로 내려갔는지 확인. 성능이 필요하면 Settings에서 다시 켤 수 있고, 그 선택은 이후 저장된다.
+
+## 2026-07-06 Silent Exit Follow-up
+
+- App is currently running from `C:\Users\one\AppData\Local\wmux\wmux.exe` as PID `49108`.
+- If it disappears again, first compare the last `wmux heartbeat` and `frontend heartbeat` lines in `C:\Users\one\AppData\Local\com.wmux.terminal\logs\wmux.log`. Both stopping together points to whole-process termination; Rust heartbeat continuing without frontend heartbeat points to a WebView renderer issue.
+- Manual soak test needed: leave several panes/workspaces open through a display sleep/wake or monitor topology change and check whether Display 4107 still correlates with wmux disappearance.

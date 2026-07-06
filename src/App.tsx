@@ -24,7 +24,7 @@ import { useNotificationStore } from "./stores/notifications";
 import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
-import { destroyTerminal, destroyAllTerminals } from "./components/terminalRegistry";
+import { destroyTerminal, destroyAllTerminals, terminalInstances } from "./components/terminalRegistry";
 import { useWorkspaceInfoPoller, useSshContextPoller, useWorkspaceInfoStore } from "./hooks/useWorkspaceInfo";
 import { useAgentSessionProcessMonitor } from "./hooks/useAgentSessionProcessMonitor";
 import { applyThemeVars, getResolvedTheme } from "./themes";
@@ -190,6 +190,29 @@ export const App = () => {
   // Codex has no native SessionEnd hook, so clear local resume bindings when
   // the Codex process disappears from the pane's PTY process tree.
   useAgentSessionProcessMonitor(2000);
+
+  useEffect(() => {
+    const settings = useSettingsStore.getState();
+    logInfo(
+      `frontend settings platform=${APP_SHORTCUT_PLATFORM} webgl=${settings.enableWebglRenderer} ` +
+        `webglUserSet=${settings.enableWebglRendererUserSet}`,
+    );
+
+    const writeHeartbeat = () => {
+      const state = useWorkspaceStore.getState();
+      const leafCount = state.workspaces.reduce(
+        (count, ws) => count + collectLeafIds(ws.layout).length,
+        0,
+      );
+      logInfo(
+        `frontend heartbeat visibility=${document.visibilityState} workspaces=${state.workspaces.length} ` +
+          `leaves=${leafCount} terminals=${terminalInstances.size}`,
+      );
+    };
+
+    const timer = window.setInterval(writeHeartbeat, 60000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Auto-detect SSH on focused pane and show sidebar monitor (poll every 5s)
   const monitorTargetRef = useRef<string | null>(null);

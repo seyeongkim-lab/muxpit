@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { THEMES, type CustomColors, type TerminalTheme, type ThemeColorKey, type ThemeEntry } from "../themes.ts";
-import { shouldEnableWebglRendererByDefault } from "../utils/runtimePlatform.ts";
+import { isWindowsPlatform, shouldEnableWebglRendererByDefault } from "../utils/runtimePlatform.ts";
 
 export type PrefixKey = "off" | "ctrl+b" | "ctrl+shift+b" | "ctrl+a" | "ctrl+space" | "ctrl+q" | "ctrl+\\";
 export type DashboardLayout = "left" | "top";
@@ -104,6 +104,7 @@ interface SettingsState {
 
 const FONT_SIZE_MIN = 8;
 const FONT_SIZE_MAX = 32;
+export const WEBGL_RENDERER_COMPATIBILITY_VERSION = "win-disable-webgl-20260706";
 
 // Default font families, in fallback order. Latin coding fonts first (Nerd Font
 // variants so Powerline/starship PUA glyphs render), then Korean/CJK fonts so
@@ -123,10 +124,17 @@ export const buildFontStack = (families: string[]): string =>
   [...families.map((f) => `'${f}'`), "monospace"].join(", ");
 
 // Load saved settings from localStorage
-const loadSaved = () => {
+type SavedSettings = Record<string, any>;
+
+const loadSaved = (): SavedSettings => {
   try {
     const saved = localStorage.getItem("wmux-settings");
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as SavedSettings;
+      }
+    }
   } catch {}
   return {};
 };
@@ -134,11 +142,29 @@ const loadSaved = () => {
 const saved = loadSaved();
 const defaultEnableWebglRenderer = shouldEnableWebglRendererByDefault();
 export const storedBoolean = (value: unknown): boolean => value === true;
+export const shouldResetSavedWebglRenderer = (
+  compatibilityVersion: unknown,
+  platform?: string,
+): boolean =>
+  isWindowsPlatform(platform) &&
+  compatibilityVersion !== WEBGL_RENDERER_COMPATIBILITY_VERSION;
 const storedDashboardLayout = (value: unknown): DashboardLayout =>
   value === "top" ? "top" : "left";
 const initialExperimentalAgentSessionRestore =
   storedBoolean(saved.enableExperimentalAgentSessionRestore);
-const initialEnableWebglRendererUserSet = storedBoolean(saved.enableWebglRendererUserSet);
+const resetSavedWebglRenderer = shouldResetSavedWebglRenderer(
+  saved.webglRendererCompatibilityVersion,
+);
+if (resetSavedWebglRenderer) {
+  saved.enableWebglRenderer = false;
+  saved.enableWebglRendererUserSet = false;
+  saved.webglRendererCompatibilityVersion = WEBGL_RENDERER_COMPATIBILITY_VERSION;
+  try {
+    localStorage.setItem("wmux-settings", JSON.stringify(saved));
+  } catch {}
+}
+const initialEnableWebglRendererUserSet =
+  !resetSavedWebglRenderer && storedBoolean(saved.enableWebglRendererUserSet);
 const initialEnableWebglRenderer =
   initialEnableWebglRendererUserSet && typeof saved.enableWebglRenderer === "boolean"
     ? saved.enableWebglRenderer
@@ -376,6 +402,7 @@ const saveSettings = (state: SettingsState) => {
         dashboardLayout: state.dashboardLayout,
         enableWebglRenderer: state.enableWebglRenderer,
         enableWebglRendererUserSet: state.enableWebglRendererUserSet,
+        webglRendererCompatibilityVersion: WEBGL_RENDERER_COMPATIBILITY_VERSION,
         enableNotifications: state.enableNotifications,
         enableNotificationSound: state.enableNotificationSound,
         notificationSoundDataUrl: state.notificationSoundDataUrl,
