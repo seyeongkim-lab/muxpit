@@ -49,6 +49,7 @@ import {
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
 import { isAgentSessionEndEvent } from "./utils/agentSession";
+import { logInfo, logWarn } from "./utils/appLog";
 import { decideAppShortcut } from "./utils/appShortcuts";
 import {
   buildSshCommandWithRemoteCmdFromConnection,
@@ -362,6 +363,7 @@ export const App = () => {
       });
 
     const handleBeforeUnload = () => {
+      logWarn("window beforeunload");
       useWorkspaceStore.getState().saveSession();
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -386,6 +388,7 @@ export const App = () => {
       "pty-exit",
       (event) => {
         const ptyId = event.payload.id;
+        logWarn(`pty exit id=${ptyId} code=${event.payload.code ?? "none"}`);
 
         // Delay so "[Process exited]" message is visible
         setTimeout(() => {
@@ -849,12 +852,14 @@ export const App = () => {
   }, []);
 
   const handleWindowClose = useCallback(() => {
+    logInfo("window close requested");
     tryGetCurrentWindow()?.close().catch((err) => console.error("[wmux] close failed:", err));
   }, []);
 
   const handleCloseConfirm = useCallback(async () => {
     closingRef.current = true;
     setCloseConfirmOpen(false);
+    logInfo("window close confirmed");
     useWorkspaceStore.getState().saveSession();
     try {
       await tryGetCurrentWindow()?.destroy();
