@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { storedBoolean, useSettingsStore } from "../src/stores/settings.ts";
+import {
+  WEBGL_RENDERER_COMPATIBILITY_VERSION,
+  shouldResetSavedWebglRenderer,
+  storedBoolean,
+  useSettingsStore,
+} from "../src/stores/settings.ts";
 
 test("storedBoolean only accepts persisted true booleans", () => {
   assert.equal(storedBoolean(true), true);
@@ -10,6 +15,16 @@ test("storedBoolean only accepts persisted true booleans", () => {
   assert.equal(storedBoolean("false"), false);
   assert.equal(storedBoolean(1), false);
   assert.equal(storedBoolean(null), false);
+});
+
+test("saved WebGL renderer settings are reset once on Windows", () => {
+  assert.equal(shouldResetSavedWebglRenderer(undefined, "Win32"), true);
+  assert.equal(
+    shouldResetSavedWebglRenderer(WEBGL_RENDERER_COMPATIBILITY_VERSION, "Win32"),
+    false,
+  );
+  assert.equal(shouldResetSavedWebglRenderer(undefined, "MacIntel"), false);
+  assert.equal(shouldResetSavedWebglRenderer(undefined, "Linux x86_64"), false);
 });
 
 test("addCustomTheme dedupes names and selects the new theme", () => {
