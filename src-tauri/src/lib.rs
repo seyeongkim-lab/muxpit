@@ -19,6 +19,7 @@ use pty::{PtyManager, WmuxPtyContext};
 use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
@@ -492,6 +493,9 @@ pub fn run() {
         log::error!("panic: {panic_info}");
     }));
 
+    #[cfg(target_os = "windows")]
+    let webview2_disable_gpu = configure_windows_webview2_args();
+
     tauri::Builder::default()
         .manage(PtyManager::new())
         .manage(MonitorManager::new())
@@ -540,16 +544,56 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
+        .setup(move |app| {
             log::info!(
-                "wmux setup complete version={} debug={}",
+                "wmux setup complete version={} debug={} pid={}",
                 app.package_info().version,
-                cfg!(debug_assertions)
+                cfg!(debug_assertions),
+                std::process::id()
             );
+            #[cfg(target_os = "windows")]
+            log::info!("webview2 disable-gpu configured={webview2_disable_gpu}");
+            start_heartbeat();
             // Start local IPC server for wmux-cli and shell hooks.
             platform::ipc::start_ipc_server(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(target_os = "windows")]
+fn configure_windows_webview2_args() -> bool {
+    const ENV_NAME: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+    const FLAG: &str = "--disable-gpu";
+
+    let existing = std::env::var(ENV_NAME).unwrap_or_default();
+    if existing.split_whitespace().any(|arg| arg == FLAG) {
+        return true;
+    }
+
+    let next = if existing.trim().is_empty() {
+        FLAG.to_string()
+    } else {
+        format!("{} {FLAG}", existing.trim())
+    };
+    std::env::set_var(ENV_NAME, next);
+    true
+}
+
+fn start_heartbeat() {
+    let started = Instant::now();
+    if let Err(err) = std::thread::Builder::new()
+        .name("wmux-heartbeat".into())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(60));
+            log::info!(
+                "wmux heartbeat pid={} uptime_secs={}",
+                std::process::id(),
+                started.elapsed().as_secs()
+            );
+        })
+    {
+        log::warn!("failed to start heartbeat: {err}");
+    }
 }
