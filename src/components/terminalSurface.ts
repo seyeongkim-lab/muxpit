@@ -4,6 +4,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalTheme } from "../themes";
+import { logInfo, logWarn } from "../utils/appLog";
 import { decodeOsc52ClipboardWrite } from "../utils/osc52";
 import {
   shouldClearTerminalInputBuffer,
@@ -252,6 +253,7 @@ class XtermTerminalSurface implements TerminalSurface {
 
   setWebglRenderer(enabled: boolean) {
     this.webglEnabled = enabled;
+    logInfo(`terminal webgl set enabled=${enabled}`);
     if (enabled) {
       if (!this.webglAddon && this.term.element) this.loadWebglAddon();
       return;
@@ -301,6 +303,7 @@ class XtermTerminalSurface implements TerminalSurface {
       // Snap" / blank page) across every pane. Disposing reverts xterm to its
       // DOM renderer so the terminal stays usable.
       addon.onContextLoss(() => {
+        logWarn("terminal webgl context lost");
         try {
           addon.dispose();
         } catch {}
@@ -309,8 +312,10 @@ class XtermTerminalSurface implements TerminalSurface {
       });
       this.term.loadAddon(addon);
       this.webglAddon = addon;
+      logInfo("terminal webgl loaded");
     } catch {
       this.webglAddon = undefined;
+      logWarn("terminal webgl load failed");
     }
   }
 }
