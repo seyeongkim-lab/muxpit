@@ -198,3 +198,16 @@
 - Installed: copied `wmux.exe` and `wmux-cli.exe` to `C:\Users\one\AppData\Local\wmux\`. Installed `wmux.exe` SHA256 matches build (`ABC6BD25E8E774BA40BCC252101C889B108F85B5E8D956D8062C36B41432EC61`); installed `wmux-cli.exe` SHA256 `9F750EC7D925F5A5387BE9B8EF4F2B5AF2183338CAE0983A50F764655D4C1CB1`.
 - Smoke launch: project release exe started with `MainWindowHandle = 4592316`; installed exe started with `MainWindowHandle = 2495350`; log file was created/updated and contained `wmux setup complete`, `frontend boot`, and restored PTY spawn lines. Test processes were stopped afterward; no wmux/child test processes remained.
 - 갱신 확인: installed `wmux.exe` `LastWriteTime` 2026-07-06 11:13:35, SHA256 `ABC6BD25E8E774BA40BCC252101C889B108F85B5E8D956D8062C36B41432EC61`.
+
+## 2026-07-06 Silent Exit Follow-up — Windows Deploy
+
+- Follow-up incident: installed diagnostic build disappeared again. `wmux.log` had no `beforeunload`, close-requested, panic, frontend error, or PTY-exit record. Last wmux line before the report was `2026-07-06 12:21:32` (`pty spawned id=12`). No live `wmux.exe`, no `CrashDumps\wmux*.dmp`, no recent WER/Application Error/WebView Crashpad report. System log had Display 4107 events at 12:33:36, 12:35:08, 12:43:03, 12:43:10.
+- Changes: Windows WebView2 is launched with `--disable-gpu`; saved WebGL renderer settings are reset once on Windows via `win-disable-webgl-20260706`; Rust setup log now includes PID and emits 60s process heartbeat; frontend logs loaded renderer settings and 60s renderer heartbeat; terminal WebGL load/context-loss paths log explicitly.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- `cargo test` (src-tauri): 통과, 66 passed. 기존 `pasted_image` test warnings 2개만 잔존.
+- Targeted TS tests: `node --test tests\runtimePlatform.test.ts tests\settings.test.ts tests\ptyBackend.test.ts` 통과, 11 passed.
+- Full `pnpm run test:ts`: 165/168 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 silent-exit follow-up 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 통과. Built application: `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- Installed: copied `wmux.exe` and `wmux-cli.exe` to `C:\Users\one\AppData\Local\wmux\`. Installed `wmux.exe` SHA256 `5A97E1B4FDCD7065002C185D21B635AA2889E1FD69964E4B0E48070BD960223A`; installed `wmux-cli.exe` SHA256 `9F750EC7D925F5A5387BE9B8EF4F2B5AF2183338CAE0983A50F764655D4C1CB1`.
+- Smoke launch: installed exe started as PID `49108`. Log confirmed `webview2 disable-gpu configured=true` and `frontend settings platform=windows webgl=false webglUserSet=false`. Rust/frontend heartbeats were recorded at 13:06 and 13:07. The later exit logged `window close confirmed` at 13:08:37, so that shutdown went through the expected close path.
