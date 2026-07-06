@@ -210,4 +210,4 @@
 - Full `pnpm run test:ts`: 165/168 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 silent-exit follow-up 변경 범위 밖.
 - Build: `pnpm tauri build --no-bundle` 통과. Built application: `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
 - Installed: copied `wmux.exe` and `wmux-cli.exe` to `C:\Users\one\AppData\Local\wmux\`. Installed `wmux.exe` SHA256 `5A97E1B4FDCD7065002C185D21B635AA2889E1FD69964E4B0E48070BD960223A`; installed `wmux-cli.exe` SHA256 `9F750EC7D925F5A5387BE9B8EF4F2B5AF2183338CAE0983A50F764655D4C1CB1`.
-- Smoke launch: installed exe started as PID `49108`. Log confirmed `webview2 disable-gpu configured=true` and `frontend settings platform=windows webgl=false webglUserSet=false`. App left running.
+- Smoke launch: installed exe started as PID `49108`. Log confirmed `webview2 disable-gpu configured=true` and `frontend settings platform=windows webgl=false webglUserSet=false`. Rust/frontend heartbeats were recorded at 13:06 and 13:07. The later exit logged `window close confirmed` at 13:08:37, so that shutdown went through the expected close path.

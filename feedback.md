@@ -59,6 +59,6 @@
 
 ## 2026-07-06 Silent Exit Follow-up
 
-- App is currently running from `C:\Users\one\AppData\Local\wmux\wmux.exe` as PID `49108`.
+- Smoke-launched app from `C:\Users\one\AppData\Local\wmux\wmux.exe` as PID `49108`; it recorded Rust/frontend heartbeats before a later `window close confirmed` exit.
 - If it disappears again, first compare the last `wmux heartbeat` and `frontend heartbeat` lines in `C:\Users\one\AppData\Local\com.wmux.terminal\logs\wmux.log`. Both stopping together points to whole-process termination; Rust heartbeat continuing without frontend heartbeat points to a WebView renderer issue.
 - Manual soak test needed: leave several panes/workspaces open through a display sleep/wake or monitor topology change and check whether Display 4107 still correlates with wmux disappearance.
