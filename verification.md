@@ -143,3 +143,58 @@
 - Build: `pnpm tauri build --no-bundle` 통과.
 - Shortcut check: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` all target `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
 - 갱신 확인: `LastWriteTime` 2026-07-05 12:35:32, SHA256 `6E203873C670A886F53CFE8FAB598A3AD3C1158B848156FFDFCA0BBE3EF0BAEA`.
+
+## 2026-07-05 SSH Tab Title Local Cwd Fix — Windows Deploy
+
+- Commit: `8bf7bdb` (`feature/ssh-tab-title`) — `Keep SSH tab titles from using stale local cwd`.
+- Build: `pnpm tauri build --no-bundle` 통과. 첫 시도는 pnpm registry signature 검증이 sandbox 네트워크 제한으로 실패했고, 승인 실행에서 `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
+- Built application: `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- Shortcut refresh: desktop `wmux.lnk` and taskbar `wmux.lnk` / `wmux (2).lnk` 기존 파일을 `.bak-20260705143906`으로 백업 후 재생성.
+- Shortcut caveat: Codex tool process runs as `seyeongkim\codexsandboxoffline`, so WScript Shell resolves profile-relative shortcut target as `C:\Users\CodexSandboxOffline\...` during automated verification. The shortcut files were created under `C:\Users\one\Desktop` and `C:\Users\one\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar` for the `one` profile.
+- 갱신 확인: `LastWriteTime` 2026-07-05 14:37:40, SHA256 `A6126A5C053E3CB89A7D6517049415793AA6D94948646A9BFBB563A5E091E502`.
+
+## 2026-07-06 Tab Drag-Reorder + Resizable Files Rail
+
+- Branch `feature/tab-reorder-filerail-width` off origin/master (#27 merged). Commit `ce49a00`. PR #28.
+- Typecheck: `pnpm exec tsc --noEmit` 통과.
+- Tests: `pnpm test:ts` 157/160 통과. 실패 3개(cliPackaging, terminalPaste x2)는 origin/master clean 상태에서도 동일하게 실패하는 사전 존재 문제(빌드된 sidecar / 네이티브 클립보드 의존)로 이번 변경과 무관 — stash 후 재현 확인.
+- Added test: `tests/sidebarLayout.test.ts` (clampFilesRailWidth min/max/round) 통과.
+- Build: `pnpm build` (tsc && vite build) 통과.
+
+## 2026-07-06 Tokyo Night Storm + Custom Themes
+
+- Branch `feature/custom-themes` off origin/master. Commit `02b8be5`. Merged as PR #29.
+- Typecheck `pnpm exec tsc --noEmit` 통과. `pnpm build` 통과.
+- Tests: 새 테스트 4개 통과 — Storm built-in 존재/배경 `#24283b`, 커스텀 테마 우선 해석+override, store add(dedupe)/remove(override 정리+active 리셋). 사전 존재 실패 3개(cliPackaging, terminalPaste)는 무관.
+- Tokyo Night Storm 팔레트는 mbadolato/iTerm2-Color-Schemes `windowsterminal/TokyoNight Storm.json` 공식값 사용.
+
+## 2026-07-06 Windows Install — Both Features from master
+
+- master `7c035d9` (PR #28 + #29 merged). Build `pnpm tauri build --no-bundle` 통과 (cargo release 52.78s).
+- Built: `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
+- Installed: copied to `C:\Users\one\AppData\Local\wmux\wmux.exe` (Copy verified: built SHA256 == installed SHA256).
+- Installed SHA256 `82C2D319706F50AD74F649D0D90DC08F7271AB4945DE210807975ADD5F097B74`, LastWriteTime 2026-07-06 08:54:31. Baseline `0AAF9217...`에서 변경 확인.
+- No wmux process was running at install time (guard passed).
+
+## 2026-07-06 Settings Open Lag Fix — Windows Install
+
+- Branch `fix/settings-open-lag` (commit `657e166`), PR #30. Cause: opening Settings always ran `list_fonts` (PowerShell InstalledFontCollection, hundreds of families) and rendered one preview-per-typeface button. Fix: font browse list collapsed by default; `list_fonts` + previews only run on expand; displayFonts memoized + capped at 120.
+- Typecheck 통과. `pnpm test:ts` 162/165 통과 (사전 존재 3개 무관). Build `pnpm tauri build --no-bundle` 통과 (cargo release 32.21s).
+- Built from committed fix-branch state (= master + fix, PR #30 아직 머지 전이라 동일 내용에서 빌드).
+- Installed: `C:\Users\one\AppData\Local\wmux\wmux.exe`, SHA256 `548CCBCD1D35536021F02A72131B5EABC8A60619AB189F478367A5302610EA4E`, LastWriteTime 2026-07-06 09:07:11. 이전 설치본 `82C2D319...`에서 변경 확인. 설치 시 실행 중 wmux 없음.
+
+## 2026-07-06 Long-Run Exit Mitigation — Windows Deploy
+
+- Reported symptom: several wmux panes/windows were left open for about an hour and wmux was gone afterward.
+- Local forensic check: no live `wmux.exe`; no recent `Application Error`/`Windows Error Reporting` event for wmux; no `C:\Users\one\AppData\Local\CrashDumps\wmux*.dmp`; WebView2 Crashpad reports empty. ProgramData WER `Critical_wmux.exe` records found were from 2026-03-19, not this incident.
+- Changes: enabled release `tauri-plugin-log` file logging to `C:\Users\one\AppData\Local\com.wmux.terminal\logs\wmux.log`; added frontend `error`/`unhandledrejection`, window close, beforeunload, and PTY lifecycle logs; added Rust panic/setup/PTY spawn/exit logs; changed Windows WebGL renderer default to off unless the user explicitly re-enables it in Settings.
+- `pnpm run build`: 통과. Vite chunk size warning만 잔존.
+- `cargo check` (src-tauri): 통과.
+- `cargo test` (src-tauri): 통과, 66 passed. 기존 `pasted_image` test warnings 2개만 잔존.
+- Targeted TS tests: `node --test tests/runtimePlatform.test.ts tests/settings.test.ts tests/ptyBackend.test.ts` 통과, 10 passed.
+- Full `pnpm run test:ts`: 162/165 passed. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`)이며 이번 long-run/logging/WebGL 변경 범위 밖.
+- Build: `pnpm tauri build --no-bundle` 통과. 첫 시도는 Tauri CLI가 `cargo`를 PATH에서 못 찾아 실패했고, `C:\Users\one\.cargo\bin`을 PATH에 추가해 재실행 성공.
+- Built application: `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`, SHA256 `ABC6BD25E8E774BA40BCC252101C889B108F85B5E8D956D8062C36B41432EC61`.
+- Installed: copied `wmux.exe` and `wmux-cli.exe` to `C:\Users\one\AppData\Local\wmux\`. Installed `wmux.exe` SHA256 matches build (`ABC6BD25E8E774BA40BCC252101C889B108F85B5E8D956D8062C36B41432EC61`); installed `wmux-cli.exe` SHA256 `9F750EC7D925F5A5387BE9B8EF4F2B5AF2183338CAE0983A50F764655D4C1CB1`.
+- Smoke launch: project release exe started with `MainWindowHandle = 4592316`; installed exe started with `MainWindowHandle = 2495350`; log file was created/updated and contained `wmux setup complete`, `frontend boot`, and restored PTY spawn lines. Test processes were stopped afterward; no wmux/child test processes remained.
+- 갱신 확인: installed `wmux.exe` `LastWriteTime` 2026-07-06 11:13:35, SHA256 `ABC6BD25E8E774BA40BCC252101C889B108F85B5E8D956D8062C36B41432EC61`.
