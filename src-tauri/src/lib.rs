@@ -15,12 +15,12 @@ use platform::process::{
     collect_session_metadata, gather_workspace_info, get_listening_ports, get_shell_context,
     process_tree_contains_agent, SessionMetadata, ShellContext, WorkspaceInfo,
 };
-use pty::{PtyManager, WmuxPtyContext};
+use pty::{PtyEvent, PtyEventChannel, PtyManager, WmuxPtyContext};
 use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, State};
+use tauri::{ipc::Channel, AppHandle, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 #[tauri::command]
@@ -78,6 +78,11 @@ fn spawn_pty_tmux_cc(
             enable_agent_session_reporting: false,
         },
     )
+}
+
+#[tauri::command]
+fn subscribe_pty_events(state: State<'_, PtyEventChannel>, channel: Channel<PtyEvent>) {
+    state.set(channel);
 }
 
 #[tauri::command]
@@ -493,16 +498,15 @@ pub fn run() {
         log::error!("panic: {panic_info}");
     }));
 
-    #[cfg(target_os = "windows")]
-    let webview2_disable_gpu = configure_windows_webview2_args();
-
     tauri::Builder::default()
         .manage(PtyManager::new())
+        .manage(PtyEventChannel::default())
         .manage(MonitorManager::new())
         .manage(WorkspaceRegistry::default())
         .invoke_handler(tauri::generate_handler![
             spawn_pty,
             spawn_pty_tmux_cc,
+            subscribe_pty_events,
             write_pty,
             resize_pty,
             kill_pty,
@@ -551,8 +555,6 @@ pub fn run() {
                 cfg!(debug_assertions),
                 std::process::id()
             );
-            #[cfg(target_os = "windows")]
-            log::info!("webview2 disable-gpu configured={webview2_disable_gpu}");
             start_heartbeat();
             // Start local IPC server for wmux-cli and shell hooks.
             platform::ipc::start_ipc_server(app.handle().clone());
@@ -560,25 +562,6 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[cfg(target_os = "windows")]
-fn configure_windows_webview2_args() -> bool {
-    const ENV_NAME: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
-    const FLAG: &str = "--disable-gpu";
-
-    let existing = std::env::var(ENV_NAME).unwrap_or_default();
-    if existing.split_whitespace().any(|arg| arg == FLAG) {
-        return true;
-    }
-
-    let next = if existing.trim().is_empty() {
-        FLAG.to_string()
-    } else {
-        format!("{} {FLAG}", existing.trim())
-    };
-    std::env::set_var(ENV_NAME, next);
-    true
 }
 
 fn start_heartbeat() {
