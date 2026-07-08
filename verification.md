@@ -211,3 +211,23 @@
 - Build: `pnpm tauri build --no-bundle` 통과. Built application: `C:\Users\one\Projects\wmux\src-tauri\target\release\wmux.exe`.
 - Installed: copied `wmux.exe` and `wmux-cli.exe` to `C:\Users\one\AppData\Local\wmux\`. Installed `wmux.exe` SHA256 `5A97E1B4FDCD7065002C185D21B635AA2889E1FD69964E4B0E48070BD960223A`; installed `wmux-cli.exe` SHA256 `9F750EC7D925F5A5387BE9B8EF4F2B5AF2183338CAE0983A50F764655D4C1CB1`.
 - Smoke launch: installed exe started as PID `49108`. Log confirmed `webview2 disable-gpu configured=true` and `frontend settings platform=windows webgl=false webglUserSet=false`. Rust/frontend heartbeats were recorded at 13:06 and 13:07. The later exit logged `window close confirmed` at 13:08:37, so that shutdown went through the expected close path.
+
+## 2026-07-08 Silent Exit Reproduction — Renderer OOM from PTY Output Event Flood
+
+- Setup: isolated dev instance (`com.wmux.terminal.isolated.itestc0ffee`, temp local edits only: env gate to skip `--disable-gpu`, WebGL default forced on), 9–13 panes each running an AI-TUI-like stream script (colored token bursts + spinner line rewrites, ~25–60ms cadence). Panes driven over CDP (`--remote-debugging-port`), memory sampled to CSV every 60s.
+- GPU-reset hypothesis rejected: with GPU on + WebGL on under full streaming load, both a graphics driver restart (Win+Ctrl+Shift+B equivalent) and a DPMS monitor off/wake cycle were survived. No `terminal webgl context lost` was even logged; rendering stayed live (frame-diff verified).
+- Reproduced crash: after 4h00m of streaming (14:23–18:24) the WebView2 renderer crashed with error page "오류 코드: Out of Memory". Crashpad dump `EBWebView\Crashpad\reports\1f54cae7-....dmp` at 18:24:07; last frontend heartbeat 18:23:11. Rust host process stayed alive with heartbeats (differs from the original incidents where the whole process vanished — possibly release/system-memory-pressure variant of the same failure).
+- Attribution: renderer process private memory grew ~100–170MB/min under load while JS heap stayed flat (~50–63MB) — native memory, not JS objects. GPU process stayed ~150MB. WebGL off (DOM renderer) made no difference: still ~105MB/min growth. Stopping the stream processes dropped renderer memory 1.9GB → 1.3GB within one minute and growth stopped completely.
+- Conclusion: `pty-output` is emitted per small read chunk as a broadcast Tauri event (hundreds of events/sec across panes, every pane's listener receives every event and filters by id). Under sustained AI-TUI-style output the renderer-side native delivery queue outgrows consumption until OOM. Unrelated to GPU/WebGL; `--disable-gpu` does not address it.
+- Fix direction (not yet implemented): coalesce PTY reads in Rust before emitting (per-pty flush every ~16ms or N KB), and/or move pty-output to per-pty `tauri::ipc::Channel` instead of broadcast events.
+- Temp edits reverted; working tree clean. Test artifacts (stream/driver scripts, soak CSVs, heap CSV) in session scratchpad only.
+- Note: the 8ms coalescing emitter from #9 was present during the OOM run. It merges bursts but a spinner-style trickle still produces one event per chunk, so coalescing alone does not cap the event rate.
+
+## 2026-07-08 PTY Event Channel Fix
+
+- Change: `pty-output`/`pty-exit` now flow over a single `tauri::ipc::Channel` that the frontend registers via the new `subscribe_pty_events` command, replacing broadcast `app.emit`. Frontend keeps the same `PtyBackend.onOutput/onExit` interface (channel fan-out happens in `tauriPtyBackend`); App.tsx's pane auto-close listener moved onto the same path. WebView2 `--disable-gpu` flag removed — the GPU-reset hypothesis was rejected by the reproduction above and the flag costs compositing performance without addressing the OOM. Windows WebGL renderer default stays off.
+- `cargo check` (src-tauri): 통과.
+- `cargo test` (src-tauri): 통과, 66 passed. (`pnpm run build`와 병렬 실행한 첫 시도는 tauri-winres 빌드 스크립트 충돌로 실패, 단독 재실행 통과.)
+- `pnpm run build`: 통과. 기존 chunk size warning만 잔존.
+- `pnpm run test:ts`: 165/168. 실패 3개는 기존 Windows path expectation (`cliPackaging`, `terminalPaste`) — 변경 범위 밖.
+- Load verification (isolated instance, 12 streaming panes, GPU on): renderer private memory 292→435MB in the first minute (scrollback fill), then flat at ~440–480MB for 5 minutes. Same load on the event path grew 1,296→1,927MB in 6 minutes (~105MB/min, unbounded). Channel-delivered output verified rendering via CDP screenshot.

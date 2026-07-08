@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{ipc::Channel, AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +26,38 @@ pub struct PtyExit {
     pub id: u32,
     pub code: Option<i32>,
     pub surface_id: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
+pub enum PtyEvent {
+    Output(PtyOutput),
+    Exit(PtyExit),
+}
+
+/// The frontend's PTY event channel, registered via `subscribe_pty_events`.
+/// PTY output used to be broadcast Tauri events, but the renderer buffers
+/// those natively faster than it consumes them under sustained multi-pane
+/// output, growing until the WebView2 renderer hits Out of Memory
+/// (verification.md 2026-07-08). Channels are Tauri's recommended path for
+/// ordered high-throughput streams.
+#[derive(Default)]
+pub struct PtyEventChannel(Mutex<Option<Channel<PtyEvent>>>);
+
+impl PtyEventChannel {
+    pub fn set(&self, channel: Channel<PtyEvent>) {
+        *self.0.lock().unwrap() = Some(channel);
+    }
+
+    fn send(&self, event: PtyEvent) {
+        if let Some(channel) = self.0.lock().unwrap().as_ref() {
+            let _ = channel.send(event);
+        }
+    }
+}
+
+fn send_pty_event(app: &AppHandle, event: PtyEvent) {
+    app.state::<PtyEventChannel>().send(event);
 }
 
 struct TmuxCcState {
@@ -349,13 +381,13 @@ impl PtyManager {
             let status = child.wait();
             let code = status.ok().map(|s| s.exit_code() as i32);
             log::info!("pty child exited id={pty_id2} code={code:?}");
-            let _ = app_clone2.emit(
-                "pty-exit",
-                PtyExit {
+            send_pty_event(
+                &app_clone2,
+                PtyEvent::Exit(PtyExit {
                     id: pty_id2,
                     code,
                     surface_id: child_surface_id,
-                },
+                }),
             );
         });
 
@@ -586,13 +618,13 @@ fn emit_reader_exit(
         let _ = tx.send(OutputMsg::Exit(None));
     } else {
         log::info!("pty reader exited id={pty_id}");
-        let _ = app.emit(
-            "pty-exit",
-            PtyExit {
+        send_pty_event(
+            app,
+            PtyEvent::Exit(PtyExit {
                 id: pty_id,
                 code: None,
                 surface_id: surface_id.clone(),
-            },
+            }),
         );
     }
 }
@@ -618,13 +650,13 @@ fn run_output_emitter(
             }
             Ok(OutputMsg::Exit(code)) => {
                 flush_output(&mut acc, pty_id, &surface_id, &app, true);
-                let _ = app.emit(
-                    "pty-exit",
-                    PtyExit {
+                send_pty_event(
+                    &app,
+                    PtyEvent::Exit(PtyExit {
                         id: pty_id,
                         code,
                         surface_id: surface_id.clone(),
-                    },
+                    }),
                 );
                 break;
             }
@@ -654,13 +686,13 @@ fn flush_output(
         return;
     }
     let emit = |text: String| {
-        let _ = app.emit(
-            "pty-output",
-            PtyOutput {
+        send_pty_event(
+            app,
+            PtyEvent::Output(PtyOutput {
                 id: pty_id,
                 data: text,
                 surface_id: surface_id.clone(),
-            },
+            }),
         );
     };
     if final_flush {
@@ -706,26 +738,26 @@ fn handle_tmux_event(
                 }
             }
             let text = String::from_utf8_lossy(&data).into_owned();
-            let _ = app.emit(
-                "pty-output",
-                PtyOutput {
+            send_pty_event(
+                app,
+                PtyEvent::Output(PtyOutput {
                     id: pty_id,
                     data: text,
                     surface_id: surface_id.clone(),
-                },
+                }),
             );
         }
         TmuxEvent::WindowPaneChanged { pane_id, .. } => {
             state.lock().unwrap().active_pane = Some(pane_id);
         }
         TmuxEvent::Exit { .. } => {
-            let _ = app.emit(
-                "pty-exit",
-                PtyExit {
+            send_pty_event(
+                app,
+                PtyEvent::Exit(PtyExit {
                     id: pty_id,
                     code: None,
                     surface_id,
-                },
+                }),
             );
         }
         // Other notifications are not acted on for MVP; ignore silently.
