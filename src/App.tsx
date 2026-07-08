@@ -56,6 +56,7 @@ import {
   parseSshCommandLine,
   type SshConnection,
 } from "./utils/sshConnection";
+import { tauriPtyBackend } from "./utils/tauriPtyBackend";
 import { tryGetCurrentWebview, tryGetCurrentWindow } from "./utils/tauriWindow";
 
 const APP_SHORTCUT_PLATFORM = getRuntimePlatform();
@@ -407,39 +408,36 @@ export const App = () => {
 
   // Listen for PTY exit events to auto-close panes
   useEffect(() => {
-    const unlisten = listen<{ id: number; code: number | null }>(
-      "pty-exit",
-      (event) => {
-        const ptyId = event.payload.id;
-        logWarn(`pty exit id=${ptyId} code=${event.payload.code ?? "none"}`);
+    const unlisten = tauriPtyBackend.onExit((payload) => {
+      const ptyId = payload.id;
+      logWarn(`pty exit id=${ptyId} code=${payload.code ?? "none"}`);
 
-        // Delay so "[Process exited]" message is visible
-        setTimeout(() => {
-          const state = useWorkspaceStore.getState();
-          const match = findLeafByPtyId(state.workspaces, ptyId);
-          if (!match) return;
-          if (match.tmuxSession) return;
+      // Delay so "[Process exited]" message is visible
+      setTimeout(() => {
+        const state = useWorkspaceStore.getState();
+        const match = findLeafByPtyId(state.workspaces, ptyId);
+        if (!match) return;
+        if (match.tmuxSession) return;
 
-          const { workspaceId, leafId, leafCount } = match;
+        const { workspaceId, leafId, leafCount } = match;
 
-          if (leafCount > 1) {
-            // Multiple panes: close just this pane
-            destroyTerminal(leafId);
-            useWorkspaceStore.getState().closeLeaf(workspaceId, leafId);
+        if (leafCount > 1) {
+          // Multiple panes: close just this pane
+          destroyTerminal(leafId);
+          useWorkspaceStore.getState().closeLeaf(workspaceId, leafId);
+        } else {
+          // Single pane: destroy terminal and replace workspace with fresh one
+          destroyAllTerminals([leafId]);
+          const store = useWorkspaceStore.getState();
+          if (store.workspaces.length > 1) {
+            store.removeWorkspace(workspaceId);
           } else {
-            // Single pane: destroy terminal and replace workspace with fresh one
-            destroyAllTerminals([leafId]);
-            const store = useWorkspaceStore.getState();
-            if (store.workspaces.length > 1) {
-              store.removeWorkspace(workspaceId);
-            } else {
-              // Last workspace: replace it in-place with a new leaf
-              store.resetWorkspace(workspaceId);
-            }
+            // Last workspace: replace it in-place with a new leaf
+            store.resetWorkspace(workspaceId);
           }
-        }, 500);
-      },
-    );
+        }
+      }, 500);
+    });
 
     return () => {
       unlisten.then((fn) => fn());
