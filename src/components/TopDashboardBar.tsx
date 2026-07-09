@@ -300,7 +300,7 @@ export const TopDashboardBar = ({
                 const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
                 return (
                   <div key={host.id} style={styles.hostRow} onClick={() => onConnectHost?.(host)}>
-                    <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "#89b4fa" }} />
+                    <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "var(--wmux-accent)" }} />
                     <span style={styles.hostName}>{host.name}</span>
                     <span style={styles.hostTarget}>{target}</span>
                     <button
@@ -579,8 +579,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottomColor: "var(--wmux-accent-strong)",
   },
   sessionIndex: {
-    color: "var(--wmux-accent)",
-    fontFamily: "'JetBrains Mono', monospace",
+    color: "var(--wmux-subtext)",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 10,
     flexShrink: 0,
   },
@@ -607,14 +607,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   sessionPaneCount: {
     color: "var(--wmux-subtext)",
-    border: "1px solid var(--wmux-hairline)",
-    borderRadius: 8,
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 9,
-    lineHeight: "13px",
-    minWidth: 14,
-    height: 14,
-    textAlign: "center",
+    fontFamily: "var(--wmux-font-mono)",
+    fontSize: 10,
+    lineHeight: 1,
     flexShrink: 0,
   },
   sessionClose: {
@@ -630,10 +625,10 @@ const styles: Record<string, React.CSSProperties> = {
   newSessionButton: {
     width: 26,
     height: 26,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid transparent",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
-    color: "var(--wmux-text)",
+    background: "transparent",
+    color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: 0,
     lineHeight: 1,
@@ -675,22 +670,23 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    color: "var(--wmux-accent)",
-    fontFamily: "'JetBrains Mono', monospace",
+    color: "var(--wmux-text)",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 11,
   },
   commandButton: {
     height: 24,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid transparent",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
+    background: "transparent",
     color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: "0 8px",
     fontSize: 12,
   },
   commandButtonActive: {
-    borderColor: "var(--wmux-accent)",
+    borderColor: "var(--wmux-hairline-strong)",
+    backgroundColor: "var(--wmux-bg-elev)",
     color: "var(--wmux-text)",
   },
   popover: {
@@ -749,7 +745,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   hostTarget: {
     color: "var(--wmux-subtext)",
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 11,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -758,9 +754,9 @@ const styles: Record<string, React.CSSProperties> = {
   smallButton: {
     width: 22,
     height: 22,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid transparent",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
+    background: "transparent",
     color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: 0,
@@ -798,22 +794,21 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   metric: {
-    border: "1px solid var(--wmux-hairline)",
-    borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
-    padding: "7px 8px",
+    padding: "7px 8px 7px 0",
   },
   metricLabel: {
     display: "block",
     color: "var(--wmux-subtext)",
     fontSize: 10,
-    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
   },
   metricValue: {
     display: "block",
     color: "var(--wmux-text)",
     fontSize: 14,
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: "var(--wmux-font-mono)",
     marginTop: 3,
   },
   statusText: {

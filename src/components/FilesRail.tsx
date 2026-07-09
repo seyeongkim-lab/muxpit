@@ -223,12 +223,10 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
   return (
     <aside ref={asideRef} style={{ ...styles.rail, width: railWidth, minWidth: railWidth }}>
       <div style={styles.header}>
-        <div style={styles.titleGroup}>
-          <span className="wmux-section-label">FILES</span>
-          <span style={styles.path} title={rootPath ?? requestedRoot}>
-            {rootPath ? compactPath(rootPath) : requestedRoot ? compactPath(requestedRoot) : "current directory"}
-          </span>
-        </div>
+        <span className="wmux-section-label">FILES</span>
+        <span style={styles.path} title={rootPath ?? requestedRoot}>
+          {rootPath ? compactPath(rootPath) : requestedRoot ? compactPath(requestedRoot) : "current directory"}
+        </span>
         <button className="wmux-btn" onClick={refresh} style={styles.refresh} title="Refresh files">
           r
         </button>
@@ -273,24 +271,22 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "col-resize",
     zIndex: 5,
   },
+  // Fixed 34px row — matches the top bar and the panes' AI bar so the app
+  // shares one horizontal baseline.
   header: {
+    height: 34,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 24px",
+    gridTemplateColumns: "auto minmax(0, 1fr) 24px",
     alignItems: "center",
     gap: 8,
-    padding: "10px 10px 7px 12px",
+    padding: "0 8px 0 12px",
     borderBottom: "1px solid var(--wmux-hairline)",
-  },
-  titleGroup: {
-    minWidth: 0,
-    display: "flex",
-    flexDirection: "column",
-    gap: 3,
+    flexShrink: 0,
   },
   path: {
     color: "var(--wmux-subtext)",
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 10,
+    fontFamily: "var(--wmux-font-mono)",
+    fontSize: 11,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
@@ -298,9 +294,9 @@ const styles: Record<string, React.CSSProperties> = {
   refresh: {
     width: 24,
     height: 24,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid transparent",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
+    background: "transparent",
     color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: 0,
@@ -313,14 +309,15 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "4px 0 8px",
   },
   row: {
-    minHeight: 25,
+    minHeight: 26,
     display: "grid",
     gridTemplateColumns: "16px 14px minmax(0, 1fr) 44px",
     alignItems: "center",
     gap: 5,
     paddingRight: 8,
     color: "var(--wmux-text)",
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: 1.3,
   },
   expandButton: {
     width: 16,
@@ -333,16 +330,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
   },
   dirMark: {
-    color: "var(--wmux-accent)",
-    fontFamily: "'JetBrains Mono', monospace",
+    color: "var(--wmux-text)",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 10,
     fontWeight: 700,
   },
   fileMark: {
     color: "var(--wmux-subtext)",
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 10,
-    fontWeight: 700,
+    fontWeight: 400,
   },
   fileName: {
     minWidth: 0,
@@ -352,7 +349,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   fileSize: {
     color: "var(--wmux-subtext)",
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 10,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -361,19 +358,17 @@ const styles: Record<string, React.CSSProperties> = {
   },
   status: {
     color: "var(--wmux-subtext)",
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
+    fontSize: 12,
     padding: "7px 12px",
   },
   error: {
-    color: "#f38ba8",
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
+    color: "var(--wmux-danger)",
+    fontSize: 12,
     padding: "7px 12px",
   },
   errorBlock: {
-    color: "#f38ba8",
-    fontFamily: "'JetBrains Mono', monospace",
+    color: "var(--wmux-danger)",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 11,
     padding: "7px 12px",
     whiteSpace: "pre-wrap",
