@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useSidebarLayoutStore } from "../stores/sidebarLayout";
 import type { SshConnection } from "../utils/sshConnection";
+import { Sparkline } from "./Sparkline";
 
 interface SidebarMonitorProps {
   monitorId: string;
@@ -54,26 +55,6 @@ const COLORS = {
   yellow: "#f9e2af",
   teal: "#94e2d5",
   mauve: "#cba6f7",
-};
-
-// SVG sparkline from time series data
-const Sparkline = ({ data, color, height = 28, autoMax, fixedMax }: { data: number[]; color: string; height?: number; autoMax?: boolean; fixedMax?: number }) => {
-  if (data.length < 2) return null;
-  const max = fixedMax ? fixedMax : autoMax ? Math.max(...data, 1) : 100;
-  const width = 180;
-  const points = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - (v / max) * height;
-    return `${x},${y}`;
-  });
-  const fillPoints = `0,${height} ${points.join(" ")} ${width},${height}`;
-
-  return (
-    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      <polygon points={fillPoints} fill={`${color}15`} />
-      <polyline points={points.join(" ")} fill="none" stroke={color} strokeWidth="1.5" />
-    </svg>
-  );
 };
 
 const formatBytes = (bytes: number): string => {
@@ -203,8 +184,8 @@ export const SidebarMonitor = ({ monitorId, sshTarget, sshCommand, sshConnection
 
           {/* Sparklines */}
           <div style={styles.sparklines}>
-            <Sparkline data={cpuData} color={COLORS.blue} height={32} />
-            <Sparkline data={memData} color={COLORS.green} height={32} />
+            <Sparkline series={[{ data: cpuData, color: COLORS.blue }]} height={32} />
+            <Sparkline series={[{ data: memData, color: COLORS.green }]} height={32} />
           </div>
 
           {/* Network */}
@@ -223,8 +204,8 @@ export const SidebarMonitor = ({ monitorId, sshTarget, sshCommand, sshConnection
                     {"▼ "}{formatBytes(latest.net.rxBytesPerSec)}{"  ▲ "}{formatBytes(latest.net.txBytesPerSec)}
                   </span>
                 </div>
-                <Sparkline data={rxData} color={COLORS.teal} height={24} fixedMax={speedBytesPerSec} autoMax={!speedBytesPerSec} />
-                <Sparkline data={txData} color={COLORS.yellow} height={24} fixedMax={speedBytesPerSec} autoMax={!speedBytesPerSec} />
+                <Sparkline series={[{ data: rxData, color: COLORS.teal }]} height={24} fixedMax={speedBytesPerSec} autoMax={!speedBytesPerSec} />
+                <Sparkline series={[{ data: txData, color: COLORS.yellow }]} height={24} fixedMax={speedBytesPerSec} autoMax={!speedBytesPerSec} />
               </div>
             );
           })()}

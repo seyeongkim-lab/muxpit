@@ -7,6 +7,7 @@ import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useTmuxSessionsStore } from "../stores/tmuxSessions";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { destroyAllTerminals } from "./terminalRegistry";
+import { Sparkline } from "./Sparkline";
 import type { SshConnection } from "../utils/sshConnection";
 import { buildWorkspaceTabView } from "../utils/workspaceTabTitle";
 
@@ -415,13 +416,37 @@ const MonitorTabButton = ({
 }) => {
   const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
   const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
-  const value = monitorSummary(monitor, latestSnapshot);
+
+  // With enough history the value slot shows a small CPU/MEM sparkline instead
+  // of text; the numbers move into the button tooltip. MEM is drawn first so
+  // the CPU line stays on top. Fixed width keeps the bar from shifting as data
+  // arrives.
+  const showGraph = !!monitor && (monitorSeries?.length ?? 0) >= 2;
+  const value = showGraph ? (
+    <Sparkline
+      series={[
+        { data: monitorSeries!.map((s) => s.memPercent), color: "var(--wmux-subtext)", fill: "none" },
+        { data: monitorSeries!.map((s) => s.cpuPercent), color: "var(--wmux-accent)", fill: "none" },
+      ]}
+      width={56}
+      height={16}
+      style={{ width: 56, flexShrink: 0, display: "block" }}
+    />
+  ) : monitor ? (
+    monitor.sshTarget
+  ) : (
+    "off"
+  );
+  const title = monitor && latestSnapshot
+    ? `${monitor.sshTarget} — CPU ${Math.round(latestSnapshot.cpuPercent)}% · MEM ${formatMemoryMb(latestSnapshot.memUsedMb)} (${Math.round(latestSnapshot.memPercent)}%)`
+    : monitor?.sshTarget;
 
   return (
     <TopTabButton
       active={active}
       label="Monitor"
       value={value}
+      title={title}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     />
@@ -469,28 +494,18 @@ const MonitorPopover = ({
   );
 };
 
-const monitorSummary = (
-  monitor: SidebarMonitorInfo | null | undefined,
-  latestSnapshot: MonitorSnapshot | undefined,
-): string => {
-  if (!monitor) return "off";
-  if (!latestSnapshot) return monitor.sshTarget;
-  const cpu = Number.isFinite(latestSnapshot.cpuPercent)
-    ? `${Math.round(latestSnapshot.cpuPercent)}%`
-    : "--";
-  return `${cpu} ${formatMemoryMb(latestSnapshot.memUsedMb)}`;
-};
-
 const TopTabButton = ({
   active,
   label,
   value,
+  title,
   onMouseEnter,
   onClick,
 }: {
   active: boolean;
   label: string;
-  value: string;
+  value: React.ReactNode;
+  title?: string;
   onMouseEnter: () => void;
   onClick: () => void;
 }) => (
@@ -498,6 +513,7 @@ const TopTabButton = ({
     className="wmux-btn wmux-top-tab"
     onMouseEnter={onMouseEnter}
     onClick={onClick}
+    title={title}
     style={{ ...styles.tabButton, ...(active ? styles.tabButtonActive : {}) }}
   >
     <span style={styles.tabLabel}>{label}</span>
@@ -548,10 +564,11 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: "hidden",
     padding: "3px 0 0",
   },
+  // Fixed width: tab titles update live (OSC titles, cwd, AI status), and a
+  // content-sized tab makes the whole row shift on every change.
   sessionTab: {
     height: 29,
-    minWidth: 112,
-    maxWidth: 220,
+    width: 160,
     display: "flex",
     alignItems: "center",
     gap: 6,
@@ -599,11 +616,13 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 0 0 1px var(--wmux-accent-mid)",
   },
   sessionTabName: {
+    flex: 1,
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     fontSize: 12,
+    textAlign: "left",
   },
   sessionPaneCount: {
     color: "var(--wmux-subtext)",
