@@ -681,15 +681,17 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "var(--wmux-bg-elev)",
     color: "var(--wmux-text)",
   },
+  // The button name carries the emphasis; the value/graph is auxiliary status.
   tabLabel: {
     fontSize: 12,
+    color: "var(--wmux-text)",
   },
   tabValue: {
     maxWidth: 92,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    color: "var(--wmux-text)",
+    color: "var(--wmux-subtext)",
     fontFamily: "var(--wmux-font-mono)",
     fontSize: 11,
   },
