@@ -150,7 +150,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
           <button
             className="wmux-btn"
             onClick={onToggleGridView}
-            style={{ ...styles.addBtn, ...(gridView ? { backgroundColor: "#313244", borderColor: "#89b4fa", color: "#cdd6f4" } : {}) }}
+            style={{ ...styles.addBtn, ...(gridView ? { background: "#313244", borderColor: "#89b4fa", color: "#cdd6f4" } : {}) }}
             title="Grid overview (Ctrl+Shift+G)"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

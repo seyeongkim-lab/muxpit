@@ -676,9 +676,12 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     padding: "0 8px",
   },
+  // `background` (not backgroundColor): the base style uses the shorthand, and
+  // React drops the property entirely when a merged style mixes shorthand and
+  // longhand — the button then falls back to the UA's light button face.
   tabButtonActive: {
     borderColor: "var(--wmux-hairline-strong)",
-    backgroundColor: "var(--wmux-bg-elev)",
+    background: "var(--wmux-bg-elev)",
     color: "var(--wmux-text)",
   },
   // The button name carries the emphasis; the value/graph is auxiliary status.
@@ -707,7 +710,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   commandButtonActive: {
     borderColor: "var(--wmux-hairline-strong)",
-    backgroundColor: "var(--wmux-bg-elev)",
+    background: "var(--wmux-bg-elev)",
     color: "var(--wmux-text)",
   },
   popover: {
