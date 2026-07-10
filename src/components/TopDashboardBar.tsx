@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useWorkspaceStore, collectLeafIds } from "../stores/workspace";
+import { useWorkspaceStore, collectLeafIds, type Workspace } from "../stores/workspace";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
-import { useTmuxSessionsStore } from "../stores/tmuxSessions";
+import { useTmuxSessionsStore, type AttachInfo, type TmuxSession } from "../stores/tmuxSessions";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { destroyAllTerminals } from "./terminalRegistry";
 import { Sparkline } from "./Sparkline";
@@ -88,7 +88,6 @@ export const TopDashboardBar = ({
   const setActive = useWorkspaceStore((s) => s.setActive);
   const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
   const sshHosts = useSshHostsStore((s) => s.hosts);
-  const infoMap = useWorkspaceInfoStore((s) => s.info);
   const tmuxAttach = useTmuxSessionsStore((s) => s._attach);
   const tmuxByWs = useTmuxSessionsStore((s) => s.byWs);
   const [hoveredTab, setHoveredTab] = useState<TopTab | null>(null);
@@ -137,76 +136,35 @@ export const TopDashboardBar = ({
           <span className="wmux-logo" style={styles.logo}>wmux</span>
         </div>
         <div style={styles.sessionTabs} onDoubleClick={(event) => event.stopPropagation()}>
-          {workspaces.map((workspace, index) => {
-            const isActive = workspace.id === activeId;
-            const tabView = buildWorkspaceTabView(
-              workspace,
-              infoMap[workspace.id],
-              tmuxAttach[workspace.id],
-              tmuxByWs[workspace.id]?.sessions,
-            );
-            const paneCount = tabView.paneCount;
-            const isDragging = dragIndex === index;
-            const isDropTarget = overIndex === index && dragIndex !== null && dragIndex !== index;
-            return (
-              <button
-                key={workspace.id}
-                className={`wmux-btn wmux-top-tab${isActive ? " wmux-ws-active" : ""}`}
-                onClick={() => setActive(workspace.id)}
-                draggable
-                onDragStart={(event) => {
-                  setDragIndex(index);
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(event) => {
-                  if (dragIndex === null) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  if (overIndex !== index) setOverIndex(index);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  dropOnTab(index);
-                }}
-                onDragEnd={endDrag}
-                style={{
-                  ...styles.sessionTab,
-                  ...(isActive ? styles.sessionTabActive : {}),
-                  ...(isDragging ? styles.sessionTabDragging : {}),
-                  ...(isDropTarget ? styles.sessionTabDropTarget : {}),
-                }}
-                title={[
-                  tabView.title,
-                  workspace.name !== tabView.title ? workspace.name : null,
-                  tabView.detail,
-                  `${paneCount} pane${paneCount === 1 ? "" : "s"}`,
-                ].filter(Boolean).join(" - ")}
-              >
-                <span style={styles.sessionIndex}>{index + 1}</span>
-                {tabView.statusKind && (
-                  <span
-                    style={{
-                      ...styles.sessionStatusDot,
-                      ...(tabView.statusKind === "ready"
-                        ? styles.sessionStatusReady
-                        : styles.sessionStatusActive),
-                    }}
-                  />
-                )}
-                <span style={styles.sessionTabName}>{tabView.title}</span>
-                {paneCount > 1 && <span style={styles.sessionPaneCount}>{paneCount}</span>}
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  onClick={(event) => closeWorkspace(event, workspace.id)}
-                  style={styles.sessionClose}
-                  title="Close workspace"
-                >
-                  x
-                </span>
-              </button>
-            );
-          })}
+          {workspaces.map((workspace, index) => (
+            <WorkspaceTab
+              key={workspace.id}
+              workspace={workspace}
+              index={index}
+              isActive={workspace.id === activeId}
+              isDragging={dragIndex === index}
+              isDropTarget={overIndex === index && dragIndex !== null && dragIndex !== index}
+              tmuxAttach={tmuxAttach[workspace.id]}
+              tmuxSessions={tmuxByWs[workspace.id]?.sessions}
+              onActivate={() => setActive(workspace.id)}
+              onClose={(event) => closeWorkspace(event, workspace.id)}
+              onDragStart={(event) => {
+                setDragIndex(index);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(event) => {
+                if (dragIndex === null) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                if (overIndex !== index) setOverIndex(index);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                dropOnTab(index);
+              }}
+              onDragEnd={endDrag}
+            />
+          ))}
           <button
             className="wmux-btn"
             onClick={() => addWorkspace()}
@@ -326,6 +284,89 @@ export const TopDashboardBar = ({
         </div>
       )}
     </div>
+  );
+};
+
+const WorkspaceTab = ({
+  workspace,
+  index,
+  isActive,
+  isDragging,
+  isDropTarget,
+  tmuxAttach,
+  tmuxSessions,
+  onActivate,
+  onClose,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  workspace: Workspace;
+  index: number;
+  isActive: boolean;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  tmuxAttach?: AttachInfo;
+  tmuxSessions?: TmuxSession[];
+  onActivate: () => void;
+  onClose: (event: React.MouseEvent) => void;
+  onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDragOver: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDrop: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDragEnd: () => void;
+}) => {
+  // Subscribed per-workspace so an OSC7/title/gitBranch update on one
+  // workspace only re-renders its own tab, not the whole tab bar.
+  const info = useWorkspaceInfoStore((s) => s.info[workspace.id]);
+  const tabView = buildWorkspaceTabView(workspace, info, tmuxAttach, tmuxSessions);
+  const paneCount = tabView.paneCount;
+
+  return (
+    <button
+      className={`wmux-btn wmux-top-tab${isActive ? " wmux-ws-active" : ""}`}
+      onClick={onActivate}
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      style={{
+        ...styles.sessionTab,
+        ...(isActive ? styles.sessionTabActive : {}),
+        ...(isDragging ? styles.sessionTabDragging : {}),
+        ...(isDropTarget ? styles.sessionTabDropTarget : {}),
+      }}
+      title={[
+        tabView.title,
+        workspace.name !== tabView.title ? workspace.name : null,
+        tabView.detail,
+        `${paneCount} pane${paneCount === 1 ? "" : "s"}`,
+      ].filter(Boolean).join(" - ")}
+    >
+      <span style={styles.sessionIndex}>{index + 1}</span>
+      {tabView.statusKind && (
+        <span
+          style={{
+            ...styles.sessionStatusDot,
+            ...(tabView.statusKind === "ready"
+              ? styles.sessionStatusReady
+              : styles.sessionStatusActive),
+          }}
+        />
+      )}
+      <span style={styles.sessionTabName}>{tabView.title}</span>
+      {paneCount > 1 && <span style={styles.sessionPaneCount}>{paneCount}</span>}
+      <span
+        role="button"
+        tabIndex={-1}
+        onClick={onClose}
+        style={styles.sessionClose}
+        title="Close workspace"
+      >
+        x
+      </span>
+    </button>
   );
 };
 
