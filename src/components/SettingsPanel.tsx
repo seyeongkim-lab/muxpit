@@ -733,7 +733,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#a6adc8", fontSize: 13, padding: "6px 12px", cursor: "pointer", textAlign: "left" as const,
     display: "flex", alignItems: "center", gap: 8,
   },
-  fontBtnActive: { borderColor: "#89b4fa", color: "#cdd6f4", backgroundColor: "#313244" },
+  fontBtnActive: { borderColor: "#89b4fa", color: "#cdd6f4", background: "#313244" },
   fontBtnMark: { color: "#89b4fa", fontSize: 12, width: 12, flexShrink: 0, textAlign: "center" as const },
   selectedList: { display: "flex", flexDirection: "column" as const, gap: 3, marginBottom: 10 },
   selectedRow: {

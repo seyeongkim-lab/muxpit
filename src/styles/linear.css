@@ -29,8 +29,18 @@
   --wmux-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
                       0 4px 14px rgba(0, 0, 0, 0.35);
 
-  --wmux-font-display: 'Inter', 'SF Pro Display', -apple-system,
-                       BlinkMacSystemFont, system-ui, sans-serif;
+  --wmux-danger: #e5484d;
+
+  --wmux-font-display: 'Inter', 'Segoe UI Variable Text', 'Segoe UI',
+                       -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --wmux-font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+}
+
+/* Chrome text uses the display font; monospace is reserved for data values
+ * (paths, sizes, metrics) via --wmux-font-mono. The terminal itself is
+ * unaffected — xterm sets its own font from settings. */
+body {
+  font-family: var(--wmux-font-display);
 }
 
 /* ---------- Logo ---------- */
@@ -45,7 +55,7 @@
 }
 
 .wmux-titlebar-close:hover {
-  background-color: #e5484d !important;
+  background-color: var(--wmux-danger) !important;
   color: #ffffff !important;
 }
 
@@ -84,11 +94,11 @@
 }
 
 .wmux-split-divider {
-  background-color: #313244;
+  background-color: var(--wmux-hairline-strong);
 }
 
 .wmux-split-divider:hover {
-  background-color: #89b4fa;
+  background-color: var(--wmux-accent);
 }
 
 /* Files rail resize grabber: invisible until hovered, then a thin accent line
@@ -182,7 +192,7 @@
 .wmux-section-label {
   font-family: var(--wmux-font-display);
   text-transform: uppercase;
-  letter-spacing: 0;
+  letter-spacing: 0.05em;
   font-size: 10px;
   font-weight: 700;
   color: var(--wmux-subtext);
@@ -190,11 +200,14 @@
 
 /* ---------- AI pane toolbar ---------- */
 
+/* Fixed 34px row so the AI bar lines up with the top bar and the files rail
+ * header — one horizontal baseline across the whole app. */
 .wmux-ai-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  height: 34px;
+  padding: 0 12px;
   flex-shrink: 0;
   background: var(--wmux-bg-soft);
   border-bottom: 1px solid var(--wmux-hairline);
@@ -206,9 +219,9 @@
   gap: 6px;
   color: var(--wmux-subtext);
   font-family: var(--wmux-font-display);
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   user-select: none;
 }
@@ -216,15 +229,15 @@
 .wmux-ai-bar-label svg {
   width: 11px;
   height: 11px;
-  color: var(--wmux-accent);
+  color: var(--wmux-subtext);
 }
 
 .wmux-ai-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: var(--wmux-accent-soft);
-  border: 1px solid var(--wmux-accent-mid);
+  background: transparent;
+  border: 1px solid var(--wmux-hairline);
   color: var(--wmux-text);
   font-family: var(--wmux-font-display);
   font-size: 11px;

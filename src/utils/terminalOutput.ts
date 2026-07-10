@@ -63,6 +63,12 @@ export class TerminalOutputParser {
     this.options = options;
   }
 
+  // Cheap pre-check so callers can skip parse() entirely for chunks that
+  // can't contain an OSC sequence (e.g. CSI-only colored build/log output).
+  get hasPending(): boolean {
+    return this.pending.length > 0;
+  }
+
   parse(data: string): TerminalOutputEvent[] {
     const input = this.pending + data;
     this.pending = "";

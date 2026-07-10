@@ -6,13 +6,13 @@
     <title>wmux</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body, #root { width: 100%; height: 100%; overflow: hidden; background: #1e1e2e; }
+      html, body, #root { width: 100%; height: 100%; overflow: hidden; background: var(--wmux-bg, #1e1e2e); }
 
-      /* Custom scrollbar - Catppuccin Mocha */
+      /* Custom scrollbar — follows the selected theme via chrome vars */
       ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 3px; }
-      ::-webkit-scrollbar-thumb:hover { background: #585b70; }
+      ::-webkit-scrollbar-thumb { background: var(--wmux-hairline-strong, #45475a); border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--wmux-subtext, #585b70); }
       ::-webkit-scrollbar-corner { background: transparent; }
     </style>
   </head>

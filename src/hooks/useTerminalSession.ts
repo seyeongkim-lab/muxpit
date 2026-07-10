@@ -241,10 +241,18 @@ export const useTerminalSession = ({
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
       writeBuffer.write(data);
-      for (const event of outputParser.parse(data)) {
-        handleTerminalOutputEvent(event, workspaceId, leafId);
+      // OSC sequences start with "\x1b]" (as opposed to the "\x1b[" CSI codes
+      // used by ANSI colors), so most colored build/log output can skip the
+      // regex parse entirely unless a sequence is still open from a prior chunk.
+      if (outputParser.hasPending || data.includes("\x1b]")) {
+        for (const event of outputParser.parse(data)) {
+          handleTerminalOutputEvent(event, workspaceId, leafId);
+        }
       }
-      if (isAiTerminal(data)) {
+      // scheduleAiStatusSnapshot() is already rAF-coalesced, so once a frame is
+      // pending there is no need to re-run the AI-kind tree walk / fallback
+      // regex scan for every further chunk that lands before it fires.
+      if (aiStatusSnapshotFrame === null && isAiTerminal(data)) {
         scheduleAiStatusSnapshot();
       }
     };

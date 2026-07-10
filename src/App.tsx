@@ -1104,8 +1104,8 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     height: "100%",
     gap: 16,
-    color: "#585b70",
-    fontFamily: "'JetBrains Mono', monospace",
+    color: "var(--wmux-subtext)",
+    fontFamily: "var(--wmux-font-display)",
     userSelect: "none" as const,
   },
   welcomeLogo: {
@@ -1116,14 +1116,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   welcomeTagline: {
     fontSize: 14,
-    color: "#a6adc8",
+    color: "var(--wmux-subtext)",
   },
   welcomeHints: {
     display: "flex",
     flexDirection: "column" as const,
     gap: 6,
     fontSize: 12,
-    color: "#585b70",
+    color: "var(--wmux-subtext)",
+    opacity: 0.75,
     marginTop: 16,
   },
 };
