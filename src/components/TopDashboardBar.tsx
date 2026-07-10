@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useWorkspaceStore, collectLeafIds } from "../stores/workspace";
+import { useWorkspaceStore, collectLeafIds, type Workspace } from "../stores/workspace";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
-import { useTmuxSessionsStore } from "../stores/tmuxSessions";
+import { useTmuxSessionsStore, type AttachInfo, type TmuxSession } from "../stores/tmuxSessions";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { destroyAllTerminals } from "./terminalRegistry";
+import { Sparkline } from "./Sparkline";
 import type { SshConnection } from "../utils/sshConnection";
 import { buildWorkspaceTabView } from "../utils/workspaceTabTitle";
 
@@ -87,7 +88,6 @@ export const TopDashboardBar = ({
   const setActive = useWorkspaceStore((s) => s.setActive);
   const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
   const sshHosts = useSshHostsStore((s) => s.hosts);
-  const infoMap = useWorkspaceInfoStore((s) => s.info);
   const tmuxAttach = useTmuxSessionsStore((s) => s._attach);
   const tmuxByWs = useTmuxSessionsStore((s) => s.byWs);
   const [hoveredTab, setHoveredTab] = useState<TopTab | null>(null);
@@ -136,76 +136,35 @@ export const TopDashboardBar = ({
           <span className="wmux-logo" style={styles.logo}>wmux</span>
         </div>
         <div style={styles.sessionTabs} onDoubleClick={(event) => event.stopPropagation()}>
-          {workspaces.map((workspace, index) => {
-            const isActive = workspace.id === activeId;
-            const tabView = buildWorkspaceTabView(
-              workspace,
-              infoMap[workspace.id],
-              tmuxAttach[workspace.id],
-              tmuxByWs[workspace.id]?.sessions,
-            );
-            const paneCount = tabView.paneCount;
-            const isDragging = dragIndex === index;
-            const isDropTarget = overIndex === index && dragIndex !== null && dragIndex !== index;
-            return (
-              <button
-                key={workspace.id}
-                className={`wmux-btn wmux-top-tab${isActive ? " wmux-ws-active" : ""}`}
-                onClick={() => setActive(workspace.id)}
-                draggable
-                onDragStart={(event) => {
-                  setDragIndex(index);
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(event) => {
-                  if (dragIndex === null) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  if (overIndex !== index) setOverIndex(index);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  dropOnTab(index);
-                }}
-                onDragEnd={endDrag}
-                style={{
-                  ...styles.sessionTab,
-                  ...(isActive ? styles.sessionTabActive : {}),
-                  ...(isDragging ? styles.sessionTabDragging : {}),
-                  ...(isDropTarget ? styles.sessionTabDropTarget : {}),
-                }}
-                title={[
-                  tabView.title,
-                  workspace.name !== tabView.title ? workspace.name : null,
-                  tabView.detail,
-                  `${paneCount} pane${paneCount === 1 ? "" : "s"}`,
-                ].filter(Boolean).join(" - ")}
-              >
-                <span style={styles.sessionIndex}>{index + 1}</span>
-                {tabView.statusKind && (
-                  <span
-                    style={{
-                      ...styles.sessionStatusDot,
-                      ...(tabView.statusKind === "ready"
-                        ? styles.sessionStatusReady
-                        : styles.sessionStatusActive),
-                    }}
-                  />
-                )}
-                <span style={styles.sessionTabName}>{tabView.title}</span>
-                {paneCount > 1 && <span style={styles.sessionPaneCount}>{paneCount}</span>}
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  onClick={(event) => closeWorkspace(event, workspace.id)}
-                  style={styles.sessionClose}
-                  title="Close workspace"
-                >
-                  x
-                </span>
-              </button>
-            );
-          })}
+          {workspaces.map((workspace, index) => (
+            <WorkspaceTab
+              key={workspace.id}
+              workspace={workspace}
+              index={index}
+              isActive={workspace.id === activeId}
+              isDragging={dragIndex === index}
+              isDropTarget={overIndex === index && dragIndex !== null && dragIndex !== index}
+              tmuxAttach={tmuxAttach[workspace.id]}
+              tmuxSessions={tmuxByWs[workspace.id]?.sessions}
+              onActivate={() => setActive(workspace.id)}
+              onClose={(event) => closeWorkspace(event, workspace.id)}
+              onDragStart={(event) => {
+                setDragIndex(index);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(event) => {
+                if (dragIndex === null) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                if (overIndex !== index) setOverIndex(index);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                dropOnTab(index);
+              }}
+              onDragEnd={endDrag}
+            />
+          ))}
           <button
             className="wmux-btn"
             onClick={() => addWorkspace()}
@@ -300,7 +259,7 @@ export const TopDashboardBar = ({
                 const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
                 return (
                   <div key={host.id} style={styles.hostRow} onClick={() => onConnectHost?.(host)}>
-                    <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "#89b4fa" }} />
+                    <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "var(--wmux-accent)" }} />
                     <span style={styles.hostName}>{host.name}</span>
                     <span style={styles.hostTarget}>{target}</span>
                     <button
@@ -325,6 +284,89 @@ export const TopDashboardBar = ({
         </div>
       )}
     </div>
+  );
+};
+
+const WorkspaceTab = ({
+  workspace,
+  index,
+  isActive,
+  isDragging,
+  isDropTarget,
+  tmuxAttach,
+  tmuxSessions,
+  onActivate,
+  onClose,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  workspace: Workspace;
+  index: number;
+  isActive: boolean;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  tmuxAttach?: AttachInfo;
+  tmuxSessions?: TmuxSession[];
+  onActivate: () => void;
+  onClose: (event: React.MouseEvent) => void;
+  onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDragOver: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDrop: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDragEnd: () => void;
+}) => {
+  // Subscribed per-workspace so an OSC7/title/gitBranch update on one
+  // workspace only re-renders its own tab, not the whole tab bar.
+  const info = useWorkspaceInfoStore((s) => s.info[workspace.id]);
+  const tabView = buildWorkspaceTabView(workspace, info, tmuxAttach, tmuxSessions);
+  const paneCount = tabView.paneCount;
+
+  return (
+    <button
+      className={`wmux-btn wmux-top-tab${isActive ? " wmux-ws-active" : ""}`}
+      onClick={onActivate}
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      style={{
+        ...styles.sessionTab,
+        ...(isActive ? styles.sessionTabActive : {}),
+        ...(isDragging ? styles.sessionTabDragging : {}),
+        ...(isDropTarget ? styles.sessionTabDropTarget : {}),
+      }}
+      title={[
+        tabView.title,
+        workspace.name !== tabView.title ? workspace.name : null,
+        tabView.detail,
+        `${paneCount} pane${paneCount === 1 ? "" : "s"}`,
+      ].filter(Boolean).join(" - ")}
+    >
+      <span style={styles.sessionIndex}>{index + 1}</span>
+      {tabView.statusKind && (
+        <span
+          style={{
+            ...styles.sessionStatusDot,
+            ...(tabView.statusKind === "ready"
+              ? styles.sessionStatusReady
+              : styles.sessionStatusActive),
+          }}
+        />
+      )}
+      <span style={styles.sessionTabName}>{tabView.title}</span>
+      {paneCount > 1 && <span style={styles.sessionPaneCount}>{paneCount}</span>}
+      <span
+        role="button"
+        tabIndex={-1}
+        onClick={onClose}
+        style={styles.sessionClose}
+        title="Close workspace"
+      >
+        x
+      </span>
+    </button>
   );
 };
 
@@ -415,13 +457,37 @@ const MonitorTabButton = ({
 }) => {
   const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
   const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
-  const value = monitorSummary(monitor, latestSnapshot);
+
+  // With enough history the value slot shows a small CPU/MEM sparkline instead
+  // of text; the numbers move into the button tooltip. MEM is drawn first so
+  // the CPU line stays on top. Fixed width keeps the bar from shifting as data
+  // arrives.
+  const showGraph = !!monitor && (monitorSeries?.length ?? 0) >= 2;
+  const value = showGraph ? (
+    <Sparkline
+      series={[
+        { data: monitorSeries!.map((s) => s.memPercent), color: "var(--wmux-subtext)", fill: "none" },
+        { data: monitorSeries!.map((s) => s.cpuPercent), color: "var(--wmux-accent)", fill: "none" },
+      ]}
+      width={56}
+      height={16}
+      style={{ width: 56, flexShrink: 0, display: "block" }}
+    />
+  ) : monitor ? (
+    monitor.sshTarget
+  ) : (
+    "off"
+  );
+  const title = monitor && latestSnapshot
+    ? `${monitor.sshTarget} — CPU ${Math.round(latestSnapshot.cpuPercent)}% · MEM ${formatMemoryMb(latestSnapshot.memUsedMb)} (${Math.round(latestSnapshot.memPercent)}%)`
+    : monitor?.sshTarget;
 
   return (
     <TopTabButton
       active={active}
       label="Monitor"
       value={value}
+      title={title}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     />
@@ -469,28 +535,18 @@ const MonitorPopover = ({
   );
 };
 
-const monitorSummary = (
-  monitor: SidebarMonitorInfo | null | undefined,
-  latestSnapshot: MonitorSnapshot | undefined,
-): string => {
-  if (!monitor) return "off";
-  if (!latestSnapshot) return monitor.sshTarget;
-  const cpu = Number.isFinite(latestSnapshot.cpuPercent)
-    ? `${Math.round(latestSnapshot.cpuPercent)}%`
-    : "--";
-  return `${cpu} ${formatMemoryMb(latestSnapshot.memUsedMb)}`;
-};
-
 const TopTabButton = ({
   active,
   label,
   value,
+  title,
   onMouseEnter,
   onClick,
 }: {
   active: boolean;
   label: string;
-  value: string;
+  value: React.ReactNode;
+  title?: string;
   onMouseEnter: () => void;
   onClick: () => void;
 }) => (
@@ -498,6 +554,7 @@ const TopTabButton = ({
     className="wmux-btn wmux-top-tab"
     onMouseEnter={onMouseEnter}
     onClick={onClick}
+    title={title}
     style={{ ...styles.tabButton, ...(active ? styles.tabButtonActive : {}) }}
   >
     <span style={styles.tabLabel}>{label}</span>
@@ -548,10 +605,11 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: "hidden",
     padding: "3px 0 0",
   },
+  // Fixed width: tab titles update live (OSC titles, cwd, AI status), and a
+  // content-sized tab makes the whole row shift on every change.
   sessionTab: {
     height: 29,
-    minWidth: 112,
-    maxWidth: 220,
+    width: 160,
     display: "flex",
     alignItems: "center",
     gap: 6,
@@ -579,8 +637,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottomColor: "var(--wmux-accent-strong)",
   },
   sessionIndex: {
-    color: "var(--wmux-accent)",
-    fontFamily: "'JetBrains Mono', monospace",
+    color: "var(--wmux-subtext)",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 10,
     flexShrink: 0,
   },
@@ -599,22 +657,19 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 0 0 1px var(--wmux-accent-mid)",
   },
   sessionTabName: {
+    flex: 1,
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     fontSize: 12,
+    textAlign: "left",
   },
   sessionPaneCount: {
     color: "var(--wmux-subtext)",
-    border: "1px solid var(--wmux-hairline)",
-    borderRadius: 8,
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 9,
-    lineHeight: "13px",
-    minWidth: 14,
-    height: 14,
-    textAlign: "center",
+    fontFamily: "var(--wmux-font-mono)",
+    fontSize: 10,
+    lineHeight: 1,
     flexShrink: 0,
   },
   sessionClose: {
@@ -630,10 +685,10 @@ const styles: Record<string, React.CSSProperties> = {
   newSessionButton: {
     width: 26,
     height: 26,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid transparent",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
-    color: "var(--wmux-text)",
+    background: "transparent",
+    color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: 0,
     lineHeight: 1,
@@ -662,35 +717,41 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     padding: "0 8px",
   },
+  // `background` (not backgroundColor): the base style uses the shorthand, and
+  // React drops the property entirely when a merged style mixes shorthand and
+  // longhand — the button then falls back to the UA's light button face.
   tabButtonActive: {
     borderColor: "var(--wmux-hairline-strong)",
-    backgroundColor: "var(--wmux-bg-elev)",
+    background: "var(--wmux-bg-elev)",
     color: "var(--wmux-text)",
   },
+  // The button name carries the emphasis; the value/graph is auxiliary status.
   tabLabel: {
     fontSize: 12,
+    color: "var(--wmux-text)",
   },
   tabValue: {
     maxWidth: 92,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    color: "var(--wmux-accent)",
-    fontFamily: "'JetBrains Mono', monospace",
+    color: "var(--wmux-subtext)",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 11,
   },
   commandButton: {
     height: 24,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid transparent",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
+    background: "transparent",
     color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: "0 8px",
     fontSize: 12,
   },
   commandButtonActive: {
-    borderColor: "var(--wmux-accent)",
+    borderColor: "var(--wmux-hairline-strong)",
+    background: "var(--wmux-bg-elev)",
     color: "var(--wmux-text)",
   },
   popover: {
@@ -749,7 +810,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   hostTarget: {
     color: "var(--wmux-subtext)",
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: "var(--wmux-font-mono)",
     fontSize: 11,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -758,9 +819,9 @@ const styles: Record<string, React.CSSProperties> = {
   smallButton: {
     width: 22,
     height: 22,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid transparent",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
+    background: "transparent",
     color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: 0,
@@ -798,22 +859,21 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   metric: {
-    border: "1px solid var(--wmux-hairline)",
-    borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
-    padding: "7px 8px",
+    padding: "7px 8px 7px 0",
   },
   metricLabel: {
     display: "block",
     color: "var(--wmux-subtext)",
     fontSize: 10,
-    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
   },
   metricValue: {
     display: "block",
     color: "var(--wmux-text)",
     fontSize: 14,
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: "var(--wmux-font-mono)",
     marginTop: 3,
   },
   statusText: {
