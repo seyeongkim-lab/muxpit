@@ -237,6 +237,9 @@ export const useTerminalSession = ({
       writeBuffer.flush();
       surface.write(data);
     };
+    const resizePtyToCurrentSurface = (id: number) => {
+      tauriPtyBackend.resize(id, Math.max(surface.rows, 1), Math.max(surface.cols, 1)).catch(console.error);
+    };
 
     const handleOutput = (payload: PtyOutput) => {
       const data = payload.data;
@@ -302,6 +305,7 @@ export const useTerminalSession = ({
             ptyId = newId;
             instance.ptyId = newId;
             setPtyId(workspaceId, leafId, newId);
+            resizePtyToCurrentSurface(newId);
             if (oldId && oldId !== newId) {
               tauriPtyBackend.kill(oldId).catch(() => {});
             }
@@ -436,6 +440,7 @@ export const useTerminalSession = ({
         workspaceId,
         leafId,
       });
+      resizePtyToCurrentSurface(ptyId);
       if (spawnPlan.postSpawnInput) {
         tauriPtyBackend.write(ptyId, spawnPlan.postSpawnInput).catch(console.error);
       }
@@ -456,6 +461,7 @@ export const useTerminalSession = ({
             workspaceId,
             surfaceId: leafId,
           });
+          resizePtyToCurrentSurface(ptyId);
           if (spawnPlan.fallbackPostSpawnInput) {
             tauriPtyBackend.write(ptyId, spawnPlan.fallbackPostSpawnInput).catch(console.error);
           }
