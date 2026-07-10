@@ -142,6 +142,7 @@ export const App = () => {
   const [sshPanelOpen, setSshPanelOpen] = useState(false);
   const [sshPanelEditId, setSshPanelEditId] = useState<string | null>(null);
   const [gridView, setGridView] = useState(false);
+  const [filesRailVisible, setFilesRailVisible] = useState(true);
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string; sshCommand: string; sshConnection?: SshConnection } | null>(null);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const closingRef = useRef(false);
@@ -943,6 +944,8 @@ export const App = () => {
           onWindowClose={handleWindowClose}
           gridView={gridView}
           onToggleGridView={() => setGridView((prev) => !prev)}
+          filesRailVisible={filesRailVisible}
+          onToggleFilesRail={() => setFilesRailVisible((prev) => !prev)}
         />
       )}
       <div style={styles.appBody}>
@@ -959,13 +962,13 @@ export const App = () => {
             gridView={gridView}
             onToggleGridView={() => setGridView((prev) => !prev)}
           />
-        ) : (
+        ) : filesRailVisible ? (
           <FilesRail
             cwd={fileRailCwd}
             sshConnection={fileRailSshConnection}
             sshCommand={fileRailSshCommand}
           />
-        )}
+        ) : null}
         <div style={styles.terminalArea}>
           {gridView ? (
             <GridOverview

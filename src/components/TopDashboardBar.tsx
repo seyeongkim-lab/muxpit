@@ -31,6 +31,8 @@ interface TopDashboardBarProps {
   onWindowClose?: () => void;
   gridView?: boolean;
   onToggleGridView?: () => void;
+  filesRailVisible?: boolean;
+  onToggleFilesRail?: () => void;
 }
 
 type TopTab = "hosts" | "monitor";
@@ -85,6 +87,8 @@ export const TopDashboardBar = ({
   onWindowClose,
   gridView,
   onToggleGridView,
+  filesRailVisible,
+  onToggleFilesRail,
 }: TopDashboardBarProps) => {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeId = useWorkspaceStore((s) => s.activeId);
@@ -236,6 +240,14 @@ export const TopDashboardBar = ({
             onMouseEnter={() => showTab("monitor")}
             onClick={() => togglePinned("monitor")}
           />
+          <button
+            className="wmux-btn"
+            onClick={onToggleFilesRail}
+            style={{ ...styles.commandButton, ...(filesRailVisible ? styles.commandButtonActive : {}) }}
+            title={filesRailVisible ? "Hide files rail" : "Show files rail"}
+          >
+            Files
+          </button>
           <button
             className="wmux-btn"
             onClick={onToggleGridView}
