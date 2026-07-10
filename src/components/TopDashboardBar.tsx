@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore, collectLeafIds, type Workspace } from "../stores/workspace";
@@ -10,6 +10,7 @@ import { destroyAllTerminals } from "./terminalRegistry";
 import { Sparkline } from "./Sparkline";
 import type { SshConnection } from "../utils/sshConnection";
 import { buildWorkspaceTabView } from "../utils/workspaceTabTitle";
+import { computeSessionTabWidth } from "../utils/topBarLayout";
 
 interface SidebarMonitorInfo {
   monitorId: string;
@@ -68,6 +69,10 @@ const formatMemoryMb = (mb: number): string => {
   return `${(mb / 1024).toFixed(1)}GB`;
 };
 
+// "+" button (26px) plus the gap in front of it, reserved outside the
+// tab-width calculation so the button always has room.
+const NEW_SESSION_BUTTON_SPACE = 26 + 3;
+
 export const TopDashboardBar = ({
   onOpenSettings,
   onOpenSshPanel,
@@ -95,6 +100,41 @@ export const TopDashboardBar = ({
   const visibleTab = pinnedTab ?? hoveredTab;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  const sessionTabsRowRef = useRef<HTMLDivElement>(null);
+  const [sessionTabsRowWidth, setSessionTabsRowWidth] = useState(0);
+
+  // Re-measure whenever the tab count changes (covers add/remove and async
+  // session-restore hydration, where the row briefly renders with 0 tabs
+  // before the real workspace list lands) and on window resize (covers the
+  // maxWidth: min(58vw, ...) cap moving with viewport width).
+  useEffect(() => {
+    const el = sessionTabsRowRef.current;
+    if (!el) return;
+    setSessionTabsRowWidth(el.getBoundingClientRect().width);
+  }, [workspaces.length]);
+
+  useEffect(() => {
+    const el = sessionTabsRowRef.current;
+    if (!el) return;
+    let frame = 0;
+    const onResize = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setSessionTabsRowWidth(el.getBoundingClientRect().width);
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  const sessionTabWidth = computeSessionTabWidth(
+    sessionTabsRowWidth - NEW_SESSION_BUTTON_SPACE,
+    workspaces.length,
+  );
 
   const endDrag = () => {
     setDragIndex(null);
@@ -135,13 +175,18 @@ export const TopDashboardBar = ({
         <div data-tauri-drag-region style={styles.brandGroup}>
           <span className="wmux-logo" style={styles.logo}>wmux</span>
         </div>
-        <div style={styles.sessionTabsRow} onDoubleClick={(event) => event.stopPropagation()}>
+        <div
+          ref={sessionTabsRowRef}
+          style={styles.sessionTabsRow}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
           <div style={styles.sessionTabs}>
             {workspaces.map((workspace, index) => (
               <WorkspaceTab
                 key={workspace.id}
                 workspace={workspace}
                 index={index}
+                width={sessionTabWidth}
                 isActive={workspace.id === activeId}
                 isDragging={dragIndex === index}
                 isDropTarget={overIndex === index && dragIndex !== null && dragIndex !== index}
@@ -292,6 +337,7 @@ export const TopDashboardBar = ({
 const WorkspaceTab = ({
   workspace,
   index,
+  width,
   isActive,
   isDragging,
   isDropTarget,
@@ -306,6 +352,7 @@ const WorkspaceTab = ({
 }: {
   workspace: Workspace;
   index: number;
+  width: number;
   isActive: boolean;
   isDragging: boolean;
   isDropTarget: boolean;
@@ -335,6 +382,7 @@ const WorkspaceTab = ({
       onDragEnd={onDragEnd}
       style={{
         ...styles.sessionTab,
+        width,
         ...(isActive ? styles.sessionTabActive : {}),
         ...(isDragging ? styles.sessionTabDragging : {}),
         ...(isDropTarget ? styles.sessionTabDropTarget : {}),
@@ -601,6 +649,12 @@ const styles: Record<string, React.CSSProperties> = {
   // clipped/shrinking tab strip so it's never cut off.
   sessionTabsRow: {
     minWidth: 0,
+    // flex: 1 so this always stretches to the available width (capped by
+    // maxWidth) regardless of how many/wide the tabs inside it currently
+    // are — otherwise its measured width would depend on its own tabs'
+    // widths, which depend on the measurement, and the two feed back into
+    // each other until tabs collapse to the narrowest tier.
+    flex: "1 1 auto",
     maxWidth: "min(58vw, 760px)",
     display: "flex",
     alignItems: "center",
@@ -618,13 +672,13 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 3,
     overflow: "hidden",
   },
-  // Preferred width 160px, but shrinks (down to 72px) rather than triggering
-  // horizontal scroll: title updates (OSC titles, cwd, AI status) still can't
-  // shift the row, since shrinking is driven only by tab count / bar width.
+  // Width is one of a few fixed steps (computeSessionTabWidth), not a
+  // continuous flex-shrink value: title updates (OSC titles, cwd, AI status)
+  // can't shift it, and it only changes tier when tab count / bar width
+  // actually crosses a threshold.
   sessionTab: {
     height: 29,
-    flex: "0 1 160px",
-    minWidth: 72,
+    flexShrink: 0,
     display: "flex",
     alignItems: "center",
     gap: 6,
