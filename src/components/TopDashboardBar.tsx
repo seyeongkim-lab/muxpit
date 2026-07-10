@@ -135,36 +135,38 @@ export const TopDashboardBar = ({
         <div data-tauri-drag-region style={styles.brandGroup}>
           <span className="wmux-logo" style={styles.logo}>wmux</span>
         </div>
-        <div style={styles.sessionTabs} onDoubleClick={(event) => event.stopPropagation()}>
-          {workspaces.map((workspace, index) => (
-            <WorkspaceTab
-              key={workspace.id}
-              workspace={workspace}
-              index={index}
-              isActive={workspace.id === activeId}
-              isDragging={dragIndex === index}
-              isDropTarget={overIndex === index && dragIndex !== null && dragIndex !== index}
-              tmuxAttach={tmuxAttach[workspace.id]}
-              tmuxSessions={tmuxByWs[workspace.id]?.sessions}
-              onActivate={() => setActive(workspace.id)}
-              onClose={(event) => closeWorkspace(event, workspace.id)}
-              onDragStart={(event) => {
-                setDragIndex(index);
-                event.dataTransfer.effectAllowed = "move";
-              }}
-              onDragOver={(event) => {
-                if (dragIndex === null) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                if (overIndex !== index) setOverIndex(index);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                dropOnTab(index);
-              }}
-              onDragEnd={endDrag}
-            />
-          ))}
+        <div style={styles.sessionTabsRow} onDoubleClick={(event) => event.stopPropagation()}>
+          <div style={styles.sessionTabs}>
+            {workspaces.map((workspace, index) => (
+              <WorkspaceTab
+                key={workspace.id}
+                workspace={workspace}
+                index={index}
+                isActive={workspace.id === activeId}
+                isDragging={dragIndex === index}
+                isDropTarget={overIndex === index && dragIndex !== null && dragIndex !== index}
+                tmuxAttach={tmuxAttach[workspace.id]}
+                tmuxSessions={tmuxByWs[workspace.id]?.sessions}
+                onActivate={() => setActive(workspace.id)}
+                onClose={(event) => closeWorkspace(event, workspace.id)}
+                onDragStart={(event) => {
+                  setDragIndex(index);
+                  event.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(event) => {
+                  if (dragIndex === null) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (overIndex !== index) setOverIndex(index);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  dropOnTab(index);
+                }}
+                onDragEnd={endDrag}
+              />
+            ))}
+          </div>
           <button
             className="wmux-btn"
             onClick={() => addWorkspace()}
@@ -595,21 +597,34 @@ const styles: Record<string, React.CSSProperties> = {
   logo: {
     fontSize: 13,
   },
-  sessionTabs: {
+  // Outer row: caps total width and keeps the "+" button outside the
+  // clipped/shrinking tab strip so it's never cut off.
+  sessionTabsRow: {
     minWidth: 0,
     maxWidth: "min(58vw, 760px)",
     display: "flex",
     alignItems: "center",
     gap: 3,
-    overflowX: "auto",
-    overflowY: "hidden",
     padding: "3px 0 0",
   },
-  // Fixed width: tab titles update live (OSC titles, cwd, AI status), and a
-  // content-sized tab makes the whole row shift on every change.
+  // No scrollbar: an appearing/disappearing scrollbar shifted the whole bar.
+  // Tabs shrink to fit instead (like Windows Terminal), so this never needs
+  // to scroll.
+  sessionTabs: {
+    minWidth: 0,
+    flex: "1 1 auto",
+    display: "flex",
+    alignItems: "center",
+    gap: 3,
+    overflow: "hidden",
+  },
+  // Preferred width 160px, but shrinks (down to 72px) rather than triggering
+  // horizontal scroll: title updates (OSC titles, cwd, AI status) still can't
+  // shift the row, since shrinking is driven only by tab count / bar width.
   sessionTab: {
     height: 29,
-    width: 160,
+    flex: "0 1 160px",
+    minWidth: 72,
     display: "flex",
     alignItems: "center",
     gap: 6,
@@ -620,7 +635,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--wmux-subtext)",
     cursor: "pointer",
     padding: "0 7px",
-    flexShrink: 0,
   },
   sessionTabActive: {
     background: "var(--wmux-bg-elev)",
