@@ -176,11 +176,10 @@ export const TopDashboardBar = ({
   return (
     <div style={styles.wrapper} onMouseLeave={hideTab}>
       <MonitorLifecycle monitor={monitor} />
-      <div data-tauri-drag-region style={styles.bar} onDoubleClick={onWindowMaximize}>
+      <div data-tauri-drag-region style={styles.bar}>
         <div
           ref={sessionTabsRowRef}
           style={styles.sessionTabsRow}
-          onDoubleClick={(event) => event.stopPropagation()}
         >
           <div style={styles.sessionTabs}>
             {workspaces.map((workspace, index) => (
@@ -224,7 +223,7 @@ export const TopDashboardBar = ({
           </button>
         </div>
         <div data-tauri-drag-region style={styles.dragSpacer} />
-        <div style={styles.controls} onDoubleClick={(event) => event.stopPropagation()}>
+        <div style={styles.controls}>
           <TopTabButton
             active={visibleTab === "hosts"}
             label="Hosts"

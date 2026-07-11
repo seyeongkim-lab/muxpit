@@ -895,7 +895,7 @@ export const App = () => {
   return (
     <div style={styles.container}>
       {dashboardLayout === "left" ? (
-        <div data-tauri-drag-region style={styles.titlebar} onDoubleClick={handleWindowMaximize}>
+        <div data-tauri-drag-region style={styles.titlebar}>
           <div data-tauri-drag-region style={styles.titlebarBrand}>
             <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
             <span data-tauri-drag-region style={styles.titlebarSubtitle}>
