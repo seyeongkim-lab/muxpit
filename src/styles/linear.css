@@ -54,7 +54,7 @@ body {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #f1f1f1;
+  color: #c8c8c8;
   cursor: default;
   transition: background-color 120ms ease, color 120ms ease;
 }
@@ -81,6 +81,15 @@ body {
   stroke: currentColor;
   stroke-width: 1;
   shape-rendering: geometricPrecision;
+  pointer-events: none;
+}
+
+.wmux-tab-close-icon {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
   pointer-events: none;
 }
 

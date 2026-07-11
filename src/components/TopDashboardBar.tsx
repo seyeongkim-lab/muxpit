@@ -177,9 +177,6 @@ export const TopDashboardBar = ({
     <div style={styles.wrapper} onMouseLeave={hideTab}>
       <MonitorLifecycle monitor={monitor} />
       <div data-tauri-drag-region style={styles.bar} onDoubleClick={onWindowMaximize}>
-        <div data-tauri-drag-region style={styles.brandGroup}>
-          <span className="wmux-logo" style={styles.logo}>wmux</span>
-        </div>
         <div
           ref={sessionTabsRowRef}
           style={styles.sessionTabsRow}
@@ -403,7 +400,9 @@ const WorkspaceTab = ({
         style={styles.sessionClose}
         title="Close workspace"
       >
-        x
+        <svg className="wmux-tab-close-icon" viewBox="0 0 14 14" aria-hidden="true">
+          <path d="m3 3 8 8M11 3l-8 8" />
+        </svg>
       </span>
     </button>
   );
@@ -615,23 +614,13 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "var(--wmux-titlebar-bg)",
   },
   bar: {
-    height: 48,
+    height: 36,
     display: "flex",
     alignItems: "center",
     gap: 8,
-    padding: "0 0 0 12px",
+    padding: 0,
     color: "var(--wmux-text)",
     userSelect: "none",
-  },
-  brandGroup: {
-    minWidth: 0,
-    flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    width: 54,
-  },
-  logo: {
-    fontSize: 13,
   },
   // Outer row: caps total width and keeps the "+" button outside the
   // clipped/shrinking tab strip so it's never cut off.
@@ -648,14 +637,14 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "flex-end",
     gap: 3,
     height: "100%",
-    padding: "8px 0 0",
+    padding: "3px 0 0",
   },
   // No scrollbar: an appearing/disappearing scrollbar shifted the whole bar.
   // Tabs shrink to fit instead (like Windows Terminal), so this never needs
   // to scroll.
   sessionTabs: {
     minWidth: 0,
-    flex: "1 1 auto",
+    flex: "0 1 auto",
     display: "flex",
     alignItems: "flex-end",
     height: "100%",
@@ -667,7 +656,7 @@ const styles: Record<string, React.CSSProperties> = {
   // can't shift it, and it only changes tier when tab count / bar width
   // actually crosses a threshold.
   sessionTab: {
-    height: 40,
+    height: 33,
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
@@ -728,22 +717,21 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   sessionClose: {
-    color: "var(--wmux-subtext)",
-    fontSize: 11,
-    lineHeight: "16px",
+    color: "#f2f2f2",
     width: 16,
     height: 16,
+    display: "grid",
+    placeItems: "center",
     borderRadius: 3,
-    textAlign: "center",
     flexShrink: 0,
   },
   newSessionButton: {
     width: 32,
-    height: 40,
+    height: 33,
     border: "1px solid transparent",
     borderRadius: 4,
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "#f2f2f2",
     cursor: "pointer",
     padding: 0,
     lineHeight: 1,
@@ -812,7 +800,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   popover: {
     position: "absolute",
-    top: 48,
+    top: 36,
     right: 138,
     width: 360,
     maxHeight: "min(440px, 70vh)",

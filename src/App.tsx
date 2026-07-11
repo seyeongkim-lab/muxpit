@@ -1012,7 +1012,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "var(--wmux-bg)",
   },
   titlebar: {
-    height: 48,
+    height: 36,
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
