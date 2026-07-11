@@ -8,6 +8,7 @@ import { useTmuxSessionsStore, type AttachInfo, type TmuxSession } from "../stor
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { destroyAllTerminals } from "./terminalRegistry";
 import { Sparkline } from "./Sparkline";
+import { WindowControls } from "./WindowControls";
 import type { SshConnection } from "../utils/sshConnection";
 import { buildWorkspaceTabView } from "../utils/workspaceTabTitle";
 import { computeSessionTabWidth } from "../utils/topBarLayout";
@@ -264,35 +265,11 @@ export const TopDashboardBar = ({
           >
             Settings
           </button>
-          <div style={styles.windowControls}>
-            <button
-              type="button"
-              className="wmux-titlebar-btn"
-              style={styles.windowButton}
-              onClick={onWindowMinimize}
-              title="Minimize"
-            >
-              -
-            </button>
-            <button
-              type="button"
-              className="wmux-titlebar-btn"
-              style={styles.windowButton}
-              onClick={onWindowMaximize}
-              title="Maximize"
-            >
-              □
-            </button>
-            <button
-              type="button"
-              className="wmux-titlebar-btn wmux-titlebar-close"
-              style={{ ...styles.windowButton, ...styles.windowCloseButton }}
-              onClick={onWindowClose}
-              title="Close"
-            >
-              ×
-            </button>
-          </div>
+          <WindowControls
+            onMinimize={onWindowMinimize}
+            onMaximize={onWindowMaximize}
+            onClose={onWindowClose}
+          />
         </div>
       </div>
       {visibleTab && (
@@ -635,11 +612,10 @@ const styles: Record<string, React.CSSProperties> = {
   wrapper: {
     position: "relative",
     zIndex: 20,
-    backgroundColor: "var(--wmux-bg)",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    backgroundColor: "var(--wmux-titlebar-bg)",
   },
   bar: {
-    height: 34,
+    height: 48,
     display: "flex",
     alignItems: "center",
     gap: 8,
@@ -669,9 +645,10 @@ const styles: Record<string, React.CSSProperties> = {
     flex: "1 1 auto",
     maxWidth: "min(58vw, 760px)",
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-end",
     gap: 3,
-    padding: "3px 0 0",
+    height: "100%",
+    padding: "8px 0 0",
   },
   // No scrollbar: an appearing/disappearing scrollbar shifted the whole bar.
   // Tabs shrink to fit instead (like Windows Terminal), so this never needs
@@ -680,7 +657,8 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
     flex: "1 1 auto",
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-end",
+    height: "100%",
     gap: 3,
     overflow: "hidden",
   },
@@ -689,23 +667,20 @@ const styles: Record<string, React.CSSProperties> = {
   // can't shift it, and it only changes tier when tab count / bar width
   // actually crosses a threshold.
   sessionTab: {
-    height: 29,
+    height: 40,
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
     gap: 6,
-    border: "1px solid transparent",
-    borderBottomColor: "transparent",
-    borderRadius: "5px 5px 0 0",
+    border: "none",
+    borderRadius: "6px 6px 0 0",
     background: "transparent",
     color: "var(--wmux-subtext)",
     cursor: "pointer",
-    padding: "0 7px",
+    padding: "0 10px",
   },
   sessionTabActive: {
-    background: "var(--wmux-bg-elev)",
-    borderColor: "var(--wmux-hairline-strong)",
-    borderBottomColor: "var(--wmux-bg-elev)",
+    background: "var(--wmux-bg-soft)",
     color: "var(--wmux-text)",
   },
   sessionTabDragging: {
@@ -763,8 +738,8 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   newSessionButton: {
-    width: 26,
-    height: 26,
+    width: 32,
+    height: 40,
     border: "1px solid transparent",
     borderRadius: 4,
     background: "transparent",
@@ -783,6 +758,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 5,
+    height: "100%",
     flexShrink: 0,
   },
   tabButton: {
@@ -836,8 +812,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   popover: {
     position: "absolute",
-    top: 34,
-    right: 132,
+    top: 48,
+    right: 138,
     width: 360,
     maxHeight: "min(440px, 70vh)",
     overflow: "auto",
@@ -960,24 +936,5 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--wmux-subtext)",
     fontSize: 12,
     padding: 6,
-  },
-  windowControls: {
-    height: 34,
-    display: "flex",
-    marginLeft: 3,
-  },
-  windowButton: {
-    width: 42,
-    height: "100%",
-    border: "none",
-    borderLeft: "1px solid transparent",
-    backgroundColor: "transparent",
-    color: "var(--wmux-subtext)",
-    fontSize: 13,
-    lineHeight: 1,
-    cursor: "default",
-  },
-  windowCloseButton: {
-    fontSize: 16,
   },
 };

@@ -32,6 +32,31 @@ export interface TerminalTheme {
 
 export const THEMES: ThemeEntry[] = [
   {
+    name: "Windows Terminal",
+    theme: {
+      background: "#1e2335",
+      foreground: "#d7ddf7",
+      cursor: "#f2f2f2",
+      selectionBackground: "#3d4666",
+      black: "#0c0c0c",
+      red: "#c50f1f",
+      green: "#13a10e",
+      yellow: "#c19c00",
+      blue: "#3b78ff",
+      magenta: "#881798",
+      cyan: "#3a96dd",
+      white: "#cccccc",
+      brightBlack: "#767676",
+      brightRed: "#e74856",
+      brightGreen: "#16c60c",
+      brightYellow: "#f9f1a5",
+      brightBlue: "#6b9cff",
+      brightMagenta: "#b4009e",
+      brightCyan: "#61d6d6",
+      brightWhite: "#f2f2f2",
+    },
+  },
+  {
     name: "Catppuccin Mocha",
     theme: {
       background: "#1e1e2e",

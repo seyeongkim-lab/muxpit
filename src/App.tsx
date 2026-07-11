@@ -3,6 +3,7 @@ import { Sidebar } from "./components/Sidebar";
 import { FilesRail } from "./components/FilesRail";
 import { SplitPane } from "./components/SplitPane";
 import { TopDashboardBar } from "./components/TopDashboardBar";
+import { WindowControls } from "./components/WindowControls";
 import { GridOverview } from "./components/GridOverview";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -901,35 +902,11 @@ export const App = () => {
               {activeWs?.name ?? "Terminal Multiplexer"}
             </span>
           </div>
-          <div style={styles.titlebarControls} onDoubleClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="wmux-titlebar-btn"
-              style={styles.titlebarButton}
-              onClick={handleWindowMinimize}
-              title="Minimize"
-            >
-              -
-            </button>
-            <button
-              type="button"
-              className="wmux-titlebar-btn"
-              style={styles.titlebarButton}
-              onClick={handleWindowMaximize}
-              title="Maximize"
-            >
-              □
-            </button>
-            <button
-              type="button"
-              className="wmux-titlebar-btn wmux-titlebar-close"
-              style={{ ...styles.titlebarButton, ...styles.titlebarCloseButton }}
-              onClick={handleWindowClose}
-              title="Close"
-            >
-              ×
-            </button>
-          </div>
+          <WindowControls
+            onMinimize={handleWindowMinimize}
+            onMaximize={handleWindowMaximize}
+            onClose={handleWindowClose}
+          />
         </div>
       ) : (
         <TopDashboardBar
@@ -1035,13 +1012,12 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "var(--wmux-bg)",
   },
   titlebar: {
-    height: 32,
+    height: 48,
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "var(--wmux-bg)",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    backgroundColor: "var(--wmux-titlebar-bg)",
     color: "var(--wmux-text)",
     userSelect: "none" as const,
   },
@@ -1069,25 +1045,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--wmux-subtext)",
     fontSize: 12,
     lineHeight: 1,
-  },
-  titlebarControls: {
-    height: "100%",
-    display: "flex",
-    flexShrink: 0,
-  },
-  titlebarButton: {
-    width: 42,
-    height: "100%",
-    border: "none",
-    borderLeft: "1px solid transparent",
-    backgroundColor: "transparent",
-    color: "var(--wmux-subtext)",
-    fontSize: 13,
-    lineHeight: 1,
-    cursor: "default",
-  },
-  titlebarCloseButton: {
-    fontSize: 16,
   },
   appBody: {
     flex: 1,

@@ -25,6 +25,12 @@ test("Tokyo Night Storm ships as a built-in theme", () => {
   assert.equal(entry.theme.background, "#24283b");
 });
 
+test("Windows Terminal theme matches the shell surface palette", () => {
+  const entry = getThemeByName("Windows Terminal");
+  assert.equal(entry.theme.background, "#1e2335");
+  assert.equal(entry.theme.foreground, "#d7ddf7");
+});
+
 test("resolution prefers a custom theme and layers overrides on it", () => {
   const customThemes: ThemeEntry[] = [
     { name: "My Theme", theme: { background: "#111111", foreground: "#eeeeee" } },

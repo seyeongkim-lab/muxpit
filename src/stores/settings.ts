@@ -212,7 +212,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fontSize: saved.fontSize ?? 14,
   fontFamilies: initialFamilies,
   fontFamily: buildFontStack(initialFamilies),
-  themeName: saved.themeName ?? "Catppuccin Mocha",
+  themeName: saved.themeName ?? "Windows Terminal",
   customColors: saved.customColors ?? {},
   customThemes: initialCustomThemes,
   prefixKey: saved.prefixKey ?? "ctrl+shift+b",
