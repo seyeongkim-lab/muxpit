@@ -6,10 +6,10 @@ export interface AiTerminalStatus {
   updatedAt: number;
 }
 
-export type AiAgentName = "claude" | "codex" | "gemini" | "copilot";
+export type AiAgentName = "claude" | "codex" | "gemini" | "copilot" | "opencode";
 
-const AI_NAME_RE = /\b(?:claude(?: code)?|codex|gemini|copilot)\b/i;
-const AI_AGENT_NAMES: AiAgentName[] = ["claude", "codex", "gemini", "copilot"];
+const AI_NAME_RE = /\b(?:claude(?: code)?|codex|gemini|copilot|opencode)\b/i;
+const AI_AGENT_NAMES: AiAgentName[] = ["claude", "codex", "gemini", "copilot", "opencode"];
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/g;
 const BOX_RE = /[\u2500-\u257f]/g;
@@ -65,7 +65,7 @@ const normalizeLine = (line: string): string =>
 export const compactAiStatusLabel = (value: string, maxLength = 42): string => {
   const normalized = normalizeLine(value)
     .replace(LEADING_STATUS_RE, "")
-    .replace(/^(?:claude(?: code)?|codex|gemini|copilot)\s*[:>\-]\s*/i, "")
+    .replace(/^(?:claude(?: code)?|codex|gemini|copilot|opencode)\s*[:>\-]\s*/i, "")
     .replace(/^permission requested\s*:\s*/i, "permission: ")
     .replace(/^prompt completed$/i, "done")
     .trim();

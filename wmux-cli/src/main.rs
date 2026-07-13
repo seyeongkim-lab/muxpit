@@ -1,6 +1,8 @@
 use std::env;
 use std::io::{BufRead, BufReader, Write};
 
+mod arguments;
+mod control;
 mod hooks;
 mod ipc;
 mod platform;
@@ -31,6 +33,19 @@ fn main() {
         },
         "list-workspaces" | "ls" => {
             send_request("list-workspaces", serde_json::json!({}));
+        }
+        command if control::is_control_command(command) => {
+            match control::parse_control_request(
+                command,
+                &args[1..],
+                control::ControlContext::from_env(),
+            ) {
+                Ok(request) => send_request(&request.method, request.params),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(2);
+                }
+            }
         }
         "help" | "--help" | "-h" => print_help(),
         other => {
@@ -136,16 +151,16 @@ fn parse_notify_args(args: &[String]) -> Result<serde_json::Value, String> {
         }
 
         match arg.as_str() {
-            "--title" => title = Some(take_option_value(args, &mut i, "--title")?),
-            "--body" => body = Some(take_option_value(args, &mut i, "--body")?),
+            "--title" => title = Some(arguments::take_option_value(args, &mut i, "--title")?),
+            "--body" => body = Some(arguments::take_option_value(args, &mut i, "--body")?),
             "--workspace" | "--workspace-id" => {
-                workspace_id = Some(take_option_value(args, &mut i, arg)?)
+                workspace_id = Some(arguments::take_option_value(args, &mut i, arg)?)
             }
             "--surface" | "--surface-id" => {
-                surface_id = Some(take_option_value(args, &mut i, arg)?)
+                surface_id = Some(arguments::take_option_value(args, &mut i, arg)?)
             }
-            "--source" => source = Some(take_option_value(args, &mut i, "--source")?),
-            "--event" => event = Some(take_option_value(args, &mut i, "--event")?),
+            "--source" => source = Some(arguments::take_option_value(args, &mut i, "--source")?),
+            "--event" => event = Some(arguments::take_option_value(args, &mut i, "--event")?),
             _ if arg.starts_with("--") => {
                 return Err(format!("Unknown notify option: {arg}"));
             }
@@ -171,32 +186,12 @@ fn parse_notify_args(args: &[String]) -> Result<serde_json::Value, String> {
     let mut params = serde_json::Map::new();
     params.insert("title".to_string(), serde_json::json!(title));
     params.insert("body".to_string(), serde_json::json!(body));
-    insert_optional(&mut params, "workspace_id", workspace_id);
-    insert_optional(&mut params, "surface_id", surface_id);
-    insert_optional(&mut params, "source", source);
-    insert_optional(&mut params, "event", event);
+    arguments::insert_optional(&mut params, "workspace_id", workspace_id);
+    arguments::insert_optional(&mut params, "surface_id", surface_id);
+    arguments::insert_optional(&mut params, "source", source);
+    arguments::insert_optional(&mut params, "event", event);
 
     Ok(serde_json::Value::Object(params))
-}
-
-fn take_option_value(args: &[String], index: &mut usize, flag: &str) -> Result<String, String> {
-    *index += 1;
-    args.get(*index)
-        .cloned()
-        .filter(|value| !value.starts_with("--"))
-        .ok_or_else(|| format!("Missing value for {flag}"))
-}
-
-fn insert_optional(
-    map: &mut serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    value: Option<String>,
-) {
-    if let Some(value) = value {
-        if !value.is_empty() {
-            map.insert(key.to_string(), serde_json::json!(value));
-        }
-    }
 }
 
 fn print_help() {
@@ -212,6 +207,16 @@ Commands:
   hooks <setup|uninstall|agent>
                           Install or run agent notification hooks
   list-workspaces, ls     List active workspaces
+  identify                Show the current workspace and surface
+  list-surfaces           List surfaces in the current workspace
+  split [options]         Split the current terminal surface
+  subagent spawn [options]
+                          Open a child agent in a native pane
+  browser <action>        Control the browser pane
+  focus [options]         Focus a workspace surface
+  send-text [options] <text>
+                          Send text to a terminal surface
+  read-screen [options]   Read visible terminal text
   help                    Show this help message
 
 Notify options:
@@ -222,12 +227,30 @@ Notify options:
   --source <name>          Event source, e.g. codex
   --event <name>           Event name, e.g. stop
 
+Control options:
+  --workspace <id>         Target workspace, defaults to the current one
+  --surface <id>           Target surface, defaults to the current one
+  --direction <direction>  Split direction: horizontal or vertical
+  --command <command>      Command for the new split
+  --label <label>          Subagent label shown in the task inbox
+  --enter                   Append Enter to send-text
+  --rows <count>           Visible rows to read, from 1 to 500
+
 Examples:
   wmux-cli ping
   wmux-cli notify "Build done" "All tests passed"
   wmux-cli notify --workspace "$WMUX_WORKSPACE_ID" --surface "$WMUX_SURFACE_ID" --source codex --event stop --title Codex --body "Prompt completed"
   wmux-cli hooks setup codex --yes
   wmux-cli hooks setup claude --yes
-  wmux-cli ls"#
+  wmux-cli ls
+  wmux-cli identify
+  wmux-cli split --direction horizontal --command codex
+  wmux-cli browser open https://example.com
+  wmux-cli browser navigate https://example.com
+  wmux-cli browser snapshot
+  wmux-cli browser console
+  wmux-cli browser screenshot
+  wmux-cli send-text --enter "npm test"
+  wmux-cli read-screen --rows 40"#
     );
 }

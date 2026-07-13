@@ -316,6 +316,17 @@ export const useTmuxSessionsStore = create<TmuxSessionsState>((set, get) => ({
   },
 }));
 
+export const getTmuxActivePaneCwd = async (workspaceId: string): Promise<string | undefined> => {
+  const ctx = useTmuxSessionsStore.getState()._attach[workspaceId];
+  if (!ctx) return undefined;
+  const cwd = await invoke<string | null>("tmux_active_pane_cwd", {
+    sshCommand: ctx.sshCommand,
+    sshConnection: ctx.sshConnection ?? null,
+    session: ctx.activeSession,
+  });
+  return cwd ?? undefined;
+};
+
 /** Snapshot of attach contexts for read-only Sidebar lookups. */
 export const useAttachInfo = () => useTmuxSessionsStore((s) => s._attach);
 

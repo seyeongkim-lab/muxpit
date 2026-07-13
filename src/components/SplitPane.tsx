@@ -9,9 +9,16 @@ import { AiPaneToolbar } from "./AiPaneToolbar";
 interface SplitPaneProps {
   node: LayoutNode;
   workspaceId: string;
+  browserVisible?: boolean;
+  createBrowserWebview?: boolean;
 }
 
-const SplitPaneImpl = ({ node, workspaceId }: SplitPaneProps) => {
+const SplitPaneImpl = ({
+  node,
+  workspaceId,
+  browserVisible = true,
+  createBrowserWebview = true,
+}: SplitPaneProps) => {
   if (node.type === "leaf") {
     if (node.aiKind && node.aiSshTarget) {
       // Wrap the terminal so the toolbar sits above it without breaking xterm's
@@ -36,7 +43,16 @@ const SplitPaneImpl = ({ node, workspaceId }: SplitPaneProps) => {
   }
 
   if (node.type === "browser") {
-    return <BrowserPane key={node.id} id={node.id} url={node.url} />;
+    return (
+      <BrowserPane
+        key={node.id}
+        workspaceId={workspaceId}
+        id={node.id}
+        url={node.url}
+        visible={browserVisible}
+        createWebview={createBrowserWebview}
+      />
+    );
   }
 
   if (node.type === "monitor") {
@@ -51,6 +67,8 @@ const SplitPaneImpl = ({ node, workspaceId }: SplitPaneProps) => {
     <SplitContainer
       node={node}
       workspaceId={workspaceId}
+      browserVisible={browserVisible}
+      createBrowserWebview={createBrowserWebview}
     />
   );
 };
@@ -60,9 +78,16 @@ export const SplitPane = memo(SplitPaneImpl);
 interface SplitContainerProps {
   node: LayoutNode & { type: "split" };
   workspaceId: string;
+  browserVisible: boolean;
+  createBrowserWebview: boolean;
 }
 
-const SplitContainer = ({ node, workspaceId }: SplitContainerProps) => {
+const SplitContainer = ({
+  node,
+  workspaceId,
+  browserVisible,
+  createBrowserWebview,
+}: SplitContainerProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const setSplitRatio = useWorkspaceStore((s) => s.setSplitRatio);
   const isHorizontal = node.direction === "horizontal";
@@ -131,7 +156,12 @@ const SplitContainer = ({ node, workspaceId }: SplitContainerProps) => {
       }}
     >
       <div style={{ width: isHorizontal ? firstSize : "100%", height: isHorizontal ? "100%" : firstSize, overflow: "hidden" }}>
-        <SplitPane node={node.children[0]} workspaceId={workspaceId} />
+        <SplitPane
+          node={node.children[0]}
+          workspaceId={workspaceId}
+          browserVisible={browserVisible}
+          createBrowserWebview={createBrowserWebview}
+        />
       </div>
 
       {/* Divider */}
@@ -147,7 +177,12 @@ const SplitContainer = ({ node, workspaceId }: SplitContainerProps) => {
       />
 
       <div style={{ width: isHorizontal ? secondSize : "100%", height: isHorizontal ? "100%" : secondSize, overflow: "hidden" }}>
-        <SplitPane node={node.children[1]} workspaceId={workspaceId} />
+        <SplitPane
+          node={node.children[1]}
+          workspaceId={workspaceId}
+          browserVisible={browserVisible}
+          createBrowserWebview={createBrowserWebview}
+        />
       </div>
     </div>
   );

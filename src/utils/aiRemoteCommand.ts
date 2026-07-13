@@ -7,8 +7,11 @@ import { quotePosixShellArg } from "./sshConnection.ts";
 //     exits non-zero (missing binary, install bailout, OAuth flow that
 //     short-circuits, etc). Without this, the parent ssh closes too and the
 //     pane just shows `[Process exited]` over a blank screen.
-export const buildAiRemoteCommand = (command: string): string => {
-  const inner = `${command}; exec "\${SHELL:-/bin/sh}" -l`;
+export const buildAiRemoteCommand = (command: string, cwd?: string): string => {
+  const launch = cwd?.startsWith("/")
+    ? `cd ${quotePosixShellArg(cwd)} && ${command}`
+    : command;
+  const inner = `${launch}; exec "\${SHELL:-/bin/sh}" -l`;
   const outer = [
     "shell=${SHELL:-/bin/sh}",
     'case "$shell" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) wmux_shell="$shell" ;; *) wmux_shell=/bin/sh ;; esac',

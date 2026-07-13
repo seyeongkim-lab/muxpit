@@ -12,6 +12,7 @@ import { WindowControls } from "./WindowControls";
 import type { SshConnection } from "../utils/sshConnection";
 import { buildWorkspaceTabView } from "../utils/workspaceTabTitle";
 import { computeSessionTabWidth } from "../utils/topBarLayout";
+import { useLaunchProfileStore } from "../stores/launchProfiles";
 
 interface SidebarMonitorInfo {
   monitorId: string;
@@ -105,6 +106,7 @@ export const TopDashboardBar = ({
   const visibleTab = pinnedTab ?? hoveredTab;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  const toggleProfiles = useLaunchProfileStore((state) => state.togglePanel);
   const sessionTabsRowRef = useRef<HTMLDivElement>(null);
   const [sessionTabsRowWidth, setSessionTabsRowWidth] = useState(0);
 
@@ -252,6 +254,14 @@ export const TopDashboardBar = ({
             title="Grid overview"
           >
             Grid
+          </button>
+          <button
+            className="wmux-btn"
+            onClick={toggleProfiles}
+            style={styles.commandButton}
+            title="Launch profiles"
+          >
+            Profiles
           </button>
           <button
             className="wmux-btn"

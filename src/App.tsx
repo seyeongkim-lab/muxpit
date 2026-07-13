@@ -12,6 +12,7 @@ import { PrefixIndicator } from "./components/PrefixIndicator";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { LaunchProfilesPanel } from "./components/LaunchProfilesPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
 import {
   buildSshConnection,
@@ -22,7 +23,9 @@ import {
 } from "./stores/sshHosts";
 import { useAiCliStore, buildAiLaunchSpec, parseSshTarget } from "./stores/aiCli";
 import { useNotificationStore } from "./stores/notifications";
-import { useTmuxSessionsStore } from "./stores/tmuxSessions";
+import { useAgentTaskStore } from "./stores/agentTasks";
+import { useLaunchProfileStore } from "./stores/launchProfiles";
+import { getTmuxActivePaneCwd, useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals, terminalInstances } from "./components/terminalRegistry";
@@ -49,7 +52,8 @@ import {
 } from "./utils/aiTerminalStatus";
 import { sanitizeTmuxSessionName } from "./utils/tmuxSession";
 import { isTerminalCompositionKeyEvent } from "./utils/terminalInput";
-import { isAgentSessionEndEvent } from "./utils/agentSession";
+import { isAgentSessionEndEvent, isRestorableAgentKind } from "./utils/agentSession";
+import { agentTaskStatusFromEvent } from "./utils/agentTask";
 import { logInfo, logWarn } from "./utils/appLog";
 import { decideAppShortcut } from "./utils/appShortcuts";
 import {
@@ -59,6 +63,8 @@ import {
 } from "./utils/sshConnection";
 import { tauriPtyBackend } from "./utils/tauriPtyBackend";
 import { tryGetCurrentWebview, tryGetCurrentWindow } from "./utils/tauriWindow";
+import type { ControlRequestEvent } from "./utils/controlRequest";
+import { executeAppControlRequest } from "./utils/controlRequestRuntime";
 
 const APP_SHORTCUT_PLATFORM = getRuntimePlatform();
 
@@ -115,15 +121,19 @@ const autoAiSplit = async (wsId: string, sshCommand: string, sshConnection?: Ssh
     const hasAiPane = (node: LayoutNode): boolean => {
       if (node.type === "leaf") {
         if (node.aiKind) return true;
-        return /(?:^|['" /])(claude|codex|gemini|copilot)\b/.test(node.command ?? "");
+        return /(?:^|['" /])(claude|codex|gemini|copilot|opencode)\b/.test(node.command ?? "");
       }
       if (node.type === "split") return hasAiPane(node.children[0]) || hasAiPane(node.children[1]);
       return false;
     };
     if (hasAiPane(ws.layout)) return;
 
-    const claude = buildAiLaunchSpec("claude", sshCommand, connection);
     const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
+    const infoState = useWorkspaceInfoStore.getState();
+    const cwd = infoState.leafCwds[wsId]?.[leafId]
+      ?? await getTmuxActivePaneCwd(wsId).catch(() => undefined)
+      ?? infoState.info[wsId]?.cwd;
+    const claude = buildAiLaunchSpec("claude", sshCommand, connection, cwd);
     useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claude.command, {
       aiKind: "claude",
       aiSshTarget: target,
@@ -146,6 +156,11 @@ export const App = () => {
   const [filesRailVisible, setFilesRailVisible] = useState(true);
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string; sshCommand: string; sshConnection?: SshConnection } | null>(null);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const launchProfilesOpen = useLaunchProfileStore((state) => state.panelOpen);
+  const setLaunchProfilesOpen = useLaunchProfileStore((state) => state.setPanelOpen);
+  const notificationPanelOpen = useNotificationStore((state) => state.panelOpen);
+  const historyPanelOpen = usePrefixStore((state) => state.historyOpen);
+  const paneNumbersVisible = usePrefixStore((state) => state.showPaneNumbers);
   const closingRef = useRef(false);
 
   const uiFontSize = useSettingsStore((s) => s.fontSize);
@@ -168,6 +183,15 @@ export const App = () => {
   const fileRailSshCommand = fileLeafIsRemote
     ? fileLeaf.sshCommand ?? fileLeaf.command ?? null
     : null;
+  const browserVisible = !(
+    settingsOpen ||
+    sshPanelOpen ||
+    closeConfirmOpen ||
+    launchProfilesOpen ||
+    notificationPanelOpen ||
+    historyPanelOpen ||
+    paneNumbersVisible
+  );
 
   // Push resolved theme colours onto :root as CSS custom properties so the
   // sidebar/toolbar chrome stays in sync when the user switches themes.
@@ -476,6 +500,18 @@ export const App = () => {
             aiStatusUpdatedAt: aiStatus.updatedAt,
           });
         }
+        const surfaceId = event.payload.surface_id;
+        const taskStatus = agentTaskStatusFromEvent(event.payload.event, body);
+        if (taskStatus && wsId && surfaceId) {
+          useAgentTaskStore.getState().updateTask({
+            workspaceId: wsId,
+            surfaceId,
+            source: event.payload.source ?? title,
+            label: body || taskStatus,
+            status: taskStatus,
+            updatedAt: Date.now(),
+          });
+        }
 
         useNotificationStore.getState().addNotification(wsId, title, body);
         playNotificationSound();
@@ -489,6 +525,28 @@ export const App = () => {
       unlisten.then((fn) => fn());
     };
   }, [activeId]);
+
+  useEffect(() => {
+    const unlisten = listen<ControlRequestEvent>("wmux-control-request", (event) => {
+      void (async () => {
+        let data: unknown = null;
+        let error: string | null = null;
+        try {
+          data = await executeAppControlRequest(event.payload);
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : String(cause);
+        }
+        await invoke("resolve_control_request", {
+          requestId: event.payload.requestId,
+          data,
+          error,
+        }).catch(() => {});
+      })();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   // Listen for agent hook session bindings from wmux-cli.
   useEffect(() => {
@@ -504,7 +562,7 @@ export const App = () => {
       "wmux-agent-session",
       (event) => {
         const { source, workspace_id, surface_id, session_id } = event.payload;
-        if ((source !== "codex" && source !== "claude") || !workspace_id || !surface_id || !session_id) {
+        if (!isRestorableAgentKind(source) || !workspace_id || !surface_id || !session_id) {
           return;
         }
 
@@ -518,6 +576,17 @@ export const App = () => {
             aiStatusLabel: aiStatus.label,
             aiStatusKind: aiStatus.kind,
             aiStatusUpdatedAt: aiStatus.updatedAt,
+          });
+        }
+        const taskStatus = agentTaskStatusFromEvent(event.payload.event, event.payload.status);
+        if (taskStatus) {
+          useAgentTaskStore.getState().updateTask({
+            workspaceId: workspace_id,
+            surfaceId: surface_id,
+            source,
+            label: event.payload.status || taskStatus,
+            status: taskStatus,
+            updatedAt: Date.now(),
           });
         }
 
@@ -961,6 +1030,7 @@ export const App = () => {
                     : activeWs.layout
                 }
                 workspaceId={activeWs.id}
+                browserVisible={browserVisible}
               />
               <PaneNumberOverlay workspaceId={activeWs.id} />
             </>
@@ -981,6 +1051,10 @@ export const App = () => {
         <PrefixIndicator />
         <HistoryPanel />
         <NotificationPanel />
+        <LaunchProfilesPanel
+          open={launchProfilesOpen}
+          onClose={() => setLaunchProfilesOpen(false)}
+        />
         <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         <SshHostPanel
           open={sshPanelOpen}

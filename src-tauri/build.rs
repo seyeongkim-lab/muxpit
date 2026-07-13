@@ -1,6 +1,51 @@
 fn main() {
     prepare_cli_sidecar();
-    tauri_build::build()
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "spawn_pty",
+            "spawn_pty_tmux_cc",
+            "subscribe_pty_events",
+            "write_pty",
+            "resize_pty",
+            "kill_pty",
+            "get_workspace_info",
+            "get_ports",
+            "get_pty_pid",
+            "get_shell_ctx",
+            "get_session_metadata",
+            "pty_has_agent_process",
+            "list_fonts",
+            "read_dir",
+            "remote_read_dir",
+            "start_monitor",
+            "stop_monitor",
+            "request_session_content",
+            "resolve_control_request",
+            "check_remote_clis",
+            "check_remote_tmux",
+            "save_image_locally",
+            "push_image_to_remote",
+            "tmux_list_sessions",
+            "tmux_active_pane_cwd",
+            "tmux_switch_client",
+            "tmux_new_session",
+            "tmux_kill_session",
+            "set_workspace_list",
+            "send_notification",
+            "install_cli_symlink",
+            "browser_create",
+            "browser_update_bounds",
+            "browser_set_visible",
+            "browser_close",
+            "browser_navigate",
+            "browser_reload",
+            "browser_current_url",
+            "browser_snapshot",
+            "browser_console_logs",
+            "browser_screenshot",
+        ]),
+    ))
+    .expect("failed to build tauri application")
 }
 
 fn prepare_cli_sidecar() {

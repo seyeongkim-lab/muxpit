@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-pty-pid"
+description = "Enables the get_pty_pid command without any pre-configured scope."
+commands.allow = ["get_pty_pid"]
+
+[[permission]]
+identifier = "deny-get-pty-pid"
+description = "Denies the get_pty_pid command without any pre-configured scope."
+commands.deny = ["get_pty_pid"]

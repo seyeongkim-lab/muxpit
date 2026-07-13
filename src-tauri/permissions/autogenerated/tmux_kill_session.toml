@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tmux-kill-session"
+description = "Enables the tmux_kill_session command without any pre-configured scope."
+commands.allow = ["tmux_kill_session"]
+
+[[permission]]
+identifier = "deny-tmux-kill-session"
+description = "Denies the tmux_kill_session command without any pre-configured scope."
+commands.deny = ["tmux_kill_session"]

@@ -29,6 +29,39 @@ test("buildAgentResumeCommand builds Codex and Claude resume commands", () => {
   );
 });
 
+test("buildAgentResumeCommand builds Gemini, Copilot, and OpenCode resume commands", () => {
+  assert.equal(
+    buildAgentResumeCommand("gemini", "gemini-session-1", false),
+    "gemini --resume gemini-session-1",
+  );
+  assert.equal(
+    buildAgentResumeCommand("copilot", "copilot-session-1", false),
+    "copilot --resume copilot-session-1",
+  );
+  assert.equal(
+    buildAgentResumeCommand("opencode", "ses_123", false),
+    "opencode --session ses_123",
+  );
+});
+
+test("new resume adapters strip selectors, prompts, and permission bypass flags", () => {
+  assert.equal(
+    buildAgentResumeCommand("gemini", "gemini-session-1", false, "gemini --yolo --model pro --resume old"),
+    "gemini --model pro --resume gemini-session-1",
+  );
+  assert.equal(
+    buildAgentResumeCommand("copilot", "copilot-session-1", false, "copilot --allow-all --model gpt-5 --continue"),
+    "copilot --model gpt-5 --resume copilot-session-1",
+  );
+  assert.equal(
+    buildAgentResumeCommand("opencode", "ses_123", false, "opencode --model provider/model --session old"),
+    "opencode --model provider/model --session ses_123",
+  );
+  assert.equal(sanitizeAgentBaseCommand("gemini", "gemini -p 'do work'"), undefined);
+  assert.equal(sanitizeAgentBaseCommand("copilot", "copilot -p 'do work'"), undefined);
+  assert.equal(sanitizeAgentBaseCommand("opencode", "opencode run do work"), undefined);
+});
+
 test("buildAgentResumeCommand adds per-agent dangerous resume flags", () => {
   assert.equal(
     buildAgentResumeCommand("codex", "11111111-2222-3333-4444-555555555555", true),
@@ -140,6 +173,12 @@ test("detectRestorableAgentCommand recognizes direct agent commands only", () =>
   assert.equal(detectRestorableAgentCommand("codex"), "codex");
   assert.equal(detectRestorableAgentCommand("/usr/bin/claude --resume abc"), "claude");
   assert.equal(detectRestorableAgentCommand("C:\\Tools\\codex.exe resume abc"), "codex");
+  assert.equal(detectRestorableAgentCommand("gemini --resume abc"), "gemini");
+  assert.equal(detectRestorableAgentCommand("copilot --resume abc"), "copilot");
+  assert.equal(detectRestorableAgentCommand("opencode --session abc"), "opencode");
+  assert.equal(detectRestorableAgentCommand("gemini --resume abc"), "gemini");
+  assert.equal(detectRestorableAgentCommand("copilot --resume abc"), "copilot");
+  assert.equal(detectRestorableAgentCommand("opencode --session abc"), "opencode");
   assert.equal(detectRestorableAgentCommand("\"C:\\Program Files\\Claude\\claude.cmd\""), "claude");
   assert.equal(detectRestorableAgentCommand("ssh host codex"), undefined);
   assert.equal(detectRestorableAgentCommand(undefined), undefined);

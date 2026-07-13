@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { useHistoryStore } from "../stores/history";
 import { useNotificationStore } from "../stores/notifications";
+import { useAgentTaskStore } from "../stores/agentTasks";
 import { usePrefixStore } from "../stores/prefix";
 import { useSettingsStore } from "../stores/settings";
 import { useWorkspaceStore } from "../stores/workspace";
@@ -10,6 +11,7 @@ import { getResolvedTheme } from "../themes";
 import { useWorkspaceInfoStore } from "./useWorkspaceInfo";
 import { shouldShowNotificationForTarget } from "../utils/notificationRouting";
 import { detectAiAgentName, parseAiTerminalStatus } from "../utils/aiTerminalStatus";
+import { agentTaskStatusFromTerminal } from "../utils/agentTask";
 import { playNotificationSound } from "../utils/notificationSound";
 import { matchesPrefixKey } from "../utils/prefixKey";
 import { type PtyExit, type PtyOutput, spawnTerminalPty } from "../utils/ptyBackend";
@@ -35,6 +37,7 @@ import {
 import {
   findTerminalAiKind,
   findTerminalCloneFromPtyId,
+  findTerminalLeaf,
   findTerminalSpawnSpec,
   findTerminalTmuxSession,
   terminalLeafExists,
@@ -63,6 +66,7 @@ const handleTerminalOutputEvent = (event: TerminalOutputEvent, workspaceId: stri
   switch (event.type) {
     case "cwd":
       patchInfo(workspaceId, { cwd: event.cwd });
+      useWorkspaceInfoStore.getState().setLeafCwd(workspaceId, leafId, event.cwd);
       if (useSettingsStore.getState().enableExperimentalCwdRestore) {
         useWorkspaceStore.getState().setLeafCwd(workspaceId, leafId, event.cwd);
       }
@@ -230,6 +234,22 @@ export const useTerminalSession = ({
           aiStatusLabel: status.label,
           aiStatusKind: status.kind,
           aiStatusUpdatedAt: status.updatedAt,
+        });
+        const leaf = findTerminalLeaf(getWorkspaces(), workspaceId, leafId);
+        const source = leaf?.agentLabel ?? findTerminalAiKind(getWorkspaces(), workspaceId, leafId) ??
+          detectAiAgentName(
+            useWorkspaceInfoStore.getState().info[workspaceId]?.agent,
+            useWorkspaceInfoStore.getState().info[workspaceId]?.processName,
+          ) ??
+          "agent";
+        useAgentTaskStore.getState().updateTask({
+          workspaceId,
+          surfaceId: leafId,
+          source,
+          label: status.label,
+          status: agentTaskStatusFromTerminal(status.kind, status.label),
+          updatedAt: status.updatedAt,
+          parentSurfaceId: leaf?.parentSurfaceId,
         });
       });
     };

@@ -3,6 +3,8 @@ import { useAiCliStore, AI_KINDS, AI_LABEL, buildAiLaunchSpec } from "../stores/
 import { useWorkspaceStore, type AiKind } from "../stores/workspace";
 import { useSshHostsStore, buildSshCommand, buildSshConnection } from "../stores/sshHosts";
 import { parseSshCommandLine, sshConnectionToCommandLine, type SshConnection } from "../utils/sshConnection";
+import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
+import { getTmuxActivePaneCwd } from "../stores/tmuxSessions";
 
 interface AiPaneToolbarProps {
   workspaceId: string;
@@ -29,6 +31,9 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget, ssh
   const probe = useAiCliStore((s) => s.probe);
   const splitLeafWithCommand = useWorkspaceStore((s) => s.splitLeafWithCommand);
   const hosts = useSshHostsStore((s) => s.hosts);
+  const cwd = useWorkspaceInfoStore(
+    (s) => s.leafCwds[workspaceId]?.[leafId] ?? s.info[workspaceId]?.cwd,
+  );
 
   const host = useMemo(
     () => hosts.find((h) => `${h.user}@${h.host}` === sshTarget),
@@ -56,8 +61,9 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget, ssh
     probe(sshTarget, baseSshCommand, baseSshConnection).catch(() => {});
   }, [available, sshTarget, baseSshCommand, baseSshConnection, probe]);
 
-  const handleAdd = (kind: AiKind) => {
-    const spec = buildAiLaunchSpec(kind, baseSshCommand, baseSshConnection);
+  const handleAdd = async (kind: AiKind) => {
+    const launchCwd = cwd ?? await getTmuxActivePaneCwd(workspaceId).catch(() => undefined);
+    const spec = buildAiLaunchSpec(kind, baseSshCommand, baseSshConnection, launchCwd);
     splitLeafWithCommand(workspaceId, leafId, "vertical", spec.command, {
       aiKind: kind,
       aiSshTarget: sshTarget,
@@ -81,7 +87,7 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget, ssh
         <button
           key={k}
           className="wmux-ai-btn"
-          onClick={() => handleAdd(k)}
+          onClick={() => void handleAdd(k)}
           title={`Open a ${AI_LABEL[k]} pane on ${sshTarget}`}
         >
           {AI_LABEL[k]}

@@ -10,20 +10,22 @@ import {
 } from "../utils/sshConnection";
 import { buildAiRemoteCommand } from "../utils/aiRemoteCommand";
 
-export const AI_KINDS: AiKind[] = ["claude", "codex", "gemini", "copilot"];
+export const AI_KINDS: AiKind[] = ["claude", "codex", "gemini", "copilot", "opencode"];
 
 export const AI_LABEL: Record<AiKind, string> = {
   claude: "claude",
   codex: "codex",
   gemini: "gemini",
   copilot: "copilot",
+  opencode: "opencode",
 };
 
-const AI_REMOTE_CMD: Record<AiKind, string> = {
-  claude: buildAiRemoteCommand("claude --dangerously-skip-permissions"),
-  codex: buildAiRemoteCommand("codex"),
-  gemini: buildAiRemoteCommand("gemini"),
-  copilot: buildAiRemoteCommand("copilot"),
+const AI_COMMAND: Record<AiKind, string> = {
+  claude: "claude --dangerously-skip-permissions",
+  codex: "codex",
+  gemini: "gemini",
+  copilot: "copilot",
+  opencode: "opencode",
 };
 
 /** Parse `user@host` from a free-form ssh command. Returns null if not found. */
@@ -50,16 +52,23 @@ export const buildAiLaunchCommand = (
   kind: AiKind,
   rawSshCommand: string,
   host?: SshHost,
+  cwd?: string,
 ): string => {
-  return buildAiLaunchSpec(kind, rawSshCommand, host ? buildSshConnection(host) : undefined).command;
+  return buildAiLaunchSpec(
+    kind,
+    rawSshCommand,
+    host ? buildSshConnection(host) : undefined,
+    cwd,
+  ).command;
 };
 
 export const buildAiLaunchSpec = (
   kind: AiKind,
   rawSshCommand: string,
   sshConnection?: SshConnection,
+  cwd?: string,
 ): AiLaunchSpec => {
-  const remote = AI_REMOTE_CMD[kind];
+  const remote = buildAiRemoteCommand(AI_COMMAND[kind], cwd);
   const connection = sshConnection ?? parseSshCommandLine(rawSshCommand)?.connection;
   if (connection) {
     return {

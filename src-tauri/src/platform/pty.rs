@@ -8,6 +8,7 @@ pub fn apply_wmux_env(
     workspace_id: Option<&str>,
     surface_id: Option<&str>,
     agent_session_token: Option<&str>,
+    control_token: Option<&str>,
 ) {
     if let Some(workspace_id) = workspace_id.filter(|value| !value.is_empty()) {
         cmd.env("WMUX_WORKSPACE_ID", workspace_id);
@@ -17,6 +18,9 @@ pub fn apply_wmux_env(
     }
     if let Some(agent_session_token) = agent_session_token.filter(|value| !value.is_empty()) {
         cmd.env("WMUX_AGENT_SESSION_TOKEN", agent_session_token);
+    }
+    if let Some(control_token) = control_token.filter(|value| !value.is_empty()) {
+        cmd.env("WMUX_CONTROL_TOKEN", control_token);
     }
 
     #[cfg(unix)]

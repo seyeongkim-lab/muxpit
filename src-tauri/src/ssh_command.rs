@@ -211,6 +211,30 @@ fn option_takes_value(option: &str) -> bool {
     )
 }
 
+pub(crate) fn ssh_target_index(argv: &[String]) -> Option<usize> {
+    let program = argv.first()?;
+    if !is_ssh_program(program) {
+        return None;
+    }
+    let mut index = 1;
+    while index < argv.len() {
+        let part = &argv[index];
+        if !part.starts_with('-') {
+            return Some(index);
+        }
+        if execution_mode_option(part).is_some() {
+            index += 1;
+            continue;
+        }
+        if split_attached_option_value(part).is_some() {
+            index += 1;
+            continue;
+        }
+        index += if option_takes_value(part) { 2 } else { 1 };
+    }
+    None
+}
+
 impl SshCommand {
     /// Add OpenSSH connection multiplexing so every connection to a host — the
     /// long-lived tmux attach plus the short tmux-list/monitor/probe connections
@@ -400,7 +424,11 @@ mod tests {
         let ssh = resolve_ssh_command(Some("ssh me@host"), None).unwrap();
         let n = ssh.options.len();
         let again = ssh.with_multiplexing();
-        assert_eq!(again.options.len(), n, "must not double-add control options");
+        assert_eq!(
+            again.options.len(),
+            n,
+            "must not double-add control options"
+        );
     }
 
     #[test]
@@ -429,5 +457,20 @@ mod tests {
                 "claude --resume 'a b'"
             ]
         );
+    }
+
+    #[test]
+    fn target_index_skips_value_and_tty_options() {
+        let argv = vec![
+            "ssh".to_string(),
+            "-tt".to_string(),
+            "-p".to_string(),
+            "2222".to_string(),
+            "-Jjump".to_string(),
+            "me@host".to_string(),
+            "uptime".to_string(),
+        ];
+        assert_eq!(ssh_target_index(&argv), Some(5));
+        assert_eq!(ssh_target_index(&["codex".to_string()]), None);
     }
 }

@@ -1,6 +1,6 @@
 import { buildCommandLine, splitCommandLine } from "./sshConnection.ts";
 
-export type RestorableAgentKind = "codex" | "claude";
+export type RestorableAgentKind = "codex" | "claude" | "gemini" | "copilot" | "opencode";
 
 export interface GeneratedAgentResumeCommand {
   kind: RestorableAgentKind;
@@ -27,7 +27,11 @@ export interface AgentSessionBinding {
 }
 
 export const isRestorableAgentKind = (value: unknown): value is RestorableAgentKind =>
-  value === "codex" || value === "claude";
+  value === "codex" ||
+  value === "claude" ||
+  value === "gemini" ||
+  value === "copilot" ||
+  value === "opencode";
 
 export const isAgentSessionEndEvent = (value: unknown): boolean => {
   if (typeof value !== "string") return false;
@@ -38,7 +42,7 @@ export const isAgentSessionEndEvent = (value: unknown): boolean => {
 
 const AGENT_EXECUTABLE_SUFFIX_RE = /\.(?:exe|cmd|bat|ps1)$/i;
 const AGENT_SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,512}$/;
-const AGENT_DANGEROUS_FLAGS: Record<RestorableAgentKind, string> = {
+const AGENT_DANGEROUS_FLAGS: Record<Extract<RestorableAgentKind, "codex" | "claude">, string> = {
   codex: "--dangerously-bypass-approvals-and-sandbox",
   claude: "--dangerously-skip-permissions",
 };
@@ -47,6 +51,7 @@ interface AgentOptionPolicy {
   valueOptions: Set<string>;
   flagOptions: Set<string>;
   droppedOptions: Set<string>;
+  rejectedOptions?: Set<string>;
   droppedOptionPrefixes?: string[];
   nonRestorableCommands: Set<string>;
   resumeCommand?: string;
@@ -215,6 +220,120 @@ const CLAUDE_POLICY: AgentOptionPolicy = {
   ]),
 };
 
+const GEMINI_POLICY: AgentOptionPolicy = {
+  valueOptions: new Set([
+    "--model",
+    "-m",
+    "--approval-mode",
+    "--extensions",
+    "-e",
+    "--include-directories",
+    "--sandbox-image",
+    "--resume",
+    "-r",
+    "--delete-session",
+    "--prompt",
+    "-p",
+    "--prompt-interactive",
+    "-i",
+  ]),
+  flagOptions: new Set(["--debug", "-d", "--sandbox", "-s", "--screen-reader"]),
+  droppedOptions: new Set([
+    "--yolo",
+    "--resume",
+    "-r",
+    "--delete-session",
+    "--prompt",
+    "-p",
+    "--prompt-interactive",
+    "-i",
+  ]),
+  rejectedOptions: new Set(["--prompt", "-p", "--prompt-interactive", "-i"]),
+  nonRestorableCommands: new Set(["update", "extensions", "mcp", "help"]),
+};
+
+const COPILOT_POLICY: AgentOptionPolicy = {
+  valueOptions: new Set([
+    "--model",
+    "--effort",
+    "--reasoning-effort",
+    "-C",
+    "--context",
+    "--plugin-dir",
+    "--resume",
+    "-r",
+    "--session-id",
+    "--connect",
+    "--prompt",
+    "-p",
+  ]),
+  flagOptions: new Set([
+    "--autopilot",
+    "--no-banner",
+    "--no-color",
+    "--no-custom-instructions",
+    "--no-experimental",
+    "--no-mouse",
+    "--no-remote",
+    "--screen-reader",
+  ]),
+  droppedOptions: new Set([
+    "--yolo",
+    "--allow-all",
+    "--continue",
+    "--resume",
+    "-r",
+    "--session-id",
+    "--connect",
+    "--prompt",
+    "-p",
+  ]),
+  rejectedOptions: new Set(["--prompt", "-p"]),
+  nonRestorableCommands: new Set(["auth", "config", "update", "help"]),
+};
+
+const OPENCODE_POLICY: AgentOptionPolicy = {
+  valueOptions: new Set([
+    "--model",
+    "-m",
+    "--agent",
+    "--dir",
+    "--variant",
+    "--session",
+    "-s",
+    "--password",
+    "-p",
+    "--username",
+    "-u",
+  ]),
+  flagOptions: new Set(["--thinking"]),
+  droppedOptions: new Set([
+    "--continue",
+    "-c",
+    "--session",
+    "-s",
+    "--fork",
+    "--password",
+    "-p",
+    "--username",
+    "-u",
+  ]),
+  nonRestorableCommands: new Set([
+    "run",
+    "serve",
+    "web",
+    "attach",
+    "agent",
+    "auth",
+    "models",
+    "session",
+    "stats",
+    "export",
+    "import",
+    "help",
+  ]),
+};
+
 const normalizeAgentProgramName = (program: string | undefined): string | undefined => {
   const basename = program?.replace(/\\/g, "/").split("/").pop();
   return basename?.replace(AGENT_EXECUTABLE_SUFFIX_RE, "").toLowerCase();
@@ -227,8 +346,20 @@ export const normalizeAgentSessionId = (value: unknown): string | undefined => {
   return sessionId;
 };
 
-const policyForKind = (kind: RestorableAgentKind): AgentOptionPolicy =>
-  kind === "codex" ? CODEX_POLICY : CLAUDE_POLICY;
+const policyForKind = (kind: RestorableAgentKind): AgentOptionPolicy => {
+  switch (kind) {
+    case "codex":
+      return CODEX_POLICY;
+    case "claude":
+      return CLAUDE_POLICY;
+    case "gemini":
+      return GEMINI_POLICY;
+    case "copilot":
+      return COPILOT_POLICY;
+    case "opencode":
+      return OPENCODE_POLICY;
+  }
+};
 
 const optionName = (arg: string): string => {
   const equals = arg.indexOf("=");
@@ -247,7 +378,13 @@ const dangerousEquivalentWidth = (
   const attached = optionHasAttachedValue(arg) ? arg.slice(name.length + 1) : undefined;
   const next = parts[index + 1];
 
-  if (arg === AGENT_DANGEROUS_FLAGS[kind]) return 1;
+  const dangerousFlag =
+    kind === "codex"
+      ? AGENT_DANGEROUS_FLAGS.codex
+      : kind === "claude"
+        ? AGENT_DANGEROUS_FLAGS.claude
+        : undefined;
+  if (dangerousFlag === arg) return 1;
   if (kind === "codex") {
     if (name === "--sandbox" || name === "-s") {
       const value = attached ?? next;
@@ -266,6 +403,14 @@ const dangerousEquivalentWidth = (
     }
     if (arg === "--allow-dangerously-skip-permissions") return 1;
   }
+  if (kind === "gemini") {
+    if (arg === "--yolo") return 1;
+    if (name === "--approval-mode") {
+      const value = attached ?? next;
+      return value === "yolo" ? attached === undefined ? 2 : 1 : undefined;
+    }
+  }
+  if (kind === "copilot" && (arg === "--yolo" || arg === "--allow-all")) return 1;
   return undefined;
 };
 
@@ -323,6 +468,7 @@ const sanitizeAgentBaseCommandParts = (
     }
 
     const name = optionName(arg);
+    if (policy.rejectedOptions?.has(name)) return undefined;
     if (policy.droppedOptionPrefixes?.some((prefix) => arg.startsWith(prefix))) {
       index += 1;
       continue;
@@ -406,13 +552,16 @@ export const buildAgentResumeCommandParts = (
       normalizedSessionId,
     ];
   }
-
-  return [
-    ...baseParts,
-    ...(dangerouslyBypass ? [AGENT_DANGEROUS_FLAGS.claude] : []),
-    "--resume",
-    normalizedSessionId,
-  ];
+  if (kind === "claude") {
+    return [
+      ...baseParts,
+      ...(dangerouslyBypass ? [AGENT_DANGEROUS_FLAGS.claude] : []),
+      "--resume",
+      normalizedSessionId,
+    ];
+  }
+  if (kind === "opencode") return [...baseParts, "--session", normalizedSessionId];
+  return [...baseParts, "--resume", normalizedSessionId];
 };
 
 export const buildAgentResumeCommand = (
@@ -458,9 +607,11 @@ export const detectGeneratedAgentResumeCommand = (
     return { kind, sessionId, dangerouslyBypass };
   }
 
-  const resumeIndex = parts.indexOf("--resume", 1);
+  const resumeOption = kind === "opencode" ? "--session" : "--resume";
+  const resumeIndex = parts.indexOf(resumeOption, 1);
   if (resumeIndex < 0) return undefined;
-  const dangerouslyBypass = parts.includes("--dangerously-skip-permissions");
+  const dangerouslyBypass =
+    kind === "claude" && parts.includes("--dangerously-skip-permissions");
   const sessionId = normalizeAgentSessionId(parts[resumeIndex + 1]);
   if (!sessionId) return undefined;
   return {

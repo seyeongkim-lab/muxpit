@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spawn-pty-tmux-cc"
+description = "Enables the spawn_pty_tmux_cc command without any pre-configured scope."
+commands.allow = ["spawn_pty_tmux_cc"]
+
+[[permission]]
+identifier = "deny-spawn-pty-tmux-cc"
+description = "Denies the spawn_pty_tmux_cc command without any pre-configured scope."
+commands.deny = ["spawn_pty_tmux_cc"]

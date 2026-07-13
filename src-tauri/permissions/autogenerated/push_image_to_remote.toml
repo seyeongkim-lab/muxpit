@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-push-image-to-remote"
+description = "Enables the push_image_to_remote command without any pre-configured scope."
+commands.allow = ["push_image_to_remote"]
+
+[[permission]]
+identifier = "deny-push-image-to-remote"
+description = "Denies the push_image_to_remote command without any pre-configured scope."
+commands.deny = ["push_image_to_remote"]

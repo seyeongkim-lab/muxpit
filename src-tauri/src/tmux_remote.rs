@@ -76,6 +76,27 @@ fn safe_new_session_name(s: &str) -> Option<String> {
     }
 }
 
+fn active_pane_cwd_command(session: &str) -> Result<String, String> {
+    let session = safe_session_token(session).ok_or_else(|| "invalid session".to_string())?;
+    Ok(format!(
+        "tmux display-message -p -t {} '#{{pane_current_path}}' 2>/dev/null",
+        quote_posix_shell_arg(&session)
+    ))
+}
+
+pub fn active_pane_cwd(ssh: &SshCommand, session: &str) -> Result<Option<String>, String> {
+    let mut cmd = build_ssh(ssh);
+    cmd.arg(active_pane_cwd_command(session)?);
+    let out = cmd.output().map_err(|e| format!("ssh exec: {e}"))?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    let cwd = String::from_utf8_lossy(&out.stdout)
+        .trim_end_matches(['\r', '\n'])
+        .to_string();
+    Ok(cwd.starts_with('/').then_some(cwd))
+}
+
 /// `tmux list-sessions` on the remote. Returns `Ok(vec![])` when no server is
 /// running or tmux is missing — both are normal states, not errors.
 pub fn list_sessions(ssh: &SshCommand) -> Result<Vec<TmuxSession>, String> {
@@ -252,5 +273,18 @@ mod tests {
         assert!(safe_new_session_name("project-1").is_some());
         assert!(safe_new_session_name("$HOME").is_none());
         assert!(safe_new_session_name("$1").is_none());
+    }
+
+    #[test]
+    fn active_pane_cwd_command_targets_session() {
+        assert_eq!(
+            active_pane_cwd_command("$3").unwrap(),
+            "tmux display-message -p -t '$3' '#{pane_current_path}' 2>/dev/null"
+        );
+    }
+
+    #[test]
+    fn active_pane_cwd_command_rejects_invalid_session() {
+        assert!(active_pane_cwd_command("foo;rm").is_err());
     }
 }

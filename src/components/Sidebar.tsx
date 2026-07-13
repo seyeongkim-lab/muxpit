@@ -1,6 +1,7 @@
 import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo";
 import { useNotificationStore } from "../stores/notifications";
+import { useAgentTaskStore } from "../stores/agentTasks";
 import { useSshHostsStore, type SshHost } from "../stores/sshHosts";
 import { useTmuxSessionsStore } from "../stores/tmuxSessions";
 import { useSettingsStore } from "../stores/settings";
@@ -12,6 +13,8 @@ import { SidebarTmuxSessions } from "./SidebarTmuxSessions";
 import { useMonitorStore, type MonitorSnapshot } from "../stores/monitor";
 import { useState, useRef } from "react";
 import type { SshConnection } from "../utils/sshConnection";
+import { attentionAgentTasks } from "../utils/agentTask";
+import { useLaunchProfileStore } from "../stores/launchProfiles";
 
 interface SidebarMonitorInfo {
   monitorId: string;
@@ -102,6 +105,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
   const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
   const infoMap = useWorkspaceInfoStore((s) => s.info);
   const notifications = useNotificationStore((s) => s.notifications);
+  const agentTasks = useAgentTaskStore((s) => s.tasks);
   const togglePanel = useNotificationStore((s) => s.togglePanel);
   const markRead = useNotificationStore((s) => s.markRead);
   const sshHosts = useSshHostsStore((s) => s.hosts);
@@ -109,6 +113,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
   const sessionListMetadata = useSettingsStore((s) => s.sessionListMetadata);
   const enableExperimentalCwdRestore = useSettingsStore((s) => s.enableExperimentalCwdRestore);
   const historyEntries = useHistoryStore((s) => s.entries);
+  const toggleProfiles = useLaunchProfileStore((s) => s.togglePanel);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
   const dragFromIdxRef = useRef<number | null>(null);
@@ -117,7 +122,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
 
   const monitorSeries = useMonitorStore((s) => monitor ? s.series[monitor.monitorId] : undefined);
   const latestSnapshot = monitorSeries?.[monitorSeries.length - 1] as MonitorSnapshot | undefined;
-  const totalUnread = notifications.filter((n) => !n.read).length;
+  const totalUnread = notifications.filter((n) => !n.read).length + attentionAgentTasks(agentTasks).length;
   const [editName, setEditName] = useState("");
 
   const handleAdd = () => addWorkspace();
@@ -146,6 +151,9 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
         <div style={styles.headerBtns}>
           <button className="wmux-btn" onClick={handleAdd} style={styles.addBtn} title="New workspace (Ctrl+Shift+T)">
             +
+          </button>
+          <button className="wmux-btn" onClick={toggleProfiles} style={styles.addBtn} title="Launch profiles">
+            P
           </button>
           <button
             className="wmux-btn"
@@ -450,7 +458,7 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
       <div style={styles.footer}>
         <span style={styles.footerText}>{workspaces.length} sessions</span>
         {totalUnread > 0 && (
-          <span style={styles.notifBadge} onClick={togglePanel} title="Notifications (Ctrl+Shift+I)">
+          <span style={styles.notifBadge} onClick={togglePanel} title="Agent inbox (Ctrl+Shift+I)">
             {totalUnread}
           </span>
         )}

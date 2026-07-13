@@ -73,11 +73,11 @@ struct PtyInstance {
     tmux_state: Option<Arc<Mutex<TmuxCcState>>>,
     workspace_id: Option<String>,
     surface_id: Option<String>,
-    agent_session_token: Option<String>,
+    access_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct PendingAgentSessionToken {
+struct PendingAccessToken {
     workspace_id: String,
     surface_id: String,
     token: String,
@@ -92,7 +92,7 @@ pub struct WmuxPtyContext {
 
 pub struct PtyManager {
     instances: Mutex<HashMap<u32, PtyInstance>>,
-    pending_agent_session_tokens: Mutex<Vec<PendingAgentSessionToken>>,
+    pending_access_tokens: Mutex<Vec<PendingAccessToken>>,
     next_id: Mutex<u32>,
 }
 
@@ -100,7 +100,7 @@ impl PtyManager {
     pub fn new() -> Self {
         Self {
             instances: Mutex::new(HashMap::new()),
-            pending_agent_session_tokens: Mutex::new(Vec::new()),
+            pending_access_tokens: Mutex::new(Vec::new()),
             next_id: Mutex::new(1),
         }
     }
@@ -245,8 +245,34 @@ impl PtyManager {
             })
             .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
+        let control_token = if wmux_context
+            .workspace_id
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+            && wmux_context
+                .surface_id
+                .as_deref()
+                .is_some_and(|value| !value.is_empty())
+        {
+            Some(generate_access_token()?)
+        } else {
+            None
+        };
+        let relay_argv = command_argv.as_ref().and_then(|argv| {
+            let relay_port = app
+                .try_state::<crate::platform::ipc::ControlRelay>()?
+                .port()?;
+            crate::remote_control::wrap_ssh_control_relay(
+                argv,
+                relay_port,
+                wmux_context.workspace_id.as_deref()?,
+                wmux_context.surface_id.as_deref()?,
+                control_token.as_deref()?,
+            )
+        });
+
         // If command is provided, run it directly; otherwise use default shell
-        let mut cmd = if let Some(ref argv) = command_argv {
+        let mut cmd = if let Some(ref argv) = relay_argv.as_ref().or(command_argv.as_ref()) {
             command_builder_from_argv(argv)?
         } else if let Some(ref command_str) = command {
             let parts = shell_words_parse(command_str);
@@ -260,28 +286,19 @@ impl PtyManager {
         if let Some(cwd) = valid_spawn_cwd(cwd) {
             cmd.cwd(cwd.as_os_str());
         }
-        let agent_session_token = if wmux_context.enable_agent_session_reporting
-            && wmux_context
-                .workspace_id
-                .as_deref()
-                .is_some_and(|value| !value.is_empty())
-            && wmux_context
-                .surface_id
-                .as_deref()
-                .is_some_and(|value| !value.is_empty())
-        {
-            Some(generate_agent_session_token()?)
-        } else {
-            None
-        };
-        let mut pending_agent_session_token = self
-            .register_pending_agent_session_token(&wmux_context, agent_session_token.as_deref());
+        let agent_session_token = wmux_context
+            .enable_agent_session_reporting
+            .then(|| control_token.clone())
+            .flatten();
+        let mut pending_access_token =
+            self.register_pending_access_token(&wmux_context, control_token.as_deref());
         cmd.env("TERM", "xterm-256color");
         platform_pty::apply_wmux_env(
             &mut cmd,
             wmux_context.workspace_id.as_deref(),
             wmux_context.surface_id.as_deref(),
             agent_session_token.as_deref(),
+            control_token.as_deref(),
         );
 
         let mut child = pair
@@ -409,7 +426,7 @@ impl PtyManager {
                     tmux_state,
                     workspace_id: wmux_context.workspace_id,
                     surface_id: wmux_context.surface_id,
-                    agent_session_token,
+                    access_token: control_token,
                 },
             );
         }
@@ -428,7 +445,7 @@ impl PtyManager {
                 "default"
             }
         );
-        pending_agent_session_token.finish();
+        pending_access_token.finish();
 
         Ok(id)
     }
@@ -501,12 +518,7 @@ impl PtyManager {
         Ok(instance.child_pid)
     }
 
-    pub fn agent_session_token_matches(
-        &self,
-        workspace_id: &str,
-        surface_id: &str,
-        token: &str,
-    ) -> bool {
+    pub fn access_token_matches(&self, workspace_id: &str, surface_id: &str, token: &str) -> bool {
         if workspace_id.is_empty() || surface_id.is_empty() || token.is_empty() {
             return false;
         }
@@ -514,13 +526,13 @@ impl PtyManager {
         if instances.values().any(|instance| {
             instance.workspace_id.as_deref() == Some(workspace_id)
                 && instance.surface_id.as_deref() == Some(surface_id)
-                && instance.agent_session_token.as_deref() == Some(token)
+                && instance.access_token.as_deref() == Some(token)
         }) {
             return true;
         }
         drop(instances);
 
-        let pending = self.pending_agent_session_tokens.lock().unwrap();
+        let pending = self.pending_access_tokens.lock().unwrap();
         pending.iter().any(|entry| {
             entry.workspace_id == workspace_id
                 && entry.surface_id == surface_id
@@ -528,55 +540,59 @@ impl PtyManager {
         })
     }
 
-    fn register_pending_agent_session_token<'a>(
+    pub fn control_token_matches(&self, workspace_id: &str, surface_id: &str, token: &str) -> bool {
+        self.access_token_matches(workspace_id, surface_id, token)
+    }
+
+    fn register_pending_access_token<'a>(
         &'a self,
         context: &WmuxPtyContext,
         token: Option<&str>,
-    ) -> PendingAgentSessionTokenGuard<'a> {
+    ) -> PendingAccessTokenGuard<'a> {
         let Some(token) = token.filter(|value| !value.is_empty()) else {
-            return PendingAgentSessionTokenGuard::empty(self);
+            return PendingAccessTokenGuard::empty(self);
         };
         let Some(workspace_id) = context
             .workspace_id
             .as_deref()
             .filter(|value| !value.is_empty())
         else {
-            return PendingAgentSessionTokenGuard::empty(self);
+            return PendingAccessTokenGuard::empty(self);
         };
         let Some(surface_id) = context
             .surface_id
             .as_deref()
             .filter(|value| !value.is_empty())
         else {
-            return PendingAgentSessionTokenGuard::empty(self);
+            return PendingAccessTokenGuard::empty(self);
         };
-        let entry = PendingAgentSessionToken {
+        let entry = PendingAccessToken {
             workspace_id: workspace_id.to_string(),
             surface_id: surface_id.to_string(),
             token: token.to_string(),
         };
-        self.pending_agent_session_tokens
+        self.pending_access_tokens
             .lock()
             .unwrap()
             .push(entry.clone());
-        PendingAgentSessionTokenGuard {
+        PendingAccessTokenGuard {
             manager: self,
             entry: Some(entry),
         }
     }
 
-    fn remove_pending_agent_session_token(&self, entry: &PendingAgentSessionToken) {
-        let mut pending = self.pending_agent_session_tokens.lock().unwrap();
+    fn remove_pending_access_token(&self, entry: &PendingAccessToken) {
+        let mut pending = self.pending_access_tokens.lock().unwrap();
         pending.retain(|candidate| candidate != entry);
     }
 }
 
-struct PendingAgentSessionTokenGuard<'a> {
+struct PendingAccessTokenGuard<'a> {
     manager: &'a PtyManager,
-    entry: Option<PendingAgentSessionToken>,
+    entry: Option<PendingAccessToken>,
 }
 
-impl<'a> PendingAgentSessionTokenGuard<'a> {
+impl<'a> PendingAccessTokenGuard<'a> {
     fn empty(manager: &'a PtyManager) -> Self {
         Self {
             manager,
@@ -586,15 +602,15 @@ impl<'a> PendingAgentSessionTokenGuard<'a> {
 
     fn finish(&mut self) {
         if let Some(entry) = self.entry.take() {
-            self.manager.remove_pending_agent_session_token(&entry);
+            self.manager.remove_pending_access_token(&entry);
         }
     }
 }
 
-impl Drop for PendingAgentSessionTokenGuard<'_> {
+impl Drop for PendingAccessTokenGuard<'_> {
     fn drop(&mut self) {
         if let Some(entry) = self.entry.take() {
-            self.manager.remove_pending_agent_session_token(&entry);
+            self.manager.remove_pending_access_token(&entry);
         }
     }
 }
@@ -794,7 +810,7 @@ fn command_builder_from_argv(argv: &[String]) -> Result<CommandBuilder, String> 
     Ok(cb)
 }
 
-fn generate_agent_session_token() -> Result<String, String> {
+fn generate_access_token() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes).map_err(|e| format!("Random token error: {e}"))?;
     Ok(URL_SAFE_NO_PAD.encode(bytes))
@@ -817,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_agent_session_token_authorizes_before_instance_registration() {
+    fn pending_access_token_authorizes_before_instance_registration() {
         let manager = PtyManager::new();
         let context = WmuxPtyContext {
             workspace_id: Some("ws".to_string()),
@@ -826,11 +842,11 @@ mod tests {
         };
 
         {
-            let _pending = manager.register_pending_agent_session_token(&context, Some("token"));
-            assert!(manager.agent_session_token_matches("ws", "leaf", "token"));
-            assert!(!manager.agent_session_token_matches("ws", "leaf", "wrong"));
+            let _pending = manager.register_pending_access_token(&context, Some("token"));
+            assert!(manager.access_token_matches("ws", "leaf", "token"));
+            assert!(!manager.access_token_matches("ws", "leaf", "wrong"));
         }
 
-        assert!(!manager.agent_session_token_matches("ws", "leaf", "token"));
+        assert!(!manager.access_token_matches("ws", "leaf", "token"));
     }
 }

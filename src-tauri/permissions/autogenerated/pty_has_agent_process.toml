@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pty-has-agent-process"
+description = "Enables the pty_has_agent_process command without any pre-configured scope."
+commands.allow = ["pty_has_agent_process"]
+
+[[permission]]
+identifier = "deny-pty-has-agent-process"
+description = "Denies the pty_has_agent_process command without any pre-configured scope."
+commands.deny = ["pty_has_agent_process"]

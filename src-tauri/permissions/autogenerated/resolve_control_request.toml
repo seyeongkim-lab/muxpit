@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-control-request"
+description = "Enables the resolve_control_request command without any pre-configured scope."
+commands.allow = ["resolve_control_request"]
+
+[[permission]]
+identifier = "deny-resolve-control-request"
+description = "Denies the resolve_control_request command without any pre-configured scope."
+commands.deny = ["resolve_control_request"]

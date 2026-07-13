@@ -20,7 +20,7 @@ export const SHELL_HISTORY_HOOK =
   'add-zsh-hook preexec __wmux_preexec; ' +
   'fi; } 2>/dev/null && clear\r';
 
-const AI_CLI_COMMAND_PATTERN = /(?:^|[\s"'\/])(claude|codex|gemini|copilot)(?=$|[\s;"'])/i;
+const AI_CLI_COMMAND_PATTERN = /(?:^|[\s"'\/])(claude|codex|gemini|copilot|opencode)(?=$|[\s;"'])/i;
 
 export type ShellHistoryHookTarget =
   | "local-posix"

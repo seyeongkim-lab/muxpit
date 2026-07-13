@@ -5,7 +5,7 @@ A Windows-first terminal multiplexer built for working with AI coding agents ove
 wmux is a desktop app (Tauri + React + xterm.js) that gives you tmux-style
 workspaces, split panes, and prefix-key navigation on Windows — plus first-class
 support for driving remote sessions through `tmux -CC` (control mode) and for
-auto-launching AI CLIs (Claude Code, Codex, Gemini, Copilot) when you connect to
+auto-launching AI CLIs (Claude Code, Codex, Gemini, Copilot, OpenCode) when you connect to
 a host.
 
 ## Features
@@ -23,17 +23,16 @@ a host.
 - **Remote tmux control mode** — when a remote host has tmux 3.2+, sessions are
   wrapped in `tmux -CC` so windows/sessions are mirrored into the sidebar and
   survive disconnects (`persistMode`).
-- **AI CLI auto-split** — on SSH connect, wmux probes the remote for installed AI
-  CLIs and, when `claude` is present, auto-splits a pane running it. The per-pane
-  toolbar can launch the other detected CLIs.
+- **AI CLI auto-split** — on SSH connect, wmux probes the remote for Claude Code, Codex, Gemini, Copilot, and OpenCode. It can start Claude automatically, and the per-pane toolbar can launch any detected CLI from the source pane's current directory.
 - **Remote session monitor** — a sidebar panel shows remote system stats (CPU,
   memory, network throughput via uPlot charts) and lists/resumes Claude Code
   sessions on the connected host.
-- **Notifications** — in-app panel plus native OS toasts; can be triggered from
-  scripts via the `wmux-cli` companion CLI (e.g. `wmux-cli notify "Build done"`).
-- **Quality-of-life** — embedded browser pane, clipboard-image paste into SSH
-  panes, scrollback/history panel, session auto-save & restore, customizable
-  themes and fonts (with Korean/Hangul font fallback).
+- **Agent inbox** — hooks for Claude Code, Codex, Gemini, Copilot, and OpenCode report working, waiting, done, and error states. Selecting an item returns to its workspace and pane.
+- **Pane control CLI** — local and SSH processes can identify, list, split, focus, send text to, and read visible text from terminal panes. SSH panes use an authenticated loopback reverse-forward relay.
+- **Session resume and launch profiles** — detected sessions can be resumed in place, while user-local profiles save and recreate terminal and browser layouts with their commands, URLs, and working directories.
+- **Native subagent panes** — `wmux-cli subagent spawn` opens a child process next to its parent pane and tracks it in the inbox.
+- **Scriptable browser panes** — native child webviews support navigation, current URL, read-only page snapshots, console/error capture, and macOS screenshots through the control CLI. Arbitrary JavaScript execution is not exposed.
+- **Quality-of-life** — clipboard-image paste into SSH panes, scrollback/history, session auto-save and restore, customizable themes, and Korean/Hangul font fallback.
 
 ## Tech stack
 
@@ -84,7 +83,7 @@ a host.
 │       ├── sysinfo.rs             # local workspace info (git, ports, shell ctx)
 │       └── ipc.rs                 # named-pipe / unix-socket server for the CLI
 ├── wmux-cli/                  # standalone CLI that talks to the app over IPC
-│   └── src/main.rs            # `wmux-cli ping | notify | ls`
+│   └── src/main.rs            # notifications, hooks, workspace and pane control
 └── docs/                      # design plans
 ```
 
@@ -122,7 +121,20 @@ WMUX_CLI_TARGET=x86_64-pc-windows-msvc pnpm build:cli
 wmux-cli ping
 wmux-cli notify "Build done" "All tests passed"
 wmux-cli ls
+wmux-cli identify
+wmux-cli split --direction horizontal --command codex
+wmux-cli subagent spawn --command "codex exec 'run tests'" --label tests
+wmux-cli hooks setup --yes
+wmux-cli browser open https://example.com
+wmux-cli browser navigate https://example.com
+wmux-cli browser snapshot
+wmux-cli send-text --enter "npm test"
+wmux-cli read-screen --rows 40
 ```
+
+Pane control commands require the `WMUX_CONTROL_TOKEN` injected into wmux terminal processes. SSH panes receive a remote helper and connect to the same allowlisted control API through a per-pane loopback reverse forward. The relay does not bind to a public interface.
+
+`wmux-cli hooks setup --yes` installs wmux-owned hook entries for supported CLIs without replacing unrelated user hooks. Installed hooks do nothing outside a wmux pane. Run the setup command on a remote host too when its agent lifecycle events should use the SSH relay and appear in the inbox.
 
 Release bundles include the companion CLI:
 

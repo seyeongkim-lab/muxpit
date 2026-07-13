@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-browser-console-logs"
+description = "Enables the browser_console_logs command without any pre-configured scope."
+commands.allow = ["browser_console_logs"]
+
+[[permission]]
+identifier = "deny-browser-console-logs"
+description = "Denies the browser_console_logs command without any pre-configured scope."
+commands.deny = ["browser_console_logs"]

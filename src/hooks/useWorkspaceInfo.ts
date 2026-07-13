@@ -70,12 +70,15 @@ const sshInfo = (prev?: WorkspaceInfo): WorkspaceInfo => ({
 
 interface WorkspaceInfoState {
   info: Record<string, WorkspaceInfo>; // keyed by workspace id
+  leafCwds: Record<string, Record<string, string>>; // keyed by workspace id, then leaf id
   setInfo: (wsId: string, info: WorkspaceInfo) => void;
   patchInfo: (wsId: string, patch: Partial<WorkspaceInfo>) => void;
+  setLeafCwd: (wsId: string, leafId: string, cwd: string) => void;
 }
 
 export const useWorkspaceInfoStore = create<WorkspaceInfoState>((set) => ({
   info: {},
+  leafCwds: {},
   setInfo: (wsId, info) =>
     set((s) => ({ info: { ...s.info, [wsId]: info } })),
   patchInfo: (wsId, patch) =>
@@ -85,6 +88,17 @@ export const useWorkspaceInfoStore = create<WorkspaceInfoState>((set) => ({
         [wsId]: { ...emptyInfo(s.info[wsId]), ...s.info[wsId], ...patch },
       },
     })),
+  setLeafCwd: (wsId, leafId, cwd) =>
+    set((s) => {
+      const workspaceCwds = s.leafCwds[wsId] ?? {};
+      if (workspaceCwds[leafId] === cwd) return s;
+      return {
+        leafCwds: {
+          ...s.leafCwds,
+          [wsId]: { ...workspaceCwds, [leafId]: cwd },
+        },
+      };
+    }),
 }));
 
 const findFirstTerminalLeaf = (node: LayoutNode): LeafNode | null => {

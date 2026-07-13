@@ -1,8 +1,11 @@
+mod browser;
+mod control;
 mod file_tree;
 mod monitor;
 mod pasted_image;
 mod platform;
 mod pty;
+mod remote_control;
 mod remote_monitor;
 mod ssh_command;
 mod tmux_cc;
@@ -20,7 +23,7 @@ use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tauri::{ipc::Channel, AppHandle, State};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 #[tauri::command]
@@ -216,6 +219,16 @@ fn request_session_content(
     request_id: String,
 ) -> Result<(), String> {
     state.request_session_content(monitor_id.as_deref(), project, session_id, request_id)
+}
+
+#[tauri::command]
+fn resolve_control_request(
+    state: State<'_, control::ControlBroker>,
+    request_id: String,
+    data: Option<serde_json::Value>,
+    error: Option<String>,
+) -> Result<(), String> {
+    state.resolve(&request_id, data, error)
 }
 
 #[tauri::command]
@@ -415,6 +428,19 @@ async fn tmux_list_sessions(
 }
 
 #[tauri::command]
+async fn tmux_active_pane_cwd(
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+    session: String,
+) -> Result<Option<String>, String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tmux_remote::active_pane_cwd(&ssh, &session))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
 async fn tmux_switch_client(
     ssh_command: Option<String>,
     ssh_connection: Option<SshCommand>,
@@ -503,6 +529,7 @@ pub fn run() {
         .manage(PtyEventChannel::default())
         .manage(MonitorManager::new())
         .manage(WorkspaceRegistry::default())
+        .manage(control::ControlBroker::default())
         .invoke_handler(tauri::generate_handler![
             spawn_pty,
             spawn_pty_tmux_cc,
@@ -524,6 +551,7 @@ pub fn run() {
             save_image_locally,
             push_image_to_remote,
             tmux_list_sessions,
+            tmux_active_pane_cwd,
             tmux_switch_client,
             tmux_new_session,
             tmux_kill_session,
@@ -531,8 +559,19 @@ pub fn run() {
             install_cli_symlink,
             set_workspace_list,
             request_session_content,
+            resolve_control_request,
             start_monitor,
             stop_monitor,
+            browser::browser_create,
+            browser::browser_update_bounds,
+            browser::browser_set_visible,
+            browser::browser_close,
+            browser::browser_navigate,
+            browser::browser_reload,
+            browser::browser_current_url,
+            browser::browser_snapshot,
+            browser::browser_console_logs,
+            browser::browser_screenshot,
         ])
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -558,6 +597,11 @@ pub fn run() {
             start_heartbeat();
             // Start local IPC server for wmux-cli and shell hooks.
             platform::ipc::start_ipc_server(app.handle().clone());
+            let relay = platform::ipc::start_control_relay(app.handle().clone());
+            if let Some(port) = relay.port() {
+                log::info!("SSH control relay listening on 127.0.0.1:{port}");
+            }
+            app.manage(relay);
             Ok(())
         })
         .run(tauri::generate_context!())

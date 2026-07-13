@@ -86,7 +86,12 @@ const GridCell = ({ workspace, isActive }: GridCellProps) => {
 
       {/* Live terminal — fully interactive */}
       <div style={styles.terminalArea}>
-        <SplitPane node={workspace.layout} workspaceId={workspace.id} />
+        <SplitPane
+          node={workspace.layout}
+          workspaceId={workspace.id}
+          browserVisible={false}
+          createBrowserWebview={false}
+        />
       </div>
     </div>
   );

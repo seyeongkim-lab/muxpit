@@ -27,7 +27,7 @@ export type SplitDirection = "horizontal" | "vertical";
 // Known AI CLI tools that we surface as a per-pane toolbar. The list is closed so
 // callers can switch on it; remote install detection (`check_remote_clis`) decides
 // which ones are actually offered.
-export type AiKind = "claude" | "codex" | "gemini" | "copilot";
+export type AiKind = "claude" | "codex" | "gemini" | "copilot" | "opencode";
 
 export interface SplitNode {
   type: "split";
@@ -57,7 +57,21 @@ export interface LeafNode {
   aiKind?: AiKind;
   aiSshTarget?: string;
   lastCwd?: string;
+  profileCwd?: string;
+  agentRole?: "subagent";
+  parentSurfaceId?: string;
+  agentLabel?: string;
   agentSession?: AgentSessionBinding;
+}
+
+export interface LeafLaunchMetadata {
+  aiKind?: AiKind;
+  aiSshTarget?: string;
+  sshConnection?: SshConnection;
+  sshRemoteCommand?: string;
+  agentRole?: "subagent";
+  parentSurfaceId?: string;
+  agentLabel?: string;
 }
 
 export interface BrowserNode {
@@ -123,6 +137,10 @@ interface SavedLeaf {
   aiKind?: AiKind;
   aiSshTarget?: string;
   lastCwd?: string;
+  profileCwd?: string;
+  agentRole?: "subagent";
+  parentSurfaceId?: string;
+  agentLabel?: string;
   agentSession?: AgentSessionBinding;
 }
 
@@ -182,6 +200,7 @@ interface WorkspaceState {
   activeId: string | null;
 
   addWorkspace: (name?: string, command?: string, tmuxSession?: string, sshConnection?: SshConnection, sshRemoteCommand?: string) => string;
+  addWorkspaceWithLayout: (name: string, layout: LayoutNode, focusedLeafId: string) => string;
   removeWorkspace: (id: string) => void;
   setActive: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
@@ -189,7 +208,8 @@ interface WorkspaceState {
   setPtyId: (workspaceId: string, leafId: string, ptyId: number) => void;
 
   resetWorkspace: (id: string) => void;
-  openBrowser: (workspaceId: string, leafId: string, url: string) => void;
+  openBrowser: (workspaceId: string, leafId: string, url: string) => string;
+  setBrowserUrl: (workspaceId: string, browserId: string, url: string) => void;
 
   // Split operations
   splitLeaf: (workspaceId: string, leafId: string, direction: SplitDirection) => string;
@@ -198,7 +218,7 @@ interface WorkspaceState {
     leafId: string,
     direction: SplitDirection,
     command: string,
-    aiMeta?: { aiKind: AiKind; aiSshTarget?: string; sshConnection?: SshConnection; sshRemoteCommand?: string },
+    aiMeta?: LeafLaunchMetadata,
   ) => string;
   /**
    * Split the focused leaf and attach the new pane to a remote tmux session via
@@ -495,7 +515,7 @@ const isDefaultWorkspaceName = (name: string | undefined): boolean =>
 // Infer AI CLI metadata from a free-form ssh command stored in `leaf.command`.
 // Used by `restoreSession` so leaves saved by a pre-aiKind build still get a
 // toolbar and don't trigger a duplicate auto-split on first launch after upgrade.
-const AI_KIND_PATTERN = /(?:^|['" /])(claude|codex|gemini|copilot)\b/;
+const AI_KIND_PATTERN = /(?:^|['" /])(claude|codex|gemini|copilot|opencode)\b/;
 const inferAiMetaFromCommand = (
   command: string | undefined,
 ): { aiKind: AiKind; aiSshTarget: string } | undefined => {
@@ -602,6 +622,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return wsId;
   },
 
+  addWorkspaceWithLayout: (name, layout, focusedLeafId) => {
+    const wsId = genId();
+    const workspace: Workspace = {
+      id: wsId,
+      name,
+      nameSource: "manual",
+      layout,
+      focusedLeafId,
+    };
+    set((state) => ({
+      workspaces: [...state.workspaces, workspace],
+      activeId: wsId,
+    }));
+    return wsId;
+  },
+
   resetWorkspace: (id: string) => {
     const newLeafId = genId();
     set((s) => ({
@@ -640,6 +676,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         };
         return { ...w, layout: replaceNode(w.layout, leafId, splitNode) };
       }),
+    }));
+    return browserId;
+  },
+
+  setBrowserUrl: (workspaceId, browserId, url) => {
+    set((state) => ({
+      workspaces: state.workspaces.map((workspace) =>
+        workspace.id === workspaceId
+          ? {
+              ...workspace,
+              layout: replaceNode(workspace.layout, browserId, {
+                type: "browser",
+                id: browserId,
+                url,
+              }),
+            }
+          : workspace,
+      ),
     }));
   },
 
@@ -836,6 +890,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               sshRemoteCommand: aiMeta?.sshRemoteCommand,
               aiKind: aiMeta?.aiKind,
               aiSshTarget: aiMeta?.aiSshTarget,
+              agentRole: aiMeta?.agentRole,
+              parentSurfaceId: aiMeta?.parentSurfaceId,
+              agentLabel: aiMeta?.agentLabel,
             },
           ],
         };
@@ -1118,7 +1175,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           agentSession
             ? agentSession.baseCommand
             : node.command;
-        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd, agentSession };
+        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd, profileCwd: node.profileCwd, agentRole: node.agentRole, parentSurfaceId: node.parentSurfaceId, agentLabel: node.agentLabel, agentSession };
       }
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, sshCommand: node.sshCommand, sshConnection: node.sshConnection, monitorId: node.monitorId };
@@ -1234,6 +1291,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             aiKind: restorePlatformBoundCommands ? node.aiKind ?? inferred?.aiKind : undefined,
             aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
             lastCwd: restoreCwd && isLocalRestorableLeaf(candidate) ? node.lastCwd : undefined,
+            profileCwd: node.profileCwd,
+            agentRole: node.agentRole,
+            parentSurfaceId: node.parentSurfaceId,
+            agentLabel: node.agentLabel,
             agentSession,
           };
         }

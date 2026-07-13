@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remote-read-dir"
+description = "Enables the remote_read_dir command without any pre-configured scope."
+commands.allow = ["remote_read_dir"]
+
+[[permission]]
+identifier = "deny-remote-read-dir"
+description = "Denies the remote_read_dir command without any pre-configured scope."
+commands.deny = ["remote_read_dir"]

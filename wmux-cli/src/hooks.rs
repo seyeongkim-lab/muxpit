@@ -9,17 +9,29 @@ use std::path::{Path, PathBuf};
 enum Agent {
     Codex,
     Claude,
+    Gemini,
+    Copilot,
+    OpenCode,
 }
 
 impl Agent {
-    fn all() -> [Agent; 2] {
-        [Agent::Codex, Agent::Claude]
+    fn all() -> [Agent; 5] {
+        [
+            Agent::Codex,
+            Agent::Claude,
+            Agent::Gemini,
+            Agent::Copilot,
+            Agent::OpenCode,
+        ]
     }
 
     fn parse(raw: &str) -> Option<Agent> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "codex" => Some(Agent::Codex),
             "claude" | "claude-code" | "claudecode" => Some(Agent::Claude),
+            "gemini" | "gemini-cli" => Some(Agent::Gemini),
+            "copilot" | "github-copilot" => Some(Agent::Copilot),
+            "opencode" | "open-code" => Some(Agent::OpenCode),
             _ => None,
         }
     }
@@ -28,6 +40,9 @@ impl Agent {
         match self {
             Agent::Codex => "codex",
             Agent::Claude => "claude",
+            Agent::Gemini => "gemini",
+            Agent::Copilot => "copilot",
+            Agent::OpenCode => "opencode",
         }
     }
 
@@ -35,6 +50,9 @@ impl Agent {
         match self {
             Agent::Codex => "Codex",
             Agent::Claude => "Claude Code",
+            Agent::Gemini => "Gemini CLI",
+            Agent::Copilot => "GitHub Copilot CLI",
+            Agent::OpenCode => "OpenCode",
         }
     }
 
@@ -42,6 +60,9 @@ impl Agent {
         match self {
             Agent::Codex => "codex",
             Agent::Claude => "claude",
+            Agent::Gemini => "gemini",
+            Agent::Copilot => "copilot",
+            Agent::OpenCode => "opencode",
         }
     }
 
@@ -57,6 +78,15 @@ impl Agent {
                 .ok_or_else(|| {
                     "Could not resolve CLAUDE_CONFIG_DIR or a home directory".to_string()
                 }),
+            Agent::Gemini => home_dir()
+                .map(|home| home.join(".gemini"))
+                .ok_or_else(|| "Could not resolve a home directory".to_string()),
+            Agent::Copilot => home_dir()
+                .map(|home| home.join(".copilot"))
+                .ok_or_else(|| "Could not resolve a home directory".to_string()),
+            Agent::OpenCode => home_dir()
+                .map(|home| home.join(".config").join("opencode"))
+                .ok_or_else(|| "Could not resolve a home directory".to_string()),
         }
     }
 
@@ -64,6 +94,9 @@ impl Agent {
         match self {
             Agent::Codex => "hooks.json",
             Agent::Claude => "settings.json",
+            Agent::Gemini => "settings.json",
+            Agent::Copilot => "hooks/wmux.json",
+            Agent::OpenCode => "plugins/wmux.js",
         }
     }
 
@@ -71,6 +104,9 @@ impl Agent {
         match self {
             Agent::Codex => "WMUX_CODEX_HOOKS_DISABLED",
             Agent::Claude => "WMUX_CLAUDE_HOOKS_DISABLED",
+            Agent::Gemini => "WMUX_GEMINI_HOOKS_DISABLED",
+            Agent::Copilot => "WMUX_COPILOT_HOOKS_DISABLED",
+            Agent::OpenCode => "WMUX_OPENCODE_HOOKS_DISABLED",
         }
     }
 }
@@ -83,6 +119,7 @@ enum AgentHookEvent {
     PreToolUse,
     PermissionRequest,
     Notification,
+    ErrorOccurred,
     SessionEnd,
     SubagentStop,
 }
@@ -100,6 +137,9 @@ impl AgentHookEvent {
                 Some(Self::PermissionRequest)
             }
             "notification" | "notify" => Some(Self::Notification),
+            "erroroccurred" | "error-occurred" | "error_occurred" | "error" => {
+                Some(Self::ErrorOccurred)
+            }
             "sessionend" | "session-end" | "session_end" => Some(Self::SessionEnd),
             "subagentstop" | "subagent-stop" | "subagent_stop" => Some(Self::SubagentStop),
             _ => None,
@@ -114,6 +154,7 @@ impl AgentHookEvent {
             Self::PreToolUse => "PreToolUse",
             Self::PermissionRequest => "PermissionRequest",
             Self::Notification => "Notification",
+            Self::ErrorOccurred => "ErrorOccurred",
             Self::SessionEnd => "SessionEnd",
             Self::SubagentStop => "SubagentStop",
         }
@@ -148,6 +189,34 @@ const CLAUDE_INSTALLED_HOOK_EVENTS: &[AgentHookEvent] = &[
     AgentHookEvent::SessionEnd,
 ];
 
+const GEMINI_HOOK_EVENTS: &[AgentHookEvent] = &[
+    AgentHookEvent::SessionStart,
+    AgentHookEvent::UserPromptSubmit,
+    AgentHookEvent::Stop,
+    AgentHookEvent::Notification,
+    AgentHookEvent::SessionEnd,
+];
+
+const COPILOT_HOOK_EVENTS: &[AgentHookEvent] = &[
+    AgentHookEvent::SessionStart,
+    AgentHookEvent::UserPromptSubmit,
+    AgentHookEvent::Stop,
+    AgentHookEvent::PermissionRequest,
+    AgentHookEvent::Notification,
+    AgentHookEvent::ErrorOccurred,
+    AgentHookEvent::SessionEnd,
+    AgentHookEvent::SubagentStop,
+];
+
+const OPENCODE_HOOK_EVENTS: &[AgentHookEvent] = &[
+    AgentHookEvent::SessionStart,
+    AgentHookEvent::UserPromptSubmit,
+    AgentHookEvent::Stop,
+    AgentHookEvent::PermissionRequest,
+    AgentHookEvent::Notification,
+    AgentHookEvent::SessionEnd,
+];
+
 trait AgentHookAdapter: Sync {
     fn known_events(&self) -> &'static [AgentHookEvent];
     fn installed_events(&self) -> &'static [AgentHookEvent];
@@ -168,6 +237,9 @@ struct HookNotification {
 
 struct CodexHookAdapter;
 struct ClaudeHookAdapter;
+struct GeminiHookAdapter;
+struct CopilotHookAdapter;
+struct OpenCodeHookAdapter;
 
 impl AgentHookAdapter for CodexHookAdapter {
     fn known_events(&self) -> &'static [AgentHookEvent] {
@@ -179,15 +251,11 @@ impl AgentHookAdapter for CodexHookAdapter {
     }
 
     fn install(&self, yes: bool) -> Result<(), String> {
-        install_agent_config(Agent::Codex, self.installed_events(), yes)?;
-        let config_dir = Agent::Codex.config_dir()?;
-        install_codex_hooks_feature(&config_dir.join("config.toml"), yes)
+        install_agent_config(Agent::Codex, self.installed_events(), yes)
     }
 
     fn uninstall(&self, yes: bool) -> Result<(), String> {
-        uninstall_agent_config(Agent::Codex, yes)?;
-        let config_dir = Agent::Codex.config_dir()?;
-        uninstall_codex_hooks_feature(&config_dir.join("config.toml"), yes)
+        uninstall_agent_config(Agent::Codex, yes)
     }
 
     fn handle_event(&self, event: AgentHookEvent, payload: &Value) -> HookOutcome {
@@ -259,13 +327,111 @@ impl AgentHookAdapter for ClaudeHookAdapter {
     }
 }
 
+fn basic_agent_outcome(title: &'static str, event: AgentHookEvent, payload: &Value) -> HookOutcome {
+    let body = match event {
+        AgentHookEvent::Stop | AgentHookEvent::SubagentStop => {
+            payload_string(payload, &["message", "summary", "status"])
+                .or_else(|| Some("Prompt completed".to_string()))
+        }
+        AgentHookEvent::ErrorOccurred => {
+            payload_string(payload, &["message", "error", "reason", "status"])
+                .or_else(|| Some("Agent error".to_string()))
+        }
+        AgentHookEvent::PermissionRequest => {
+            payload_string(payload, &["tool_name", "toolName", "command", "message"])
+                .map(|value| format!("Permission requested: {value}"))
+                .or_else(|| Some("Permission requested".to_string()))
+        }
+        AgentHookEvent::Notification => {
+            payload_string(payload, &["message", "body", "text", "status"])
+                .or_else(|| Some("Needs attention".to_string()))
+        }
+        _ => None,
+    };
+    HookOutcome {
+        notification: body.map(|body| HookNotification { title, body }),
+    }
+}
+
+impl AgentHookAdapter for GeminiHookAdapter {
+    fn known_events(&self) -> &'static [AgentHookEvent] {
+        GEMINI_HOOK_EVENTS
+    }
+
+    fn installed_events(&self) -> &'static [AgentHookEvent] {
+        GEMINI_HOOK_EVENTS
+    }
+
+    fn install(&self, yes: bool) -> Result<(), String> {
+        install_agent_config(Agent::Gemini, self.installed_events(), yes)
+    }
+
+    fn uninstall(&self, yes: bool) -> Result<(), String> {
+        uninstall_agent_config(Agent::Gemini, yes)
+    }
+
+    fn handle_event(&self, event: AgentHookEvent, payload: &Value) -> HookOutcome {
+        basic_agent_outcome("Gemini CLI", event, payload)
+    }
+}
+
+impl AgentHookAdapter for CopilotHookAdapter {
+    fn known_events(&self) -> &'static [AgentHookEvent] {
+        COPILOT_HOOK_EVENTS
+    }
+
+    fn installed_events(&self) -> &'static [AgentHookEvent] {
+        COPILOT_HOOK_EVENTS
+    }
+
+    fn install(&self, yes: bool) -> Result<(), String> {
+        install_copilot_hooks(yes)
+    }
+
+    fn uninstall(&self, yes: bool) -> Result<(), String> {
+        uninstall_copilot_hooks(yes)
+    }
+
+    fn handle_event(&self, event: AgentHookEvent, payload: &Value) -> HookOutcome {
+        basic_agent_outcome("GitHub Copilot CLI", event, payload)
+    }
+}
+
+impl AgentHookAdapter for OpenCodeHookAdapter {
+    fn known_events(&self) -> &'static [AgentHookEvent] {
+        OPENCODE_HOOK_EVENTS
+    }
+
+    fn installed_events(&self) -> &'static [AgentHookEvent] {
+        OPENCODE_HOOK_EVENTS
+    }
+
+    fn install(&self, yes: bool) -> Result<(), String> {
+        install_opencode_plugin(yes)
+    }
+
+    fn uninstall(&self, yes: bool) -> Result<(), String> {
+        uninstall_managed_file(Agent::OpenCode, yes)
+    }
+
+    fn handle_event(&self, event: AgentHookEvent, payload: &Value) -> HookOutcome {
+        basic_agent_outcome("OpenCode", event, payload)
+    }
+}
+
 static CODEX_ADAPTER: CodexHookAdapter = CodexHookAdapter;
 static CLAUDE_ADAPTER: ClaudeHookAdapter = ClaudeHookAdapter;
+static GEMINI_ADAPTER: GeminiHookAdapter = GeminiHookAdapter;
+static COPILOT_ADAPTER: CopilotHookAdapter = CopilotHookAdapter;
+static OPENCODE_ADAPTER: OpenCodeHookAdapter = OpenCodeHookAdapter;
 
 fn agent_adapter(agent: Agent) -> &'static dyn AgentHookAdapter {
     match agent {
         Agent::Codex => &CODEX_ADAPTER,
         Agent::Claude => &CLAUDE_ADAPTER,
+        Agent::Gemini => &GEMINI_ADAPTER,
+        Agent::Copilot => &COPILOT_ADAPTER,
+        Agent::OpenCode => &OPENCODE_ADAPTER,
     }
 }
 
@@ -307,35 +473,39 @@ pub(crate) fn handle_hooks_command(args: &[String]) -> Result<(), String> {
 }
 
 fn print_hooks_help() {
-    let codex_events = event_names_for_help(agent_adapter(Agent::Codex).known_events());
-    let claude_events = event_names_for_help(agent_adapter(Agent::Claude).known_events());
+    let agents = Agent::all()
+        .iter()
+        .map(|agent| agent.name())
+        .collect::<Vec<_>>()
+        .join("|");
+    let event_lines = Agent::all()
+        .iter()
+        .map(|agent| {
+            let events = agent_adapter(*agent)
+                .known_events()
+                .iter()
+                .map(|event| event.name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("  {}: {events}", agent.name())
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     println!(
         "wmux-cli hooks - install and run agent notification hooks
 
 Usage:
-  wmux-cli hooks setup [codex|claude] [--agent <agent>] [--yes|-y]
-  wmux-cli hooks uninstall [codex|claude] [--agent <agent>] [--yes|-y]
-  wmux-cli hooks <codex|claude> install [--yes|-y]
-  wmux-cli hooks <codex|claude> uninstall [--yes|-y]
-  wmux-cli hooks <codex|claude> <event>
+  wmux-cli hooks setup [{agents}] [--agent <agent>] [--yes|-y]
+  wmux-cli hooks uninstall [{agents}] [--agent <agent>] [--yes|-y]
+  wmux-cli hooks <agent> install [--yes|-y]
+  wmux-cli hooks <agent> uninstall [--yes|-y]
+  wmux-cli hooks <agent> <event>
 
-Codex events:
-  {codex_events}
-
-Claude session and notification hooks are installed for supported events.
-Known Claude events:
-  {claude_events}
+Known events:
+{event_lines}
 
 Installed hooks no-op unless WMUX_SURFACE_ID is present."
     );
-}
-
-fn event_names_for_help(events: &[AgentHookEvent]) -> String {
-    events
-        .iter()
-        .map(|event| event.name())
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 #[derive(Default)]
@@ -493,6 +663,241 @@ fn uninstall_agent_config(agent: Agent, yes: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn copilot_hooks_config() -> Value {
+    let current_exe = env::current_exe().ok();
+    let event_map = [
+        ("sessionStart", AgentHookEvent::SessionStart),
+        ("userPromptSubmitted", AgentHookEvent::UserPromptSubmit),
+        ("agentStop", AgentHookEvent::Stop),
+        ("permissionRequest", AgentHookEvent::PermissionRequest),
+        ("notification", AgentHookEvent::Notification),
+        ("errorOccurred", AgentHookEvent::ErrorOccurred),
+        ("sessionEnd", AgentHookEvent::SessionEnd),
+        ("subagentStop", AgentHookEvent::SubagentStop),
+    ];
+    let mut hooks = Map::new();
+    for (event_name, event) in event_map {
+        let mut hook = Map::new();
+        hook.insert("type".to_string(), json!("command"));
+        #[cfg(not(windows))]
+        hook.insert(
+            "bash".to_string(),
+            json!(hook_command(
+                Agent::Copilot.name(),
+                Agent::Copilot.disabled_env(),
+                event.name(),
+                current_exe.as_deref(),
+            )),
+        );
+        #[cfg(windows)]
+        hook.insert(
+            "powershell".to_string(),
+            json!(hook_command(
+                Agent::Copilot.name(),
+                Agent::Copilot.disabled_env(),
+                event.name(),
+                current_exe.as_deref(),
+            )),
+        );
+        hook.insert("timeoutSec".to_string(), json!(5));
+        hooks.insert(event_name.to_string(), json!([Value::Object(hook)]));
+    }
+    json!({ "version": 1, "hooks": hooks })
+}
+
+fn install_copilot_hooks(yes: bool) -> Result<(), String> {
+    let path = Agent::Copilot
+        .config_dir()?
+        .join(Agent::Copilot.config_file());
+    let config = merge_copilot_hooks(read_json_object(&path)?)?;
+    write_json_if_changed(&path, &config, yes, "GitHub Copilot CLI hooks")
+}
+
+fn merge_copilot_hooks(mut config: Map<String, Value>) -> Result<Map<String, Value>, String> {
+    if let Some(version) = config.get("version") {
+        if version != &json!(1) {
+            return Err("Existing GitHub Copilot CLI hook version is not 1".to_string());
+        }
+    }
+
+    let mut hooks = take_copilot_hooks_object(&mut config)?;
+    remove_owned_copilot_hook_values(&mut hooks)?;
+
+    let Value::Object(mut generated) = copilot_hooks_config() else {
+        unreachable!();
+    };
+    let generated_hooks = take_copilot_hooks_object(&mut generated)?;
+    for (event, value) in generated_hooks {
+        let Value::Array(mut generated_entries) = value else {
+            unreachable!();
+        };
+        let mut entries = match hooks.remove(&event) {
+            Some(Value::Array(entries)) => entries,
+            Some(_) => return Err(format!("Existing Copilot hook {event} is not an array")),
+            None => Vec::new(),
+        };
+        entries.append(&mut generated_entries);
+        hooks.insert(event, Value::Array(entries));
+    }
+
+    config.insert("version".to_string(), json!(1));
+    config.insert("hooks".to_string(), Value::Object(hooks));
+    Ok(config)
+}
+
+fn uninstall_copilot_hooks(yes: bool) -> Result<(), String> {
+    let path = Agent::Copilot
+        .config_dir()?
+        .join(Agent::Copilot.config_file());
+    if !path.exists() {
+        println!("No GitHub Copilot CLI hooks found at {}", path.display());
+        return Ok(());
+    }
+
+    let mut config = read_json_object(&path)?;
+    if !remove_owned_copilot_hooks(&mut config)? {
+        println!("Removed 0 wmux hook(s) from {}", path.display());
+        return Ok(());
+    }
+    write_json_if_changed(&path, &config, yes, "GitHub Copilot CLI hooks")
+}
+
+fn take_copilot_hooks_object(
+    config: &mut Map<String, Value>,
+) -> Result<Map<String, Value>, String> {
+    match config.remove("hooks") {
+        Some(Value::Object(hooks)) => Ok(hooks),
+        Some(_) => Err("Existing Copilot hooks value is not a JSON object".to_string()),
+        None => Ok(Map::new()),
+    }
+}
+
+fn remove_owned_copilot_hook_values(hooks: &mut Map<String, Value>) -> Result<bool, String> {
+    let mut removed = false;
+    for (event, value) in hooks.iter_mut() {
+        let Value::Array(entries) = value else {
+            return Err(format!("Existing Copilot hook {event} is not an array"));
+        };
+        let before = entries.len();
+        entries.retain(|entry| !is_owned_copilot_hook(entry));
+        removed |= entries.len() != before;
+    }
+    hooks.retain(|_, value| value.as_array().is_some_and(|entries| !entries.is_empty()));
+    Ok(removed)
+}
+
+fn remove_owned_copilot_hooks(config: &mut Map<String, Value>) -> Result<bool, String> {
+    let mut hooks = take_copilot_hooks_object(config)?;
+    let removed = remove_owned_copilot_hook_values(&mut hooks)?;
+    if !hooks.is_empty() {
+        config.insert("hooks".to_string(), Value::Object(hooks));
+    }
+    Ok(removed)
+}
+
+fn is_owned_copilot_hook(value: &Value) -> bool {
+    ["bash", "powershell"].iter().any(|key| {
+        value
+            .get(*key)
+            .and_then(Value::as_str)
+            .is_some_and(|command| command.contains("hooks copilot "))
+    })
+}
+
+const OPENCODE_PLUGIN_MARKER: &str = "wmux-opencode-plugin";
+
+fn opencode_plugin_source(binary: &Path) -> String {
+    let binary = serde_json::to_string(binary.to_string_lossy().as_ref())
+        .unwrap_or_else(|_| "\"wmux-cli\"".to_string());
+    format!(
+        r#"// {OPENCODE_PLUGIN_MARKER}
+import {{ spawn }} from "node:child_process"
+
+const wmuxCli = {binary}
+
+const report = (hookEvent, payload) => new Promise((resolve) => {{
+  const child = spawn(wmuxCli, ["hooks", "opencode", hookEvent], {{
+    env: process.env,
+    stdio: ["pipe", "ignore", "ignore"],
+  }})
+  child.on("error", () => resolve())
+  child.on("close", () => resolve())
+  child.stdin?.end(JSON.stringify(payload))
+}})
+
+export const WmuxPlugin = async ({{ directory }}) => ({{
+  event: async ({{ event }}) => {{
+    const properties = event.properties ?? {{}}
+    const info = properties.info ?? {{}}
+    const sessionId = info.id ?? properties.sessionID
+    if (!sessionId) return
+
+    const payload = {{ sessionId, cwd: info.directory ?? directory }}
+    if (event.type === "session.created") await report("SessionStart", payload)
+    if (event.type === "session.deleted") await report("SessionEnd", payload)
+    if (event.type === "session.idle") await report("Stop", {{ ...payload, message: "done" }})
+    if (event.type === "session.error") await report("Notification", {{ ...payload, message: "error" }})
+    if (event.type === "permission.asked") {{
+      await report("PermissionRequest", {{ ...payload, message: properties.title ?? "Permission requested" }})
+    }}
+    if (event.type === "session.status" && properties.status?.type === "busy") {{
+      await report("UserPromptSubmit", {{ ...payload, prompt: "working" }})
+    }}
+  }},
+}})
+"#
+    )
+}
+
+fn install_opencode_plugin(yes: bool) -> Result<(), String> {
+    let binary = env::current_exe().map_err(|e| format!("Could not resolve wmux-cli: {e}"))?;
+    let path = Agent::OpenCode
+        .config_dir()?
+        .join(Agent::OpenCode.config_file());
+    write_text_if_changed(
+        &path,
+        &opencode_plugin_source(&binary),
+        yes,
+        "OpenCode plugin",
+    )
+}
+
+fn uninstall_managed_file(agent: Agent, yes: bool) -> Result<(), String> {
+    let path = agent.config_dir()?.join(agent.config_file());
+    if !path.exists() {
+        println!(
+            "No {} integration found at {}",
+            agent.display_name(),
+            path.display()
+        );
+        return Ok(());
+    }
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
+    let marker = match agent {
+        Agent::Copilot => "wmux-cli hooks copilot",
+        Agent::OpenCode => OPENCODE_PLUGIN_MARKER,
+        _ => return Err("Managed file uninstall is not supported for this agent".to_string()),
+    };
+    if !content.contains(marker) {
+        return Err(format!(
+            "Refusing to remove unmanaged file {}",
+            path.display()
+        ));
+    }
+    if !yes && !confirm_remove(&path)? {
+        println!("Aborted.");
+        return Ok(());
+    }
+    fs::remove_file(&path).map_err(|e| format!("Could not remove {}: {e}", path.display()))?;
+    println!(
+        "{} integration removed from {}",
+        agent.display_name(),
+        path.display()
+    );
+    Ok(())
+}
+
 fn run_agent_hook(agent: Agent, event: AgentHookEvent) -> Result<(), String> {
     if env::var(agent.disabled_env()).ok().as_deref() == Some("1") {
         println!("{{}}");
@@ -617,10 +1022,10 @@ fn records_agent_session(agent: Agent, event: AgentHookEvent) -> bool {
     ) || matches!(
         (agent, event),
         (
-            Agent::Claude,
+            Agent::Claude | Agent::Copilot | Agent::OpenCode,
             AgentHookEvent::Notification | AgentHookEvent::SessionEnd
         )
-    )
+    ) || matches!((agent, event), (Agent::Gemini, AgentHookEvent::SessionEnd))
 }
 
 fn insert_env(map: &mut Map<String, Value>, key: &str, env_key: &str) {
@@ -688,7 +1093,7 @@ fn take_hooks_object(config: &mut Map<String, Value>) -> Result<Map<String, Valu
 }
 
 fn insert_hook_group(hooks: &mut Map<String, Value>, agent: Agent, event: AgentHookEvent) {
-    let event_name = event.name().to_string();
+    let event_name = installed_event_name(agent, event).to_string();
     let mut groups = match hooks.remove(&event_name) {
         Some(Value::Array(groups)) => groups,
         Some(value) => vec![value],
@@ -696,6 +1101,14 @@ fn insert_hook_group(hooks: &mut Map<String, Value>, agent: Agent, event: AgentH
     };
     groups.push(hook_group(agent, event));
     hooks.insert(event_name, Value::Array(groups));
+}
+
+fn installed_event_name(agent: Agent, event: AgentHookEvent) -> &'static str {
+    match (agent, event) {
+        (Agent::Gemini, AgentHookEvent::UserPromptSubmit) => "BeforeAgent",
+        (Agent::Gemini, AgentHookEvent::Stop) => "AfterAgent",
+        _ => event.name(),
+    }
 }
 
 fn hook_group(agent: Agent, event: AgentHookEvent) -> Value {
@@ -714,10 +1127,16 @@ fn hook_group(agent: Agent, event: AgentHookEvent) -> Value {
     if agent == Agent::Codex {
         hook.insert("timeout".to_string(), json!(5));
     }
+    if agent == Agent::Gemini {
+        hook.insert("name".to_string(), json!("wmux"));
+    }
 
     let mut group = Map::new();
     if agent == Agent::Claude {
         group.insert("matcher".to_string(), json!(""));
+    }
+    if agent == Agent::Gemini {
+        group.insert("matcher".to_string(), json!("*"));
     }
     group.insert("hooks".to_string(), Value::Array(vec![Value::Object(hook)]));
     Value::Object(group)
@@ -832,6 +1251,18 @@ fn confirm_write(path: &Path) -> Result<bool, String> {
     Ok(answer.trim().eq_ignore_ascii_case("y") || answer.trim().eq_ignore_ascii_case("yes"))
 }
 
+fn confirm_remove(path: &Path) -> Result<bool, String> {
+    print!("Remove {}? [y/N] ", path.display());
+    io::stdout()
+        .flush()
+        .map_err(|e| format!("Could not flush stdout: {e}"))?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|e| format!("Could not read confirmation: {e}"))?;
+    Ok(answer.trim().eq_ignore_ascii_case("y") || answer.trim().eq_ignore_ascii_case("yes"))
+}
+
 fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -851,111 +1282,12 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn install_codex_hooks_feature(path: &Path, yes: bool) -> Result<(), String> {
-    let content = fs::read_to_string(path).unwrap_or_default();
-    let cleaned = remove_managed_block(&content);
-    if codex_hooks_feature_enabled(&cleaned) {
-        if cleaned != content {
-            write_text_if_changed(path, &cleaned, yes, "Codex hooks feature")?;
-        }
-        return Ok(());
-    }
-
-    let updated = insert_codex_feature_block(&cleaned);
-    write_text_if_changed(path, &updated, yes, "Codex hooks feature")
-}
-
-fn uninstall_codex_hooks_feature(path: &Path, yes: bool) -> Result<(), String> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let content =
-        fs::read_to_string(path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
-    let cleaned = remove_managed_block(&content);
-    if cleaned == content {
-        return Ok(());
-    }
-    write_text_if_changed(path, &cleaned, yes, "Codex hooks feature")
-}
-
-const CODEX_FEATURE_BEGIN: &str = "# wmux-codex-hooks-feature begin";
-const CODEX_FEATURE_END: &str = "# wmux-codex-hooks-feature end";
-
-fn remove_managed_block(content: &str) -> String {
-    let mut out = Vec::new();
-    let mut in_block = false;
-    for line in content.lines() {
-        if line.trim() == CODEX_FEATURE_BEGIN {
-            in_block = true;
-            continue;
-        }
-        if line.trim() == CODEX_FEATURE_END {
-            in_block = false;
-            continue;
-        }
-        if !in_block {
-            out.push(line);
-        }
-    }
-    if out.is_empty() {
-        String::new()
-    } else {
-        out.join("\n") + "\n"
-    }
-}
-
-fn codex_hooks_feature_enabled(content: &str) -> bool {
-    let mut in_features = false;
-    for raw in content.lines() {
-        let line = raw.split('#').next().unwrap_or("").trim();
-        if line.is_empty() {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            in_features = line == "[features]";
-            continue;
-        }
-        if line == "features.hooks = true" || line == "features.codex_hooks = true" {
-            return true;
-        }
-        if in_features && (line == "hooks = true" || line == "codex_hooks = true") {
-            return true;
-        }
-    }
-    false
-}
-
-fn insert_codex_feature_block(content: &str) -> String {
-    let mut lines: Vec<String> = content.lines().map(ToString::to_string).collect();
-    if let Some(index) = lines.iter().position(|line| line.trim() == "[features]") {
-        lines.insert(index + 1, CODEX_FEATURE_END.to_string());
-        lines.insert(index + 1, "hooks = true".to_string());
-        lines.insert(index + 1, CODEX_FEATURE_BEGIN.to_string());
-    } else {
-        if !lines.is_empty() && lines.last().is_some_and(|line| !line.trim().is_empty()) {
-            lines.push(String::new());
-        }
-        lines.push(CODEX_FEATURE_BEGIN.to_string());
-        lines.push("[features]".to_string());
-        lines.push("hooks = true".to_string());
-        lines.push(CODEX_FEATURE_END.to_string());
-    }
-    lines.join("\n") + "\n"
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn names(events: &[AgentHookEvent]) -> Vec<&'static str> {
         events.iter().map(|event| event.name()).collect()
-    }
-
-    #[test]
-    fn managed_block_round_trips() {
-        let content = "a\n# wmux-codex-hooks-feature begin\n[features]\nhooks = true\n# wmux-codex-hooks-feature end\nb\n";
-        assert_eq!(remove_managed_block(content), "a\nb\n");
     }
 
     #[test]
@@ -994,6 +1326,104 @@ mod tests {
                 "SessionEnd",
             ]
         );
+    }
+
+    #[test]
+    fn hook_setup_covers_all_restorable_agents() {
+        assert_eq!(
+            Agent::all().map(Agent::name),
+            ["codex", "claude", "gemini", "copilot", "opencode"]
+        );
+        assert_eq!(
+            names(GEMINI_ADAPTER.installed_events()),
+            vec![
+                "SessionStart",
+                "UserPromptSubmit",
+                "Stop",
+                "Notification",
+                "SessionEnd",
+            ]
+        );
+        assert_eq!(
+            GEMINI_ADAPTER
+                .installed_events()
+                .iter()
+                .map(|event| installed_event_name(Agent::Gemini, *event))
+                .collect::<Vec<_>>(),
+            vec![
+                "SessionStart",
+                "BeforeAgent",
+                "AfterAgent",
+                "Notification",
+                "SessionEnd",
+            ]
+        );
+        assert!(copilot_hooks_config().to_string().contains("sessionStart"));
+        assert!(copilot_hooks_config().to_string().contains("errorOccurred"));
+        assert!(opencode_plugin_source(Path::new("/tmp/wmux-cli")).contains("session.created"));
+        assert!(opencode_plugin_source(Path::new("/tmp/wmux-cli")).contains("permission.asked"));
+        assert!(!opencode_plugin_source(Path::new("/tmp/wmux-cli")).contains("permission.updated"));
+    }
+
+    #[test]
+    fn copilot_hook_merge_and_remove_preserve_unowned_entries() {
+        let existing = json!({
+            "version": 1,
+            "custom": true,
+            "hooks": {
+                "agentStop": [{ "type": "command", "bash": "custom-stop" }],
+                "customEvent": [{ "type": "command", "bash": "custom-event" }]
+            }
+        });
+        let Value::Object(existing) = existing else {
+            unreachable!();
+        };
+
+        let merged = merge_copilot_hooks(existing).expect("merged config");
+        assert_eq!(merged.get("custom"), Some(&json!(true)));
+        assert_eq!(
+            merged["hooks"]["agentStop"].as_array().map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(merged["hooks"]["customEvent"][0]["bash"], "custom-event");
+
+        let mut merged_twice = merge_copilot_hooks(merged).expect("idempotent merge");
+        assert_eq!(
+            merged_twice["hooks"]["agentStop"].as_array().map(Vec::len),
+            Some(2)
+        );
+        assert!(remove_owned_copilot_hooks(&mut merged_twice).expect("remove hooks"));
+        assert_eq!(
+            merged_twice["hooks"]["agentStop"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            merged_twice["hooks"]["customEvent"][0]["bash"],
+            "custom-event"
+        );
+    }
+
+    #[test]
+    fn new_agent_hooks_extract_session_ids() {
+        for agent in [Agent::Gemini, Agent::Copilot, Agent::OpenCode] {
+            let params = hook_session_params(
+                agent,
+                AgentHookEvent::SessionStart,
+                &json!({
+                    "sessionId": "ses_1234567890",
+                    "cwd": "/work/project"
+                }),
+            )
+            .expect("session params");
+            assert_eq!(
+                params.get("source").and_then(Value::as_str),
+                Some(agent.name())
+            );
+            assert_eq!(
+                params.get("session_id").and_then(Value::as_str),
+                Some("ses_1234567890")
+            );
+        }
     }
 
     #[test]
