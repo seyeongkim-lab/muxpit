@@ -69,7 +69,7 @@ export const decideAppShortcut = (
     if (keyEquals(event, "g")) return { kind: "toggleGrid" };
     if (keyEquals(event, "d")) return { kind: "splitHorizontal" };
     if (keyEquals(event, "e")) return { kind: "splitVertical" };
-    if (keyEquals(event, "b")) return { kind: "openBrowser" };
+    if (keyEquals(event, "o")) return { kind: "openBrowser" };
     if (keyEquals(event, "w")) return { kind: "closePane" };
     if (keyEquals(event, "t")) return { kind: "newWorkspace" };
     if (keyEquals(event, "x")) return { kind: "closeWorkspace" };

@@ -32,6 +32,14 @@ test("app shortcut policy keeps existing Ctrl+Shift app commands", () => {
     decideAppShortcut({ ...baseEvent, key: "W", ctrlKey: true, shiftKey: true }, "linux"),
     { kind: "closePane" },
   );
+  assert.deepEqual(
+    decideAppShortcut({ ...baseEvent, key: "O", ctrlKey: true, shiftKey: true }, "linux"),
+    { kind: "openBrowser" },
+  );
+  assert.deepEqual(
+    decideAppShortcut({ ...baseEvent, key: "B", ctrlKey: true, shiftKey: true }, "linux"),
+    { kind: "none" },
+  );
 });
 
 test("app shortcut policy reserves platform clipboard shortcuts", () => {

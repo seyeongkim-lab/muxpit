@@ -189,14 +189,18 @@ export const executeControlRequest = async (
       if (request.action === "spawn-subagent" && !command) {
         throw new Error("Subagent command is required");
       }
+      const launchCwd = runtime.getLeafCwd(target.workspace.id, target.surface.id);
       const metadata: LeafLaunchMetadata | undefined = request.action === "spawn-subagent"
         ? {
             agentRole: "subagent",
             parentSurfaceId:
               stringParam(request.params, "parent_surface_id") ?? target.surface.id,
             agentLabel: stringParam(request.params, "label") ?? "subagent",
+            ...(launchCwd ? { launchCwd } : {}),
           }
-        : undefined;
+        : launchCwd
+          ? { launchCwd }
+          : undefined;
       const surfaceId = runtime.split(
         target.workspace.id,
         target.surface.id,

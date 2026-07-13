@@ -52,7 +52,7 @@ test("identify resolves the requested wmux surface", async () => {
 });
 
 test("split focuses the new surface", async () => {
-  const calls: string[] = [];
+  const calls: unknown[] = [];
   const result = await executeControlRequest({
     requestId: "request-2",
     action: "split",
@@ -63,15 +63,18 @@ test("split focuses the new surface", async () => {
       command: "codex",
     },
   }, runtime({
-    split: (_workspaceId, _surfaceId, direction, command) => {
-      calls.push(`${direction}:${command}`);
+    split: (_workspaceId, _surfaceId, direction, command, metadata) => {
+      calls.push([direction, command, metadata]);
       return "pane-2";
     },
-    focus: (workspaceId, surfaceId) => calls.push(`${workspaceId}:${surfaceId}`),
+    focus: (workspaceId, surfaceId) => calls.push([workspaceId, surfaceId]),
   }));
 
   assert.deepEqual(result, { workspaceId: "ws-1", surfaceId: "pane-2" });
-  assert.deepEqual(calls, ["horizontal:codex", "ws-1:pane-2"]);
+  assert.deepEqual(calls, [
+    ["horizontal", "codex", { launchCwd: "/work/project" }],
+    ["ws-1", "pane-2"],
+  ]);
 });
 
 test("spawn-subagent records parent surface and label", async () => {
@@ -100,6 +103,7 @@ test("spawn-subagent records parent surface and label", async () => {
     agentRole: "subagent",
     parentSurfaceId: "pane-1",
     agentLabel: "reviewer",
+    launchCwd: "/work/project",
   }]);
 });
 

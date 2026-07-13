@@ -46,3 +46,12 @@ test("removeCustomTheme drops overrides and resets the active selection", () => 
   assert.equal(state.customColors["Temp"], undefined);
   assert.notEqual(state.themeName, "Temp");
 });
+
+test("onboarding completion can be persisted through the settings action", () => {
+  const previous = useSettingsStore.getState().hasCompletedOnboarding;
+
+  useSettingsStore.getState().setHasCompletedOnboarding(true);
+  assert.equal(useSettingsStore.getState().hasCompletedOnboarding, true);
+
+  useSettingsStore.getState().setHasCompletedOnboarding(previous);
+});

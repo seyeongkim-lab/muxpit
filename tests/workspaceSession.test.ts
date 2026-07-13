@@ -147,6 +147,35 @@ test("workspace session omits and ignores cwd when experimental feature is disab
   assert.equal(findLeaf(restored.layout, "local")?.lastCwd, undefined);
 });
 
+test("workspace session preserves explicit launch cwd without enabling cwd restore", () => {
+  resetStores();
+  const workspace: Workspace = {
+    id: "ws",
+    name: "Workspace",
+    nameSource: "manual",
+    focusedLeafId: "agent",
+    layout: {
+      type: "leaf",
+      id: "agent",
+      ptyId: null,
+      command: "codex",
+      launchCwd: "/home/me/project",
+    },
+  };
+  useWorkspaceStore.setState({ workspaces: [workspace], activeId: "ws" });
+
+  useWorkspaceStore.getState().saveSession();
+  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  assert.equal(saved.workspaces[0].layout.launchCwd, "/home/me/project");
+
+  useWorkspaceStore.setState({ workspaces: [], activeId: null });
+  assert.equal(useWorkspaceStore.getState().restoreSession(), true);
+  assert.equal(
+    findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent")?.launchCwd,
+    "/home/me/project",
+  );
+});
+
 test("setLeafCwd only updates local cwd when the value changes", () => {
   resetStores();
   useSettingsStore.setState({ enableExperimentalCwdRestore: true });

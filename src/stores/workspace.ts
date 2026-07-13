@@ -56,6 +56,7 @@ export interface LeafNode {
   // user@host string and is what AI availability is keyed by.
   aiKind?: AiKind;
   aiSshTarget?: string;
+  launchCwd?: string;
   lastCwd?: string;
   profileCwd?: string;
   agentRole?: "subagent";
@@ -69,6 +70,7 @@ export interface LeafLaunchMetadata {
   aiSshTarget?: string;
   sshConnection?: SshConnection;
   sshRemoteCommand?: string;
+  launchCwd?: string;
   agentRole?: "subagent";
   parentSurfaceId?: string;
   agentLabel?: string;
@@ -136,6 +138,7 @@ interface SavedLeaf {
   tmuxSession?: string;
   aiKind?: AiKind;
   aiSshTarget?: string;
+  launchCwd?: string;
   lastCwd?: string;
   profileCwd?: string;
   agentRole?: "subagent";
@@ -890,6 +893,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               sshRemoteCommand: aiMeta?.sshRemoteCommand,
               aiKind: aiMeta?.aiKind,
               aiSshTarget: aiMeta?.aiSshTarget,
+              launchCwd: aiMeta?.launchCwd,
               agentRole: aiMeta?.agentRole,
               parentSurfaceId: aiMeta?.parentSurfaceId,
               agentLabel: aiMeta?.agentLabel,
@@ -1175,7 +1179,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           agentSession
             ? agentSession.baseCommand
             : node.command;
-        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, lastCwd, profileCwd: node.profileCwd, agentRole: node.agentRole, parentSurfaceId: node.parentSurfaceId, agentLabel: node.agentLabel, agentSession };
+        return { type: "leaf", id: node.id, sshCommand: node.sshCommand, command, sshConnection: node.sshConnection, sshRemoteCommand: node.sshRemoteCommand, tmuxSession: node.tmuxSession, aiKind: node.aiKind, aiSshTarget: node.aiSshTarget, launchCwd: node.launchCwd, lastCwd, profileCwd: node.profileCwd, agentRole: node.agentRole, parentSurfaceId: node.parentSurfaceId, agentLabel: node.agentLabel, agentSession };
       }
       if (node.type === "browser") return { type: "browser", id: node.id, url: node.url };
       if (node.type === "monitor") return { type: "monitor", id: node.id, sshTarget: node.sshTarget, sshCommand: node.sshCommand, sshConnection: node.sshConnection, monitorId: node.monitorId };
@@ -1290,6 +1294,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             tmuxSession,
             aiKind: restorePlatformBoundCommands ? node.aiKind ?? inferred?.aiKind : undefined,
             aiSshTarget: restorePlatformBoundCommands ? node.aiSshTarget ?? inferred?.aiSshTarget : undefined,
+            launchCwd: restorePlatformBoundCommands && isLocalRestorableLeaf(candidate) ? node.launchCwd : undefined,
             lastCwd: restoreCwd && isLocalRestorableLeaf(candidate) ? node.lastCwd : undefined,
             profileCwd: node.profileCwd,
             agentRole: node.agentRole,

@@ -13,6 +13,8 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { LaunchProfilesPanel } from "./components/LaunchProfilesPanel";
+import { AgentLauncherPanel } from "./components/AgentLauncherPanel";
+import { OnboardingPanel } from "./components/OnboardingPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
 import {
   buildSshConnection,
@@ -153,6 +155,7 @@ export const App = () => {
   const [sshPanelOpen, setSshPanelOpen] = useState(false);
   const [sshPanelEditId, setSshPanelEditId] = useState<string | null>(null);
   const [gridView, setGridView] = useState(false);
+  const [agentLauncherOpen, setAgentLauncherOpen] = useState(false);
   const [filesRailVisible, setFilesRailVisible] = useState(true);
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string; sshCommand: string; sshConnection?: SshConnection } | null>(null);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
@@ -168,6 +171,7 @@ export const App = () => {
   const customColors = useSettingsStore((s) => s.customColors);
   const customThemes = useSettingsStore((s) => s.customThemes);
   const dashboardLayout = useSettingsStore((s) => s.dashboardLayout);
+  const hasCompletedOnboarding = useSettingsStore((s) => s.hasCompletedOnboarding);
   const activeInfo = useWorkspaceInfoStore((s) => activeId ? s.info[activeId] : undefined);
   const fileLeaf = activeWs
     ? findLeafNode(activeWs.layout, activeWs.focusedLeafId) ?? findFirstLeafNode(activeWs.layout)
@@ -188,6 +192,8 @@ export const App = () => {
     sshPanelOpen ||
     closeConfirmOpen ||
     launchProfilesOpen ||
+    agentLauncherOpen ||
+    !hasCompletedOnboarding ||
     notificationPanelOpen ||
     historyPanelOpen ||
     paneNumbersVisible
@@ -980,6 +986,7 @@ export const App = () => {
       ) : (
         <TopDashboardBar
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenAgentLauncher={() => setAgentLauncherOpen(true)}
           onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
           onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
           onConnectHost={handleConnectHost}
@@ -998,6 +1005,7 @@ export const App = () => {
         {dashboardLayout === "left" ? (
           <Sidebar
             onOpenSettings={() => setSettingsOpen(true)}
+            onOpenAgentLauncher={() => setAgentLauncherOpen(true)}
             onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
             onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
             onConnectHost={handleConnectHost}
@@ -1055,6 +1063,11 @@ export const App = () => {
           open={launchProfilesOpen}
           onClose={() => setLaunchProfilesOpen(false)}
         />
+        <AgentLauncherPanel
+          open={agentLauncherOpen}
+          onClose={() => setAgentLauncherOpen(false)}
+        />
+        <OnboardingPanel />
         <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         <SshHostPanel
           open={sshPanelOpen}

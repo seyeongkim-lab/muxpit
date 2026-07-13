@@ -11,7 +11,7 @@ export interface TerminalSpawnSpec {
   commandArgv?: string[];
   sshConnection?: SshConnection;
   cwd?: string;
-  cwdSource?: "local" | "agent" | "profile";
+  cwdSource?: "local" | "launch" | "agent" | "profile";
   agentSession?: AgentSessionBinding;
 }
 
@@ -27,6 +27,7 @@ export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => 
     : node.sshConnection ?? parsed?.connection;
   const sshRemoteCommand = node.sshRemoteCommand ?? parsed?.remoteCommand;
   const command = node.command ?? node.sshCommand;
+  const local = isLocalTerminalLeaf(node);
   return {
     command,
     commandArgv: sshConnection
@@ -36,14 +37,16 @@ export const terminalSpawnSpecFromLeaf = (node: LeafNode): TerminalSpawnSpec => 
         })
       : undefined,
     sshConnection,
-    cwd: node.agentSession?.cwd ?? node.profileCwd ?? (isLocalTerminalLeaf(node) ? node.lastCwd : undefined),
+    cwd: node.agentSession?.cwd ?? (local ? node.launchCwd : undefined) ?? node.profileCwd ?? (local ? node.lastCwd : undefined),
     cwdSource: node.agentSession?.cwd
       ? "agent"
-      : node.profileCwd
-        ? "profile"
-        : isLocalTerminalLeaf(node) && node.lastCwd
-          ? "local"
-          : undefined,
+      : local && node.launchCwd
+        ? "launch"
+        : node.profileCwd
+          ? "profile"
+          : local && node.lastCwd
+            ? "local"
+            : undefined,
     agentSession: node.agentSession,
   };
 };

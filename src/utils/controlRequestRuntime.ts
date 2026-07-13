@@ -56,7 +56,7 @@ const runtime: ControlRuntime = {
         aiKind,
       });
     }
-    return state.splitLeafWithCommand(workspaceId, surfaceId, direction, command);
+    return state.splitLeafWithCommand(workspaceId, surfaceId, direction, command, metadata);
   },
   focus: (workspaceId, surfaceId) => {
     const state = useWorkspaceStore.getState();

@@ -13,6 +13,9 @@ import type { SshConnection } from "../utils/sshConnection";
 import { buildWorkspaceTabView } from "../utils/workspaceTabTitle";
 import { computeSessionTabWidth } from "../utils/topBarLayout";
 import { useLaunchProfileStore } from "../stores/launchProfiles";
+import { useNotificationStore } from "../stores/notifications";
+import { useAgentTaskStore } from "../stores/agentTasks";
+import { attentionAgentTasks } from "../utils/agentTask";
 
 interface SidebarMonitorInfo {
   monitorId: string;
@@ -23,6 +26,7 @@ interface SidebarMonitorInfo {
 
 interface TopDashboardBarProps {
   onOpenSettings?: () => void;
+  onOpenAgentLauncher?: () => void;
   onOpenSshPanel?: () => void;
   onEditHost?: (hostId: string) => void;
   onConnectHost?: (host: SshHost) => void;
@@ -79,6 +83,7 @@ const NEW_SESSION_BUTTON_SPACE = 26 + 3;
 
 export const TopDashboardBar = ({
   onOpenSettings,
+  onOpenAgentLauncher,
   onOpenSshPanel,
   onEditHost,
   onConnectHost,
@@ -107,6 +112,11 @@ export const TopDashboardBar = ({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const toggleProfiles = useLaunchProfileStore((state) => state.togglePanel);
+  const notifications = useNotificationStore((state) => state.notifications);
+  const toggleInbox = useNotificationStore((state) => state.togglePanel);
+  const agentTasks = useAgentTaskStore((state) => state.tasks);
+  const totalUnread = notifications.filter((notification) => !notification.read).length
+    + attentionAgentTasks(agentTasks).length;
   const sessionTabsRowRef = useRef<HTMLDivElement>(null);
   const [sessionTabsRowWidth, setSessionTabsRowWidth] = useState(0);
 
@@ -262,6 +272,22 @@ export const TopDashboardBar = ({
             title="Launch profiles"
           >
             Profiles
+          </button>
+          <button
+            className="wmux-btn"
+            onClick={onOpenAgentLauncher}
+            style={styles.commandButton}
+            title="Open AI pane"
+          >
+            AI
+          </button>
+          <button
+            className="wmux-btn"
+            onClick={toggleInbox}
+            style={styles.commandButton}
+            title="Agent inbox (Ctrl+Shift+I)"
+          >
+            Inbox{totalUnread > 0 ? ` ${totalUnread}` : ""}
           </button>
           <button
             className="wmux-btn"

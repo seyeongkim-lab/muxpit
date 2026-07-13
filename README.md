@@ -28,6 +28,7 @@ a host.
   memory, network throughput via uPlot charts) and lists/resumes Claude Code
   sessions on the connected host.
 - **Agent inbox** — hooks for Claude Code, Codex, Gemini, Copilot, and OpenCode report working, waiting, done, and error states. Selecting an item returns to its workspace and pane.
+- **Local AI launcher** — open Claude, Codex, Gemini, Copilot, or OpenCode beside the focused local terminal and inherit its current directory.
 - **Pane control CLI** — local and SSH processes can identify, list, split, focus, send text to, and read visible text from terminal panes. SSH panes use an authenticated loopback reverse-forward relay.
 - **Session resume and launch profiles** — detected sessions can be resumed in place, while user-local profiles save and recreate terminal and browser layouts with their commands, URLs, and working directories.
 - **Native subagent panes** — `wmux-cli subagent spawn` opens a child process next to its parent pane and tracks it in the inbox.
@@ -159,7 +160,7 @@ Direct shortcuts:
 | `Ctrl+Shift+E`  | Split vertical          |
 | `Ctrl+Shift+W`  | Close focused pane      |
 | `Ctrl+Shift+G`  | Toggle grid overview    |
-| `Ctrl+Shift+B`  | Open browser pane       |
+| `Ctrl+Shift+O`  | Open browser pane       |
 | `Ctrl+Shift+I`  | Toggle notifications    |
 | `Ctrl+,`        | Settings                |
 | `Ctrl+=/-/0`    | Font size up/down/reset |

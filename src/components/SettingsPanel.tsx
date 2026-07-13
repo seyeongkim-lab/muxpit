@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSettingsStore, PREFIX_KEY_CHOICES, DASHBOARD_LAYOUT_CHOICES, SESSION_LIST_METADATA_OPTIONS, type DashboardLayout, type PrefixKey } from "../stores/settings";
-import { useWorkspaceStore } from "../stores/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { THEMES, THEME_COLOR_GROUPS, getThemeByName, getResolvedTheme } from "../themes";
 import type { ThemeColorKey } from "../themes";
 import { playNotificationSound } from "../utils/notificationSound";
 import { isMacOsPlatform } from "../utils/runtimePlatform";
+import { useCliInstaller } from "../hooks/useCliInstaller";
+import { useExperimentalRestoreSettings } from "../hooks/useExperimentalRestoreSettings";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -84,8 +85,6 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     enableNotifications,
     enableNotificationSound,
     notificationSoundName,
-    enableExperimentalCwdRestore,
-    enableExperimentalAgentSessionRestore,
     enableExperimentalAgentDangerousResume,
     sessionListMetadata,
     setFontSize, setFontFamilies, setThemeName, setCustomColor, resetCustomColors, resetSingleColor,
@@ -96,18 +95,23 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     setEnableNotificationSound,
     setNotificationSound,
     resetNotificationSound,
-    setEnableExperimentalCwdRestore,
-    setEnableExperimentalAgentSessionRestore,
     setEnableExperimentalAgentDangerousResume,
+    setHasCompletedOnboarding,
     setSessionListMetadata,
   } = useSettingsStore();
+  const {
+    cwdRestore: enableExperimentalCwdRestore,
+    agentSessionRestore: enableExperimentalAgentSessionRestore,
+    updateCwdRestore,
+    updateAgentSessionRestore,
+  } = useExperimentalRestoreSettings();
   const [allFonts, setAllFonts] = useState<string[]>([]);
   const [monoOnly, setMonoOnly] = useState(true);
   const [search, setSearch] = useState("");
   const [colorOpen, setColorOpen] = useState(false);
   const [fontListOpen, setFontListOpen] = useState(false);
-  const [cliInstallStatus, setCliInstallStatus] = useState<string | null>(null);
-  const [cliInstalling, setCliInstalling] = useState(false);
+  const { install: installCli, installing: cliInstalling, status: cliInstallStatus } =
+    useCliInstaller();
   const soundInputRef = useRef<HTMLInputElement | null>(null);
 
   const baseTheme = getThemeByName(themeName, customThemes).theme;
@@ -131,27 +135,6 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
     [themeName, resetSingleColor],
   );
 
-  const handleExperimentalCwdRestoreChange = useCallback(
-    (enabled: boolean) => {
-      setEnableExperimentalCwdRestore(enabled);
-      if (!enabled) {
-        useWorkspaceStore.getState().clearSavedCwd();
-      }
-    },
-    [setEnableExperimentalCwdRestore],
-  );
-
-  const handleExperimentalAgentSessionRestoreChange = useCallback(
-    (enabled: boolean) => {
-      setEnableExperimentalAgentSessionRestore(enabled);
-      if (!enabled) {
-        setEnableExperimentalAgentDangerousResume(false);
-        useWorkspaceStore.getState().clearSavedAgentSessions();
-      }
-    },
-    [setEnableExperimentalAgentDangerousResume, setEnableExperimentalAgentSessionRestore],
-  );
-
   // Enumerating fonts spawns a slow PowerShell/fc-list call and the browse list
   // renders one preview per typeface, so defer both until the user opens it.
   useEffect(() => {
@@ -167,19 +150,6 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
         .filter((f) => !search || f.toLowerCase().includes(search.toLowerCase())),
     [allFonts, monoOnly, search],
   );
-
-  const installCli = useCallback(async () => {
-    setCliInstalling(true);
-    setCliInstallStatus(null);
-    try {
-      const path = await invoke<string>("install_cli_symlink");
-      setCliInstallStatus(`Installed at ${path}`);
-    } catch (error) {
-      setCliInstallStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setCliInstalling(false);
-    }
-  }, []);
 
   if (!open) return null;
 
@@ -233,6 +203,17 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               <div style={styles.hint}>Creates ~/.local/bin/wmux-cli for terminal use.</div>
             </div>
           )}
+
+          <div style={styles.section}>
+            <label style={styles.label}>AI Workbench</label>
+            <button
+              onClick={() => { setHasCompletedOnboarding(false); onClose(); }}
+              style={styles.smallBtn}
+            >
+              Show setup guide
+            </button>
+            <div style={styles.hint}>CLI setup, agent hooks, restore options, and shortcuts.</div>
+          </div>
 
           {/* Font Size */}
           <div style={styles.section}>
@@ -356,7 +337,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               <input
                 type="checkbox"
                 checked={enableExperimentalCwdRestore}
-                onChange={(e) => handleExperimentalCwdRestoreChange(e.target.checked)}
+                onChange={(e) => updateCwdRestore(e.target.checked)}
               />
               Restore local session CWD
             </label>
@@ -367,7 +348,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               <input
                 type="checkbox"
                 checked={enableExperimentalAgentSessionRestore}
-                onChange={(e) => handleExperimentalAgentSessionRestoreChange(e.target.checked)}
+                onChange={(e) => updateAgentSessionRestore(e.target.checked)}
               />
               Restore Codex and Claude sessions
             </label>

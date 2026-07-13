@@ -167,6 +167,24 @@ test("terminal spawn plan disables agent restore and cwd when setting is off", (
   assert.equal(plan.postSpawnInput, undefined);
 });
 
+test("terminal spawn plan always honors explicit launch cwd", () => {
+  const plan = buildTerminalSpawnPlan({
+    spec: {
+      command: "codex",
+      cwd: "/work/project",
+      cwdSource: "launch",
+    },
+    resolved: {
+      command: "codex",
+      commandArgv: null,
+      sshConnection: null,
+    },
+    settings: { ...baseSettings, enableCwdRestore: false },
+  });
+
+  assert.equal(plan.cwd, "/work/project");
+});
+
 test("terminal spawn plan does not report or restore across SSH and tmux boundaries", () => {
   const sshPlan = buildTerminalSpawnPlan({
     spec: {

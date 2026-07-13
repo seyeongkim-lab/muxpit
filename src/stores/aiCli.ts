@@ -20,12 +20,17 @@ export const AI_LABEL: Record<AiKind, string> = {
   opencode: "opencode",
 };
 
-const AI_COMMAND: Record<AiKind, string> = {
-  claude: "claude --dangerously-skip-permissions",
+export const LOCAL_AI_COMMAND: Record<AiKind, string> = {
+  claude: "claude",
   codex: "codex",
   gemini: "gemini",
   copilot: "copilot",
   opencode: "opencode",
+};
+
+const REMOTE_AI_COMMAND: Record<AiKind, string> = {
+  ...LOCAL_AI_COMMAND,
+  claude: "claude --dangerously-skip-permissions",
 };
 
 /** Parse `user@host` from a free-form ssh command. Returns null if not found. */
@@ -68,7 +73,7 @@ export const buildAiLaunchSpec = (
   sshConnection?: SshConnection,
   cwd?: string,
 ): AiLaunchSpec => {
-  const remote = buildAiRemoteCommand(AI_COMMAND[kind], cwd);
+  const remote = buildAiRemoteCommand(REMOTE_AI_COMMAND[kind], cwd);
   const connection = sshConnection ?? parseSshCommandLine(rawSshCommand)?.connection;
   if (connection) {
     return {

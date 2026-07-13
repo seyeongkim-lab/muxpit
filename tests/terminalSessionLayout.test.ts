@@ -90,6 +90,33 @@ test("terminal spawn spec prefers agent session cwd over local cwd", () => {
   assert.equal(spec.agentSession?.sessionId, "11111111-2222-3333-4444-555555555555");
 });
 
+test("terminal spawn spec treats launch cwd as explicit local input", () => {
+  const localLeaf: LeafNode = {
+    type: "leaf",
+    id: "local-ai",
+    ptyId: null,
+    command: "codex",
+    launchCwd: "/work/project",
+    lastCwd: "/home/me",
+  };
+  const sshLeaf: LeafNode = {
+    type: "leaf",
+    id: "remote-ai",
+    ptyId: null,
+    command: "ssh me@example.com codex",
+    launchCwd: "/work/project",
+  };
+
+  assert.deepEqual(
+    {
+      cwd: terminalSpawnSpecFromLeaf(localLeaf).cwd,
+      cwdSource: terminalSpawnSpecFromLeaf(localLeaf).cwdSource,
+    },
+    { cwd: "/work/project", cwdSource: "launch" },
+  );
+  assert.equal(terminalSpawnSpecFromLeaf(sshLeaf).cwd, undefined);
+});
+
 test("terminal session layout selectors only target terminal leaves", () => {
   const workspaces: Workspace[] = [
     {

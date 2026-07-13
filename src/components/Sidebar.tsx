@@ -25,6 +25,7 @@ interface SidebarMonitorInfo {
 
 interface SidebarProps {
   onOpenSettings?: () => void;
+  onOpenAgentLauncher?: () => void;
   onOpenSshPanel?: () => void;
   onEditHost?: (hostId: string) => void;
   onConnectHost?: (host: SshHost) => void;
@@ -93,7 +94,7 @@ const formatMemory = (bytes: number): string => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
 };
 
-export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
+export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, onEditHost, onConnectHost, monitor, onCloseMonitor, onViewClaudeSession, onResumeClaudeSession, gridView, onToggleGridView }: SidebarProps) => {
   // Granular selectors so the sidebar only re-renders on the slices it shows,
   // not on every workspace-store mutation. Actions are stable refs in zustand.
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -154,6 +155,9 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
           </button>
           <button className="wmux-btn" onClick={toggleProfiles} style={styles.addBtn} title="Launch profiles">
             P
+          </button>
+          <button className="wmux-btn" onClick={onOpenAgentLauncher} style={styles.addBtn} title="Open AI pane">
+            AI
           </button>
           <button
             className="wmux-btn"
@@ -457,11 +461,10 @@ export const Sidebar = ({ onOpenSettings, onOpenSshPanel, onEditHost, onConnectH
 
       <div style={styles.footer}>
         <span style={styles.footerText}>{workspaces.length} sessions</span>
-        {totalUnread > 0 && (
-          <span style={styles.notifBadge} onClick={togglePanel} title="Agent inbox (Ctrl+Shift+I)">
-            {totalUnread}
-          </span>
-        )}
+        <button className="wmux-btn" style={styles.inboxButton} onClick={togglePanel} title="Agent inbox (Ctrl+Shift+I)">
+          Inbox
+          {totalUnread > 0 && <span style={styles.notifBadge}>{totalUnread}</span>}
+        </button>
       </div>
     </div>
   );
@@ -678,7 +681,16 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#f38ba8",
     fontSize: 12,
     fontWeight: 700,
-    cursor: "pointer",
+  },
+  inboxButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    padding: 0,
+    color: "var(--wmux-subtext)",
+    background: "transparent",
+    border: "none",
+    fontSize: 12,
   },
 
   // Section (shared by HOSTS and SESSIONS)

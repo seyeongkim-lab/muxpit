@@ -77,6 +77,7 @@ interface SettingsState {
   enableExperimentalCwdRestore: boolean;
   enableExperimentalAgentSessionRestore: boolean;
   enableExperimentalAgentDangerousResume: boolean;
+  hasCompletedOnboarding: boolean;
   sessionListMetadata: SessionListMetadataSettings;
 
   increaseFontSize: () => void;
@@ -99,6 +100,7 @@ interface SettingsState {
   setEnableExperimentalCwdRestore: (enabled: boolean) => void;
   setEnableExperimentalAgentSessionRestore: (enabled: boolean) => void;
   setEnableExperimentalAgentDangerousResume: (enabled: boolean) => void;
+  setHasCompletedOnboarding: (completed: boolean) => void;
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => void;
 }
 
@@ -230,6 +232,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   enableExperimentalAgentDangerousResume: initialExperimentalAgentSessionRestore
     ? storedBoolean(saved.enableExperimentalAgentDangerousResume)
     : false,
+  hasCompletedOnboarding: storedBoolean(saved.hasCompletedOnboarding),
   sessionListMetadata: initialSessionListMetadata,
 
   increaseFontSize: () => {
@@ -380,6 +383,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     saveSettings(get());
   },
 
+  setHasCompletedOnboarding: (completed: boolean) => {
+    set({ hasCompletedOnboarding: completed });
+    saveSettings(get());
+  },
+
   setSessionListMetadata: (key: SessionListMetadataKey, enabled: boolean) => {
     set((state) => ({
       sessionListMetadata: { ...state.sessionListMetadata, [key]: enabled },
@@ -410,6 +418,7 @@ const saveSettings = (state: SettingsState) => {
         enableExperimentalCwdRestore: state.enableExperimentalCwdRestore,
         enableExperimentalAgentSessionRestore: state.enableExperimentalAgentSessionRestore,
         enableExperimentalAgentDangerousResume: state.enableExperimentalAgentDangerousResume,
+        hasCompletedOnboarding: state.hasCompletedOnboarding,
         sessionListMetadata: state.sessionListMetadata,
       }),
     );

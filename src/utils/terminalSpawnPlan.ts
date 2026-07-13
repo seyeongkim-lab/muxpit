@@ -11,7 +11,7 @@ export interface TerminalSpawnPlanSpec {
   commandArgv?: string[];
   sshConnection?: SshConnection;
   cwd?: string;
-  cwdSource?: "local" | "agent" | "profile";
+  cwdSource?: "local" | "launch" | "agent" | "profile";
   agentSession?: AgentSessionBinding;
 }
 
@@ -114,7 +114,7 @@ export const buildTerminalSpawnPlan = ({
     spawnSshConnection: resolved.sshConnection,
     cwd: spec.cwdSource === "agent"
       ? settings.enableAgentSessionRestore ? spec.cwd ?? null : null
-      : spec.cwdSource === "profile"
+      : spec.cwdSource === "launch" || spec.cwdSource === "profile"
         ? spec.cwd ?? null
         : settings.enableCwdRestore ? spec.cwd ?? null : null,
     enableCwdReporting:
