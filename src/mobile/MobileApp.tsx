@@ -502,7 +502,11 @@ export const MobileApp = () => {
   normalizedHandlerRef.current = applyNormalizedEvent;
 
   const handleTransport = (event: MobileAgentTransportEvent): void => {
-    if (event.kind === "stderr" && event.data?.trim()) {
+    if (
+      event.kind === "stderr"
+      && activeChannel.current === event.channelId
+      && event.data?.trim()
+    ) {
       setError(event.data.trim());
       return;
     }
