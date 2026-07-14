@@ -165,7 +165,9 @@ fn agent_command(
             if session_id.is_some() {
                 return Err("Codex sessions are resumed through app-server".into());
             }
-            format!("{prefix}exec codex app-server --listen stdio://")
+            format!(
+                "{prefix}exec codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio://"
+            )
         }
         MobileAgentProvider::Claude => {
             let resume = match session_id {
@@ -176,7 +178,7 @@ fn agent_command(
                 None => String::new(),
             };
             format!(
-                "{prefix}exec claude -p --input-format stream-json --output-format stream-json --verbose{resume}"
+                "{prefix}exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose{resume}"
             )
         }
     };
@@ -497,4 +499,22 @@ pub fn run() {
         )
         .run(tauri::generate_context!())
         .expect("error while running wmux mobile application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_commands_bypass_permissions() {
+        let codex = agent_command(MobileAgentProvider::Codex, None, None).unwrap();
+        assert!(codex.contains(
+            "exec codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio://"
+        ));
+
+        let claude = agent_command(MobileAgentProvider::Claude, None, None).unwrap();
+        assert!(claude.contains(
+            "exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose"
+        ));
+    }
 }

@@ -176,6 +176,7 @@ export const MobileApp = () => {
   const [hostSheetOpen, setHostSheetOpen] = useState(false);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
+  const latestTimelineTextLength = items[items.length - 1]?.text.length ?? 0;
 
   const credentialCache = useRef(new Map<string, SshAuth>());
   const decoders = useRef(new Map<string, JsonLineDecoder>());
@@ -214,6 +215,11 @@ export const MobileApp = () => {
     timeline.scrollTop = timeline.scrollHeight;
     pendingSessionScrollRef.current = null;
   }, [activeSessionId, items]);
+
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current;
+    if (timeline) timeline.scrollTop = timeline.scrollHeight;
+  }, [activeSessionId, approvals.length, items.length, latestTimelineTextLength, running]);
 
   useEffect(() => {
     if (MOBILE_DEMO) return;
@@ -502,12 +508,20 @@ export const MobileApp = () => {
           text: event.detail,
         }));
         return;
-      case "approvalRequested":
+      case "approvalRequested": {
+        const request = providerRef.current === "codex"
+          ? codexClient.current?.resolveApproval(event.requestId, true)
+          : undefined;
+        if (request) {
+          void request.catch((reason) => setError(String(reason)));
+          return;
+        }
         setApprovals((previous) => [
           ...previous,
           { requestId: event.requestId, title: event.title, detail: event.detail },
         ]);
         return;
+      }
       case "error":
         setError(event.message);
     }

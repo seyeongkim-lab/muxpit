@@ -13,6 +13,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 const MAX_LINE_BYTES: usize = 1024 * 1024;
+const TRANSPORT_CHUNK_BYTES: usize = 64 * 1024;
 const CLAUDE_SESSION_SCRIPT: &str = include_str!("../scripts/claude_sessions.py");
 
 #[derive(Clone, Copy, Deserialize)]
@@ -79,7 +80,10 @@ fn provider_command(
             if session_id.is_some() {
                 return Err("Codex sessions are resumed through app-server".into());
             }
-            Ok("codex app-server --listen stdio://".into())
+            Ok(
+                "codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio://"
+                    .into(),
+            )
         }
         DesktopAgentProvider::Claude => {
             let resume = match session_id {
@@ -90,7 +94,7 @@ fn provider_command(
                 None => String::new(),
             };
             Ok(format!(
-                "claude -p --input-format stream-json --output-format stream-json --verbose{resume}"
+                "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose{resume}"
             ))
         }
         DesktopAgentProvider::Copilot => Ok("copilot --acp --stdio".into()),
@@ -184,16 +188,32 @@ fn target_command(
     Ok(process)
 }
 
+fn transport_chunks(data: &str) -> Vec<&str> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < data.len() {
+        let mut end = (start + TRANSPORT_CHUNK_BYTES).min(data.len());
+        while !data.is_char_boundary(end) {
+            end -= 1;
+        }
+        chunks.push(&data[start..end]);
+        start = end;
+    }
+    chunks
+}
+
 fn emit_stream(app: &AppHandle, channel_id: &str, kind: &'static str, data: String) {
-    let _ = app.emit(
-        "desktop-agent-transport",
-        DesktopAgentTransportEvent {
-            channel_id: channel_id.into(),
-            kind,
-            data: Some(data),
-            exit_status: None,
-        },
-    );
+    for chunk in transport_chunks(&data) {
+        let _ = app.emit(
+            "desktop-agent-transport",
+            DesktopAgentTransportEvent {
+                channel_id: channel_id.into(),
+                kind,
+                data: Some(chunk.into()),
+                exit_status: None,
+            },
+        );
+    }
 }
 
 fn read_stream<R: std::io::Read + Send + 'static>(
@@ -201,7 +221,7 @@ fn read_stream<R: std::io::Read + Send + 'static>(
     channel_id: String,
     kind: &'static str,
     stream: R,
-) {
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
@@ -216,7 +236,13 @@ fn read_stream<R: std::io::Read + Send + 'static>(
                 }
             }
         }
-    });
+    })
+}
+
+fn join_stream_readers(readers: Vec<std::thread::JoinHandle<()>>) {
+    for reader in readers {
+        let _ = reader.join();
+    }
 }
 
 fn reap_process(
@@ -225,6 +251,7 @@ fn reap_process(
     channel_id: String,
     mut child: Child,
     stop_rx: mpsc::Receiver<()>,
+    stream_readers: Vec<std::thread::JoinHandle<()>>,
 ) {
     std::thread::spawn(move || {
         let status = loop {
@@ -244,6 +271,7 @@ fn reap_process(
                 Err(RecvTimeoutError::Timeout) => {}
             }
         };
+        join_stream_readers(stream_readers);
         manager.channels.lock().unwrap().remove(&channel_id);
         let _ = app.emit(
             "desktop-agent-transport",
@@ -302,9 +330,11 @@ fn open_process(
             stop,
         },
     );
-    read_stream(app.clone(), channel_id.clone(), "stdout", stdout);
-    read_stream(app.clone(), channel_id.clone(), "stderr", stderr);
-    reap_process(app, manager, channel_id, child, stop_rx);
+    let stream_readers = vec![
+        read_stream(app.clone(), channel_id.clone(), "stdout", stdout),
+        read_stream(app.clone(), channel_id.clone(), "stderr", stderr),
+    ];
+    reap_process(app, manager, channel_id, child, stop_rx, stream_readers);
     Ok(())
 }
 
@@ -485,10 +515,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stream_readers_are_joined_before_close() {
+        let completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader_completed = Arc::clone(&completed);
+        let reader = std::thread::spawn(move || {
+            reader_completed.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        join_stream_readers(vec![reader]);
+
+        assert!(completed.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn transport_chunks_preserve_utf8() {
+        let data = format!("{}\n", "세션".repeat(TRANSPORT_CHUNK_BYTES));
+        let chunks = transport_chunks(&data);
+
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.len() <= TRANSPORT_CHUNK_BYTES));
+        assert_eq!(chunks.concat(), data);
+    }
+
+    #[test]
     fn provider_commands_use_structured_protocols() {
         assert_eq!(
             provider_command(DesktopAgentProvider::Codex, None).unwrap(),
-            "codex app-server --listen stdio://"
+            "codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio://"
+        );
+        assert_eq!(
+            provider_command(DesktopAgentProvider::Claude, None).unwrap(),
+            "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose"
         );
         assert_eq!(
             provider_command(DesktopAgentProvider::Copilot, None).unwrap(),

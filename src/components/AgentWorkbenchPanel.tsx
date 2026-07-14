@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AcpClient } from "../agent/acpClient.ts";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import {
   closeDesktopAgent,
   listDesktopClaudeSessions,
@@ -54,7 +54,11 @@ interface ProviderView {
 interface ChannelMeta {
   provider: AiKind;
   purpose: "provider" | "claude-list" | "claude-history";
+  handledPayload: boolean;
 }
+
+const MIN_WORKBENCH_WIDTH = 420;
+const MIN_TERMINAL_WIDTH = 280;
 
 const PROVIDER_NAMES: Record<AiKind, string> = {
   claude: "Claude",
@@ -126,6 +130,9 @@ const appendDelta = (
     : [...items, { id, kind, text }];
 };
 
+const withoutLoadingItem = (items: MobileTimelineItem[]): MobileTimelineItem[] =>
+  items.filter((item) => !item.id.startsWith("loading-"));
+
 const claudeInput = (text: string): string => JSON.stringify({
   type: "user",
   message: { role: "user", content: [{ type: "text", text }] },
@@ -193,6 +200,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   ]);
   const targetKey = `${target.sshConnection?.target ?? target.sshCommand ?? "local"}|${target.cwd ?? ""}`;
   const view = views[provider];
+  const latestTimelineTextLength = view.items[view.items.length - 1]?.text.length ?? 0;
 
   const updateView = useCallback((kind: AiKind, update: (current: ProviderView) => ProviderView) => {
     setViews((current) => {
@@ -284,7 +292,23 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           }),
         }));
         return;
-      case "approvalRequested":
+      case "approvalRequested": {
+        const request = kind === "codex"
+          ? codexClients.current.get(kind)?.resolveApproval(event.requestId, true)
+          : kind !== "claude"
+            ? (() => {
+                const optionId = automaticPermissionOptionId(event.options);
+                return optionId
+                  ? acpClients.current.get(kind)?.resolvePermission(event.requestId, optionId)
+                  : undefined;
+              })()
+            : undefined;
+        if (request) {
+          void request.catch((reason) => {
+            updateView(kind, (current) => ({ ...current, error: String(reason) }));
+          });
+          return;
+        }
         updateView(kind, (current) => ({
           ...current,
           approvals: [
@@ -298,8 +322,14 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           ],
         }));
         return;
+      }
       case "error":
-        updateView(kind, (current) => ({ ...current, error: event.message }));
+        updateView(kind, (current) => ({
+          ...current,
+          items: withoutLoadingItem(current.items),
+          status: "ready",
+          error: event.message,
+        }));
     }
   }, [updateView]);
 
@@ -308,14 +338,19 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     sessionId?: string,
   ): Promise<void> => {
     const channelId = nextChannelId("claude", purpose);
-    channels.current.set(channelId, { provider: "claude", purpose });
+    channels.current.set(channelId, { provider: "claude", purpose, handledPayload: false });
     decoders.current.set(channelId, new JsonLineDecoder());
     try {
       if (sessionId) await loadDesktopClaudeSession(channelId, sessionId, target);
       else await listDesktopClaudeSessions(channelId, target);
     } catch (reason) {
       channels.current.delete(channelId);
-      updateView("claude", (current) => ({ ...current, error: String(reason) }));
+      updateView("claude", (current) => ({
+        ...current,
+        items: withoutLoadingItem(current.items),
+        status: "ready",
+        error: String(reason),
+      }));
     }
   }, [nextChannelId, target, updateView]);
 
@@ -326,7 +361,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     const generation = runtimeGeneration.current;
     const opening = (async () => {
       const channelId = nextChannelId(kind, "provider");
-      channels.current.set(channelId, { provider: kind, purpose: "provider" });
+      channels.current.set(channelId, { provider: kind, purpose: "provider", handledPayload: false });
       decoders.current.set(channelId, new JsonLineDecoder());
       updateView(kind, (current) => ({ ...current, status: "connecting", error: null }));
       try {
@@ -396,6 +431,19 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         return;
       }
       if (event.kind === "closed") {
+        if (meta.purpose !== "provider" && !meta.handledPayload) {
+          const detail = stderr.current.get(event.channelId);
+          updateView("claude", (current) => ({
+            ...current,
+            items: meta.purpose === "claude-history"
+              ? withoutLoadingItem(current.items)
+              : current.items,
+            status: "ready",
+            error: detail || (meta.purpose === "claude-history"
+              ? "Claude session history returned no data"
+              : "Claude session list returned no data"),
+          }));
+        }
         channels.current.delete(event.channelId);
         decoders.current.delete(event.channelId);
         stderr.current.delete(event.channelId);
@@ -423,6 +471,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         try {
           const message = JSON.parse(line) as Record<string, unknown>;
           if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
+            meta.handledPayload = true;
             applyEvent("claude", {
               type: "sessionsLoaded",
               sessions: message.sessions as MobileSession[],
@@ -433,10 +482,15 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           const normalized = historyEvents.length > 0
             ? historyEvents
             : normalizeClaudeMessage(message);
+          if (normalized.length > 0) meta.handledPayload = true;
           for (const item of normalized) applyEvent("claude", item);
         } catch {
+          meta.handledPayload = true;
           updateView(meta.provider, (current) => ({
             ...current,
+            items: meta.purpose === "claude-history"
+              ? withoutLoadingItem(current.items)
+              : current.items,
             error: `${PROVIDER_NAMES[meta.provider]} returned an invalid JSON line`,
           }));
         }
@@ -488,10 +542,17 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     if (open && probedTarget === targetKey && installed.has(provider)) void openProvider(provider);
   }, [installed, open, openProvider, probedTarget, provider, targetKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open || !timelineRef.current) return;
     timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-  }, [open, provider, view.items.length, view.approvals.length]);
+  }, [
+    latestTimelineTextLength,
+    open,
+    provider,
+    view.approvals.length,
+    view.items.length,
+    view.running,
+  ]);
 
   const selectSession = async (session: MobileSession): Promise<void> => {
     updateView(provider, (current) => ({
@@ -515,7 +576,11 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         await acpClients.current.get(provider)?.loadSession(session.id, session.cwd ?? target.cwd ?? ".");
       }
     } catch (reason) {
-      updateView(provider, (current) => ({ ...current, error: String(reason) }));
+      updateView(provider, (current) => ({
+        ...current,
+        items: withoutLoadingItem(current.items),
+        error: String(reason),
+      }));
     }
   };
 
@@ -639,7 +704,8 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     const startX = event.clientX;
     const startWidth = width;
     const move = (moveEvent: MouseEvent) => {
-      setWidth(Math.min(760, Math.max(420, startWidth + startX - moveEvent.clientX)));
+      const maxWidth = Math.max(MIN_WORKBENCH_WIDTH, window.innerWidth - MIN_TERMINAL_WIDTH);
+      setWidth(Math.min(maxWidth, Math.max(MIN_WORKBENCH_WIDTH, startWidth + startX - moveEvent.clientX)));
     };
     const stopResize = () => {
       document.removeEventListener("mousemove", move);

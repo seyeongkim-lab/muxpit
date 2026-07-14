@@ -68,6 +68,12 @@ const permissionOptions = (value: unknown): AgentPermissionOption[] =>
       })
     : [];
 
+export const automaticPermissionOptionId = (
+  options: AgentPermissionOption[] | undefined,
+): string | undefined =>
+  options?.find((option) => option.kind === "allow_always")?.id
+  ?? options?.find((option) => option.kind.startsWith("allow"))?.id;
+
 export const normalizeAcpMessage = (
   provider: AcpProvider,
   value: unknown,
@@ -170,7 +176,7 @@ export class AcpClient {
     const result = await this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "wmux", title: "wmux", version: "0.2.0" },
+      clientInfo: { name: "wmux", title: "wmux", version: "0.2.1" },
     });
     this.capabilities = asObject(result.agentCapabilities) as AgentCapabilities ?? {};
     if (this.capabilities.sessionCapabilities?.list) {

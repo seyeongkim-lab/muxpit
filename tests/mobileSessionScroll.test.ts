@@ -12,3 +12,9 @@ test("loaded mobile sessions scroll the rendered timeline to the end", () => {
   assert.match(component, /timeline\.scrollTop = timeline\.scrollHeight;/);
   assert.match(component, /<main ref=\{timelineRef\} className="activity-timeline"/);
 });
+
+test("mobile follows streaming output and approves Codex requests", () => {
+  assert.match(component, /latestTimelineTextLength/);
+  assert.match(component, /\[activeSessionId, approvals\.length, items\.length, latestTimelineTextLength, running\]/);
+  assert.match(component, /resolveApproval\(event\.requestId, true\)/);
+});

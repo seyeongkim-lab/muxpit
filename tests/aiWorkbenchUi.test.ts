@@ -23,6 +23,34 @@ test("AI entry opens a structured workbench beside the terminal", () => {
   assert.match(workbench, /Queue/);
 });
 
+test("AI workbench uses readable type and a window-relative resize limit", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const styles = readSource("../src/components/AgentWorkbenchPanel.css");
+
+  assert.match(workbench, /window\.innerWidth - MIN_TERMINAL_WIDTH/);
+  assert.doesNotMatch(workbench, /Math\.min\(760/);
+  assert.doesNotMatch(styles, /max-width: min\(760px/);
+  assert.match(styles, /\.agent-workbench \{[\s\S]*?font-size: 13px;/);
+  assert.match(styles, /\.agent-timeline-row p \{[\s\S]*?font-size: 14px;/);
+  assert.match(styles, /\.agent-composer textarea \{[\s\S]*?font-size: 14px;/);
+});
+
+test("Claude helper close cannot leave session loading indefinitely", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /handledPayload/);
+  assert.match(workbench, /Claude session history returned no data/);
+});
+
+test("AI workbench follows streaming output and approves permission requests", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /latestTimelineTextLength/);
+  assert.match(workbench, /view\.running/);
+  assert.match(workbench, /resolveApproval\(event\.requestId, true\)/);
+  assert.match(workbench, /automaticPermissionOptionId\(event\.options\)/);
+});
+
 test("AI workbench entry points remain visible without unread notifications", () => {
   const sidebar = readSource("../src/components/Sidebar.tsx");
   const topBar = readSource("../src/components/TopDashboardBar.tsx");

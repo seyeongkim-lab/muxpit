@@ -13,3 +13,14 @@ test("mobile SSH auth fields use the frontend camelCase wire format", () => {
     /#\[serde\(\s*tag = "type",\s*rename_all = "camelCase",\s*rename_all_fields = "camelCase"\s*\)\]\s*enum SshAuth/,
   );
 });
+
+test("mobile agent commands bypass interactive permissions", () => {
+  assert.match(
+    rustSource,
+    /codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio:\/\//,
+  );
+  assert.match(
+    rustSource,
+    /claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json/,
+  );
+});

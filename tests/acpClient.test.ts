@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { AcpClient, normalizeAcpMessage } from "../src/agent/acpClient.ts";
+import {
+  AcpClient,
+  automaticPermissionOptionId,
+  normalizeAcpMessage,
+} from "../src/agent/acpClient.ts";
 
 test("ACP client initializes and lists sessions when supported", async () => {
   const sent: Record<string, unknown>[] = [];
@@ -21,7 +25,7 @@ test("ACP client initializes and lists sessions when supported", async () => {
     params: {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "wmux", title: "wmux", version: "0.2.0" },
+      clientInfo: { name: "wmux", title: "wmux", version: "0.2.1" },
     },
   });
   client.receive(JSON.stringify({
@@ -146,4 +150,15 @@ test("ACP client sends new, load, prompt, cancel, and permission shapes", async 
     id: 12,
     result: { outcome: { outcome: "selected", optionId: "allow-once" } },
   });
+});
+
+test("automatic ACP permission prefers a persistent allow option", () => {
+  assert.equal(automaticPermissionOptionId([
+    { id: "deny", label: "Deny", kind: "reject_once" },
+    { id: "once", label: "Allow once", kind: "allow_once" },
+    { id: "always", label: "Always allow", kind: "allow_always" },
+  ]), "always");
+  assert.equal(automaticPermissionOptionId([
+    { id: "once", label: "Allow once", kind: "allow_once" },
+  ]), "once");
 });

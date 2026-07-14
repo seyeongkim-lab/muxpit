@@ -11,8 +11,8 @@ test("desktop agent bridge exposes structured local and SSH channels", () => {
   const bridge = readSource("../src/agent/desktopAgentBridge.ts");
 
   assert.match(backend, /DesktopAgentManager/);
-  assert.match(backend, /codex app-server --listen stdio:\/\//);
-  assert.match(backend, /claude -p --input-format stream-json --output-format stream-json/);
+  assert.match(backend, /codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio:\/\//);
+  assert.match(backend, /claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json/);
   assert.match(backend, /copilot --acp --stdio/);
   assert.match(backend, /opencode acp/);
   assert.match(backend, /gemini --experimental-acp/);
