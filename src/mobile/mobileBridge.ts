@@ -31,6 +31,8 @@ export const connectSsh = (request: SshConnectRequest): Promise<SshConnectResult
 
 export const disconnectSsh = (): Promise<void> => invoke("mobile_ssh_disconnect");
 
+export const probeSsh = (): Promise<boolean> => invoke("mobile_ssh_probe");
+
 export const openAgent = (
   channelId: string,
   provider: "codex" | "claude",
@@ -45,6 +47,9 @@ export const openAgent = (
 
 export const listClaudeSessions = (channelId: string): Promise<void> =>
   invoke("mobile_claude_sessions", { channelId });
+
+export const loadClaudeSession = (channelId: string, sessionId: string): Promise<void> =>
+  invoke("mobile_claude_session", { channelId, sessionId });
 
 export const writeAgentLine = (channelId: string, line: string): Promise<void> =>
   invoke("mobile_agent_write", { channelId, line });

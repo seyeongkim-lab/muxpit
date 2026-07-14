@@ -3,6 +3,7 @@ import { CodexMobileClient } from "./codexMobileClient.ts";
 import {
   JsonLineDecoder,
   composerAction,
+  normalizeClaudeHistoryMessage,
   normalizeClaudeMessage,
   type MobileAgentEvent,
   type MobileSession,
@@ -13,8 +14,10 @@ import {
   connectSsh,
   disconnectSsh,
   listClaudeSessions,
+  loadClaudeSession,
   onAgentTransport,
   openAgent,
+  probeSsh,
   writeAgentLine,
   type MobileAgentTransportEvent,
   type SshAuth,
@@ -179,6 +182,7 @@ export const MobileApp = () => {
   const codexClient = useRef<CodexMobileClient | null>(null);
   const activeChannel = useRef<string | null>(null);
   const currentProfileRef = useRef<HostProfile | null>(null);
+  const connectionStatusRef = useRef<ConnectionStatus>(connectionStatus);
   const providerRef = useRef<Provider>(provider);
   const activeSessionRef = useRef<string | null>(null);
   const activeTurnRef = useRef<string | null>(null);
@@ -191,8 +195,11 @@ export const MobileApp = () => {
   } | null>(null);
   const normalizedHandlerRef = useRef<(event: MobileAgentEvent) => void>(() => {});
   const transportHandlerRef = useRef<(event: MobileAgentTransportEvent) => void>(() => {});
+  const resumeConnectionRef = useRef<() => Promise<void>>(async () => {});
+  const resumeInFlightRef = useRef(false);
   const submitRef = useRef<(text: string, fromQueue?: boolean) => Promise<void>>(async () => {});
 
+  useEffect(() => { connectionStatusRef.current = connectionStatus; }, [connectionStatus]);
   useEffect(() => { providerRef.current = provider; }, [provider]);
   useEffect(() => { currentProfileRef.current = currentProfile; }, [currentProfile]);
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
@@ -220,6 +227,15 @@ export const MobileApp = () => {
       disposed = true;
       unlisten?.();
     };
+  }, []);
+
+  useEffect(() => {
+    if (MOBILE_DEMO) return;
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") void resumeConnectionRef.current();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
   const rememberProfile = (profile: HostProfile): void => {
@@ -263,23 +279,36 @@ export const MobileApp = () => {
     activeChannel.current = channelId;
     decoders.current.set(channelId, new JsonLineDecoder());
     try {
-      await openAgent(channelId, nextProvider, sessionId, profile.cwd || undefined);
-      if (nextProvider === "codex") {
+      if (nextProvider === "claude") {
+        if (sessionId) {
+          setActiveSessionId(sessionId);
+          activeSessionRef.current = sessionId;
+          setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
+        }
+        const historyChannel = `${sessionId ? "claude-history" : "claude-sessions"}-${Date.now()}`;
+        decoders.current.set(historyChannel, new JsonLineDecoder());
+        const historyRequest = sessionId
+          ? loadClaudeSession(historyChannel, sessionId)
+          : listClaudeSessions(historyChannel);
+        await Promise.all([
+          openAgent(channelId, nextProvider, sessionId, profile.cwd || undefined),
+          historyRequest.catch((reason) => setError(String(reason))),
+        ]);
+      } else {
+        if (sessionId) {
+          setActiveSessionId(sessionId);
+          activeSessionRef.current = sessionId;
+          setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
+        }
+        await openAgent(channelId, nextProvider, undefined, profile.cwd || undefined);
         const client = new CodexMobileClient(
           (line) => writeAgentLine(channelId, line),
           (event) => normalizedHandlerRef.current(event),
         );
         codexClient.current = client;
-        void client.initialize().catch((reason) => setError(String(reason)));
-      } else {
-        const listChannel = `claude-sessions-${Date.now()}`;
-        decoders.current.set(listChannel, new JsonLineDecoder());
-        void listClaudeSessions(listChannel).catch((reason) => setError(String(reason)));
-        if (sessionId) {
-          setActiveSessionId(sessionId);
-          activeSessionRef.current = sessionId;
-          setItems([{ id: `resume-${sessionId}`, kind: "status", text: "Session resumed" }]);
-        }
+        void client.initialize()
+          .then(() => sessionId ? client.resumeSession(sessionId) : undefined)
+          .catch((reason) => setError(String(reason)));
       }
       return channelId;
     } catch (reason) {
@@ -293,8 +322,10 @@ export const MobileApp = () => {
     profile: HostProfile,
     auth: SshAuth,
     trustedFingerprint = profile.trustedFingerprint,
+    restore?: { provider: Provider; sessionId?: string },
   ): Promise<void> => {
     setConnectionStatus("connecting");
+    connectionStatusRef.current = "connecting";
     setPendingTrust(null);
     setError(null);
     try {
@@ -308,6 +339,7 @@ export const MobileApp = () => {
       if (result.trustRequired) {
         setPendingTrust({ profile, auth, fingerprint: result.fingerprint });
         setConnectionStatus("disconnected");
+        connectionStatusRef.current = "disconnected";
         return;
       }
       const trustedProfile = { ...profile, trustedFingerprint: result.fingerprint };
@@ -317,12 +349,47 @@ export const MobileApp = () => {
       currentProfileRef.current = trustedProfile;
       setForm(formFromProfile(trustedProfile));
       setConnectionStatus("connected");
-      void openProvider(trustedProfile, providerRef.current);
+      connectionStatusRef.current = "connected";
+      void openProvider(
+        trustedProfile,
+        restore?.provider ?? providerRef.current,
+        restore?.sessionId,
+      );
     } catch (reason) {
       setConnectionStatus("disconnected");
+      connectionStatusRef.current = "disconnected";
       setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
+
+  const resumeConnection = async (): Promise<void> => {
+    if (connectionStatusRef.current !== "connected" || resumeInFlightRef.current) return;
+    const profile = currentProfileRef.current;
+    if (!profile) return;
+    resumeInFlightRef.current = true;
+    try {
+      const currentProvider = providerRef.current;
+      const sessionId = activeSessionRef.current ?? undefined;
+      if (await probeSsh()) {
+        if (!activeChannel.current) await openProvider(profile, currentProvider, sessionId);
+        return;
+      }
+      const auth = credentialCache.current.get(profile.id);
+      if (!auth) {
+        setConnectionStatus("disconnected");
+        connectionStatusRef.current = "disconnected";
+        setError("SSH connection was lost. Enter the credential to reconnect.");
+        return;
+      }
+      await connectProfile(profile, auth, profile.trustedFingerprint, {
+        provider: currentProvider,
+        sessionId,
+      });
+    } finally {
+      resumeInFlightRef.current = false;
+    }
+  };
+  resumeConnectionRef.current = resumeConnection;
 
   const connectFromForm = async (): Promise<void> => {
     const profile = profileFromForm(form);
@@ -354,6 +421,7 @@ export const MobileApp = () => {
     if (!auth) {
       await disconnectSsh().catch(() => {});
       setConnectionStatus("disconnected");
+      connectionStatusRef.current = "disconnected";
       setCurrentProfile(null);
       currentProfileRef.current = null;
       activeChannel.current = null;
@@ -462,6 +530,11 @@ export const MobileApp = () => {
         const message = JSON.parse(line) as Record<string, unknown>;
         if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
           setSessions(message.sessions as MobileSession[]);
+          continue;
+        }
+        const historyEvents = normalizeClaudeHistoryMessage(message);
+        if (historyEvents.length > 0) {
+          for (const normalized of historyEvents) normalizedHandlerRef.current(normalized);
           continue;
         }
         for (const normalized of normalizeClaudeMessage(message)) {
@@ -792,6 +865,7 @@ export const MobileApp = () => {
               setHostSheetOpen(false);
               void disconnectSsh();
               setConnectionStatus("disconnected");
+              connectionStatusRef.current = "disconnected";
               setCurrentProfile(null);
               currentProfileRef.current = null;
               setForm(blankForm());

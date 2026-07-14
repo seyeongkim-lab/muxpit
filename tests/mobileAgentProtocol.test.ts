@@ -5,6 +5,7 @@ import {
   JsonLineDecoder,
   composerAction,
   normalizeClaudeMessage,
+  normalizeClaudeHistoryMessage,
   normalizeCodexMessage,
 } from "../src/mobile/agentProtocol.ts";
 
@@ -95,6 +96,29 @@ test("Claude stream messages become text, tool, and completion events", () => {
   assert.deepEqual(
     normalizeClaudeMessage({ type: "result", session_id: "session-1", subtype: "success" }),
     [{ type: "turnCompleted", sessionId: "session-1", status: "completed" }],
+  );
+});
+
+test("Claude history payload becomes a loaded mobile session", () => {
+  const session = {
+    id: "session-1",
+    title: "Fix Android client",
+    cwd: "/home/me/project",
+    updatedAt: 1_752_500_000,
+    provider: "claude" as const,
+  };
+  const items = [
+    { id: "user-1", kind: "user" as const, text: "Fix the client" },
+    { id: "tool-1", kind: "tool" as const, title: "Bash", text: "pnpm test" },
+  ];
+
+  assert.deepEqual(
+    normalizeClaudeHistoryMessage({
+      type: "wmux_claude_session",
+      session,
+      items,
+    }),
+    [{ type: "sessionLoaded", session, items }],
   );
 });
 

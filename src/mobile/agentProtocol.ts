@@ -229,6 +229,43 @@ export const normalizeCodexMessage = (value: unknown): MobileAgentEvent[] => {
   return [];
 };
 
+export const normalizeClaudeHistoryMessage = (value: unknown): MobileAgentEvent[] => {
+  const message = objectValue(value);
+  if (!message) return [];
+  if (message.type === "wmux_error") {
+    return [{ type: "error", message: stringValue(message.message) ?? "Claude history could not be loaded" }];
+  }
+  if (message.type !== "wmux_claude_session") return [];
+
+  const sessionValue = objectValue(message.session);
+  const sessionId = stringValue(sessionValue?.id);
+  if (!sessionId) return [{ type: "error", message: "Claude history did not include a session id" }];
+  const session: MobileSession = {
+    id: sessionId,
+    title: stringValue(sessionValue?.title) ?? "Claude session",
+    ...(typeof sessionValue?.cwd === "string" ? { cwd: sessionValue.cwd } : {}),
+    ...(typeof sessionValue?.updatedAt === "number" ? { updatedAt: sessionValue.updatedAt } : {}),
+    provider: "claude",
+  };
+  const items: MobileTimelineItem[] = [];
+  if (Array.isArray(message.items)) {
+    for (const value of message.items) {
+      const item = objectValue(value);
+      const id = stringValue(item?.id);
+      const kind = stringValue(item?.kind);
+      const text = stringValue(item?.text);
+      if (!id || !text || !kind || !["user", "assistant", "tool", "status"].includes(kind)) continue;
+      items.push({
+        id,
+        kind: kind as MobileTimelineItem["kind"],
+        text,
+        ...(typeof item?.title === "string" ? { title: item.title } : {}),
+      });
+    }
+  }
+  return [{ type: "sessionLoaded", session, items }];
+};
+
 const claudeToolDetail = (input: unknown): string => {
   const object = objectValue(input);
   return stringValue(object?.command)

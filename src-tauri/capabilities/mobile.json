@@ -11,9 +11,11 @@
     "log:default",
     "allow-mobile-ssh-connect",
     "allow-mobile-ssh-disconnect",
+    "allow-mobile-ssh-probe",
     "allow-mobile-agent-open",
     "allow-mobile-agent-write",
     "allow-mobile-agent-close",
-    "allow-mobile-claude-sessions"
+    "allow-mobile-claude-sessions",
+    "allow-mobile-claude-session"
   ]
 }

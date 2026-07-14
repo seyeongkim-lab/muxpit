@@ -11,60 +11,10 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 
-const CLAUDE_SESSION_SCAN: &str = r#"
-import glob
-import json
-import os
-
-sessions = []
-root = os.path.expanduser("~/.claude/projects")
-for path in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
-    try:
-        stat = os.stat(path)
-        with open(path, "rb") as stream:
-            stream.seek(max(stat.st_size - 262144, 0))
-            if stream.tell() > 0:
-                stream.readline()
-            lines = stream.read().decode("utf-8", errors="replace").splitlines()
-        cwd = ""
-        title = ""
-        for line in lines:
-            try:
-                item = json.loads(line)
-            except (TypeError, ValueError):
-                continue
-            cwd = item.get("cwd") or cwd
-            if item.get("type") != "user":
-                continue
-            content = (item.get("message") or {}).get("content")
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                text = " ".join(
-                    block.get("text", "")
-                    for block in content
-                    if isinstance(block, dict) and block.get("type") == "text"
-                )
-            else:
-                text = ""
-            text = " ".join(text.split())
-            if text and not text.startswith("<"):
-                title = text[:120]
-        sessions.append({
-            "id": os.path.splitext(os.path.basename(path))[0],
-            "title": title or "Claude session",
-            "cwd": cwd,
-            "updatedAt": int(stat.st_mtime),
-            "provider": "claude",
-        })
-    except OSError:
-        continue
-
-sessions.sort(key=lambda item: item["updatedAt"], reverse=True)
-print(json.dumps({"type": "wmux_sessions", "sessions": sessions[:100]}), flush=True)
-"#;
+const CLAUDE_SESSION_SCRIPT: &str = include_str!("../scripts/claude_sessions.py");
 
 #[derive(Clone)]
 struct SshClient {
@@ -344,6 +294,20 @@ pub async fn mobile_ssh_disconnect(state: State<'_, MobileSshManager>) -> Result
     Ok(())
 }
 
+#[tauri::command]
+pub async fn mobile_ssh_probe(state: State<'_, MobileSshManager>) -> Result<bool, String> {
+    let session = state.session.read().await;
+    let Some(session) = session.as_ref() else {
+        return Ok(false);
+    };
+    let channel = match tokio::time::timeout(PROBE_TIMEOUT, session.channel_open_session()).await {
+        Ok(Ok(channel)) => channel,
+        Ok(Err(_)) | Err(_) => return Ok(false),
+    };
+    let _ = channel.close().await;
+    Ok(true)
+}
+
 async fn open_channel(
     app: AppHandle,
     state: State<'_, MobileSshManager>,
@@ -421,6 +385,22 @@ async fn open_channel(
     Ok(())
 }
 
+async fn open_claude_session_script(
+    app: AppHandle,
+    state: State<'_, MobileSshManager>,
+    channel_id: String,
+    arguments: &[&str],
+) -> Result<(), String> {
+    let script = base64::engine::general_purpose::STANDARD.encode(CLAUDE_SESSION_SCRIPT);
+    let python = format!("import base64;exec(base64.b64decode({script:?}))");
+    let mut command = format!("exec python3 -u -c {}", quote_posix_shell_arg(&python));
+    for argument in arguments {
+        command.push(' ');
+        command.push_str(&quote_posix_shell_arg(argument));
+    }
+    open_channel(app, state, channel_id, login_shell_command(&command)).await
+}
+
 #[tauri::command]
 pub async fn mobile_agent_open(
     app: AppHandle,
@@ -440,12 +420,20 @@ pub async fn mobile_claude_sessions(
     state: State<'_, MobileSshManager>,
     channel_id: String,
 ) -> Result<(), String> {
-    let script = base64::engine::general_purpose::STANDARD.encode(CLAUDE_SESSION_SCAN);
-    let inner = format!(
-        "exec python3 -u -c {}",
-        quote_posix_shell_arg(&format!("import base64;exec(base64.b64decode({script:?}))"))
-    );
-    open_channel(app, state, channel_id, login_shell_command(&inner)).await
+    open_claude_session_script(app, state, channel_id, &["list"]).await
+}
+
+#[tauri::command]
+pub async fn mobile_claude_session(
+    app: AppHandle,
+    state: State<'_, MobileSshManager>,
+    channel_id: String,
+    session_id: String,
+) -> Result<(), String> {
+    if !valid_session_id(&session_id) {
+        return Err("Invalid Claude session id".into());
+    }
+    open_claude_session_script(app, state, channel_id, &["history", &session_id]).await
 }
 
 #[tauri::command]
@@ -495,10 +483,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mobile_ssh_connect,
             mobile_ssh_disconnect,
+            mobile_ssh_probe,
             mobile_agent_open,
             mobile_agent_write,
             mobile_agent_close,
             mobile_claude_sessions,
+            mobile_claude_session,
         ])
         .plugin(
             tauri_plugin_log::Builder::default()
