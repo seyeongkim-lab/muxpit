@@ -274,7 +274,7 @@ let counter = 0;
 const genId = () => `n-${Date.now()}-${counter++}`;
 const SESSION_STORAGE_KEY = "wmux-session";
 const SESSION_SCHEMA_VERSION = 2;
-const SESSION_PLATFORMS: RuntimePlatform[] = ["linux", "windows", "macos", "unknown"];
+const SESSION_PLATFORMS: RuntimePlatform[] = ["android", "linux", "windows", "macos", "unknown"];
 let saveToPlatformSpecificSessionKey = false;
 
 const platformSessionKey = (platform: RuntimePlatform): string =>

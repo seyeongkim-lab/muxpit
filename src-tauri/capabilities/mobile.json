@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "enables the Android agent workbench",
+  "platforms": ["android"],
+  "webviews": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "log:default",
+    "allow-mobile-ssh-connect",
+    "allow-mobile-ssh-disconnect",
+    "allow-mobile-agent-open",
+    "allow-mobile-agent-write",
+    "allow-mobile-agent-close",
+    "allow-mobile-claude-sessions"
+  ]
+}

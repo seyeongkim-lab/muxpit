@@ -118,6 +118,7 @@ export const getTerminalClipboardAction = (
         return "pasteClipboard";
       }
       return "none";
+    case "android":
     case "unknown":
       if ((ctrlPlainShortcut || ctrlShiftShortcut) && keyEquals(event, "c")) {
         return state.hasSelection ? "copySelection" : "blockClipboardShortcut";

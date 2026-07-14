@@ -3,12 +3,16 @@ type NavigatorLike = {
   userAgent?: string;
 };
 
-export type RuntimePlatform = "linux" | "windows" | "macos" | "unknown";
+export type RuntimePlatform = "android" | "linux" | "windows" | "macos" | "unknown";
 
 const currentNavigator = (): NavigatorLike | null =>
   typeof navigator === "undefined" ? null : navigator;
 
-export const getRuntimePlatform = (platform = currentNavigator()?.platform ?? ""): RuntimePlatform => {
+export const getRuntimePlatform = (
+  platform = currentNavigator()?.platform ?? "",
+  userAgent = currentNavigator()?.userAgent ?? "",
+): RuntimePlatform => {
+  if (/android/i.test(userAgent)) return "android";
   if (/^win/i.test(platform)) return "windows";
   if (/mac/i.test(platform)) return "macos";
   if (/linux/i.test(platform)) return "linux";
@@ -23,6 +27,9 @@ export const isWindowsPlatform = (platform = currentNavigator()?.platform ?? "")
 
 export const isMacOsPlatform = (platform = currentNavigator()?.platform ?? ""): boolean =>
   getRuntimePlatform(platform) === "macos";
+
+export const isAndroidPlatform = (nav = currentNavigator()): boolean =>
+  nav !== null && getRuntimePlatform(nav.platform ?? "", nav.userAgent ?? "") === "android";
 
 export const isLinuxWebKitRuntime = (nav = currentNavigator()): boolean => {
   if (!nav) return false;

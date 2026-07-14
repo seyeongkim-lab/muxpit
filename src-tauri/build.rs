@@ -1,7 +1,20 @@
 fn main() {
-    prepare_cli_sidecar();
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&[
+    let target = std::env::var("TARGET").expect("TARGET is set by Cargo build scripts");
+    let mobile = target.contains("android") || target.contains("ios");
+    if !mobile {
+        prepare_cli_sidecar();
+    }
+    let commands = if mobile {
+        &[
+            "mobile_ssh_connect",
+            "mobile_ssh_disconnect",
+            "mobile_agent_open",
+            "mobile_agent_write",
+            "mobile_agent_close",
+            "mobile_claude_sessions",
+        ][..]
+    } else {
+        &[
             "spawn_pty",
             "spawn_pty_tmux_cc",
             "subscribe_pty_events",
@@ -43,8 +56,12 @@ fn main() {
             "browser_snapshot",
             "browser_console_logs",
             "browser_screenshot",
-        ]),
-    ))
+        ][..]
+    };
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(commands)),
+    )
     .expect("failed to build tauri application")
 }
 

@@ -13,6 +13,13 @@ test("runtime platform detects desktop platforms", () => {
   assert.equal(getRuntimePlatform(""), "unknown");
 });
 
+test("runtime platform detects Android before generic Linux", () => {
+  assert.equal(
+    getRuntimePlatform("Linux armv8l", "Mozilla/5.0 (Linux; Android 16; Pixel 9)"),
+    "android",
+  );
+});
+
 test("WebGL renderer default is disabled on Windows and Linux", () => {
   assert.equal(shouldEnableWebglRendererByDefault("Win32"), false);
   assert.equal(shouldEnableWebglRendererByDefault("Linux x86_64"), false);

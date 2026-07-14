@@ -2,6 +2,8 @@ use crate::platform::command::silent_command;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
+pub use crate::shell_quote::quote_posix_shell_arg;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshCommand {
     pub program: String,
@@ -310,10 +312,6 @@ impl SshCommand {
         }
         out
     }
-}
-
-pub fn quote_posix_shell_arg(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]

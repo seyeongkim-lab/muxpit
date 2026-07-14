@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles/linear.css";
 import { logError, logInfo } from "./utils/appLog";
 import { installNavigatorLocaleFallback } from "./utils/locale";
+import { isAndroidPlatform } from "./utils/runtimePlatform";
 
 type BootErrorBoundaryProps = {
   children: ReactNode;
@@ -60,11 +61,17 @@ const root = createRoot(rootElement);
 
 logInfo("frontend boot");
 
-void import("./App")
-  .then(({ App }) => {
+const mobilePreview = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).has("mobile");
+const loadApp = isAndroidPlatform() || mobilePreview
+  ? import("./mobile/MobileApp").then(({ MobileApp }) => MobileApp)
+  : import("./App").then(({ App }) => App);
+
+void loadApp
+  .then((AppComponent) => {
     root.render(
       <BootErrorBoundary>
-        <App />
+        <AppComponent />
       </BootErrorBoundary>,
     );
   })
