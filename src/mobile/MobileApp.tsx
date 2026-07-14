@@ -268,6 +268,7 @@ export const MobileApp = () => {
     nextProvider: Provider,
     sessionId?: string,
     preserveSessions = false,
+    cwd = profile.cwd,
   ): Promise<string | undefined> => {
     const previousChannel = activeChannel.current;
     if (previousChannel) await closeAgent(previousChannel).catch(() => {});
@@ -292,7 +293,7 @@ export const MobileApp = () => {
           ? loadClaudeSession(historyChannel, sessionId)
           : listClaudeSessions(historyChannel);
         await Promise.all([
-          openAgent(channelId, nextProvider, sessionId, profile.cwd || undefined),
+          openAgent(channelId, nextProvider, sessionId, cwd || undefined),
           historyRequest.catch((reason) => setError(String(reason))),
         ]);
       } else {
@@ -301,7 +302,7 @@ export const MobileApp = () => {
           activeSessionRef.current = sessionId;
           setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
         }
-        await openAgent(channelId, nextProvider, undefined, profile.cwd || undefined);
+        await openAgent(channelId, nextProvider, undefined, cwd || undefined);
         const client = new CodexMobileClient(
           (line) => writeAgentLine(channelId, line),
           (event) => normalizedHandlerRef.current(event),
@@ -323,7 +324,7 @@ export const MobileApp = () => {
     profile: HostProfile,
     auth: SshAuth,
     trustedFingerprint = profile.trustedFingerprint,
-    restore?: { provider: Provider; sessionId?: string },
+    restore?: { provider: Provider; sessionId?: string; cwd?: string },
   ): Promise<void> => {
     setConnectionStatus("connecting");
     connectionStatusRef.current = "connecting";
@@ -356,6 +357,7 @@ export const MobileApp = () => {
         restore?.provider ?? providerRef.current,
         restore?.sessionId,
         Boolean(restore?.sessionId),
+        restore?.cwd,
       );
     } catch (reason) {
       setConnectionStatus("disconnected");
@@ -372,8 +374,11 @@ export const MobileApp = () => {
     try {
       const currentProvider = providerRef.current;
       const sessionId = activeSessionRef.current ?? undefined;
+      const sessionCwd = sessions.find((session) => session.id === sessionId)?.cwd;
       if (await probeSsh()) {
-        if (!activeChannel.current) await openProvider(profile, currentProvider, sessionId, true);
+        if (!activeChannel.current) {
+          await openProvider(profile, currentProvider, sessionId, true, sessionCwd);
+        }
         return;
       }
       const auth = credentialCache.current.get(profile.id);
@@ -386,6 +391,7 @@ export const MobileApp = () => {
       await connectProfile(profile, auth, profile.trustedFingerprint, {
         provider: currentProvider,
         sessionId,
+        cwd: sessionCwd,
       });
     } finally {
       resumeInFlightRef.current = false;
@@ -652,7 +658,7 @@ export const MobileApp = () => {
       return;
     }
     const profile = currentProfileRef.current;
-    if (profile) await openProvider(profile, "claude", session.id, true);
+    if (profile) await openProvider(profile, "claude", session.id, true, session.cwd);
   };
 
   const newSession = async (): Promise<void> => {

@@ -9,7 +9,7 @@ const rust = readFileSync(new URL("../src-tauri/src/mobile_agent.rs", import.met
 test("mobile app checks and restores SSH when returning to the foreground", () => {
   assert.match(app, /document\.addEventListener\("visibilitychange"/);
   assert.match(app, /await probeSsh\(\)/);
-  assert.match(app, /openProvider\(profile, currentProvider, sessionId, true\)/);
+  assert.match(app, /openProvider\(profile, currentProvider, sessionId, true, sessionCwd\)/);
   assert.match(app, /event\.kind === "stderr"[^}]*activeChannel\.current === event\.channelId/s);
   assert.match(app, /event\.kind === "exit"[^}]*activeChannel\.current === event\.channelId/s);
   assert.match(bridge, /export const probeSsh/);
