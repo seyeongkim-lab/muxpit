@@ -506,7 +506,12 @@ export const MobileApp = () => {
       setError(event.data.trim());
       return;
     }
-    if (event.kind === "exit" && event.exitStatus && event.exitStatus !== 0) {
+    if (
+      event.kind === "exit"
+      && activeChannel.current === event.channelId
+      && event.exitStatus
+      && event.exitStatus !== 0
+    ) {
       setError(`Remote agent exited with status ${event.exitStatus}.`);
       return;
     }
