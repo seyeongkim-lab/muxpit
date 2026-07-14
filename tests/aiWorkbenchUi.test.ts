@@ -5,14 +5,22 @@ import { readFileSync } from "node:fs";
 const readSource = (path: string): string =>
   readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("AI launcher uses safe local commands and explicit launch cwd", () => {
-  const launcher = readSource("../src/components/AgentLauncherPanel.tsx");
-  const commands = readSource("../src/stores/aiCli.ts");
+test("AI entry opens a structured workbench beside the terminal", () => {
+  const app = readSource("../src/App.tsx");
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const bridge = readSource("../src/agent/desktopAgentBridge.ts");
 
-  assert.match(launcher, /LOCAL_AI_COMMAND\[kind\]/);
-  assert.match(launcher, /launchCwd: cwd/);
-  assert.match(commands, /export const LOCAL_AI_COMMAND/);
-  assert.match(commands, /LOCAL_AI_COMMAND[\s\S]*claude: "claude"/);
+  assert.match(app, /<AgentWorkbenchPanel/);
+  assert.match(app, /agentWorkbenchOpen/);
+  assert.doesNotMatch(app, /<AgentLauncherPanel/);
+  assert.match(workbench, /openDesktopAgent/);
+  assert.match(workbench, /onDesktopAgentTransport/);
+  assert.match(bridge, /desktop_agent_open/);
+  assert.match(bridge, /desktop-agent-transport/);
+  assert.match(workbench, /CodexMobileClient/);
+  assert.match(workbench, /AcpClient/);
+  assert.match(workbench, /Steer/);
+  assert.match(workbench, /Queue/);
 });
 
 test("AI workbench entry points remain visible without unread notifications", () => {

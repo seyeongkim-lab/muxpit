@@ -1,5 +1,6 @@
 mod browser;
 mod control;
+mod desktop_agent;
 mod file_tree;
 mod monitor;
 mod pasted_image;
@@ -12,6 +13,10 @@ mod tmux_cc;
 mod tmux_remote;
 
 use monitor::MonitorManager;
+use desktop_agent::{
+    check_local_clis_sync, desktop_agent_close, desktop_agent_open, desktop_agent_write,
+    desktop_claude_session, desktop_claude_sessions, DesktopAgentManager,
+};
 use pasted_image::{push_image_to_remote_sync, save_image_locally_sync};
 use platform::command::silent_command;
 use platform::process::{
@@ -244,6 +249,13 @@ async fn check_remote_clis(
         .map_err(|e| format!("Task join error: {e}"))?
 }
 
+#[tauri::command]
+async fn check_local_clis(names: Vec<String>) -> Result<HashMap<String, bool>, String> {
+    tauri::async_runtime::spawn_blocking(move || check_local_clis_sync(&names))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))
+}
+
 /// Returns the remote tmux version (e.g. `"3.4"`) when tmux is found on the
 /// target host and can execute `tmux -V`; otherwise `None`.
 #[tauri::command]
@@ -361,7 +373,7 @@ fn check_remote_clis_sync(
     Ok(result)
 }
 
-fn login_shell_remote_command(command: &str) -> String {
+pub(crate) fn login_shell_remote_command(command: &str) -> String {
     let outer = format!(
         "shell=${{SHELL:-/bin/sh}}; \
          case \"$shell\" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) wmux_shell=\"$shell\" ;; *) wmux_shell=/bin/sh ;; esac; \
@@ -530,6 +542,7 @@ pub fn run() {
         .manage(MonitorManager::new())
         .manage(WorkspaceRegistry::default())
         .manage(control::ControlBroker::default())
+        .manage(DesktopAgentManager::default())
         .invoke_handler(tauri::generate_handler![
             spawn_pty,
             spawn_pty_tmux_cc,
@@ -547,7 +560,13 @@ pub fn run() {
             read_dir,
             remote_read_dir,
             check_remote_clis,
+            check_local_clis,
             check_remote_tmux,
+            desktop_agent_open,
+            desktop_agent_write,
+            desktop_agent_close,
+            desktop_claude_sessions,
+            desktop_claude_session,
             save_image_locally,
             push_image_to_remote,
             tmux_list_sessions,

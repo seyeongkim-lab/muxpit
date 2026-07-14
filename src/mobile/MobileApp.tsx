@@ -480,6 +480,13 @@ export const MobileApp = () => {
       case "messageDelta":
         setItems((previous) => appendMessageDelta(previous, event.itemId, event.text));
         return;
+      case "userMessage":
+        setItems((previous) => appendUnique(previous, {
+          id: event.itemId,
+          kind: "user",
+          text: event.text,
+        }));
+        return;
       case "messageCompleted":
         setItems((previous) => completeMessage(previous, event.itemId, event.text));
         if (event.sessionId) {

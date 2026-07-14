@@ -1,11 +1,20 @@
 export type ComposerAction = "send" | "steer" | "queue";
 
+export type AgentProvider = "codex" | "claude" | "gemini" | "copilot" | "opencode";
+
+export interface AgentPermissionOption {
+  id: string;
+  label: string;
+  kind: string;
+}
+
 export type MobileAgentEvent =
   | { type: "sessionsLoaded"; sessions: MobileSession[] }
   | { type: "sessionLoaded"; session: MobileSession; items: MobileTimelineItem[] }
   | { type: "turnStarted"; sessionId: string; turnId: string }
   | { type: "turnCompleted"; sessionId: string; status: string }
   | { type: "messageDelta"; sessionId: string; turnId: string; itemId: string; text: string }
+  | { type: "userMessage"; sessionId: string; itemId: string; text: string }
   | { type: "messageCompleted"; sessionId: string; itemId?: string; text: string }
   | { type: "toolStarted"; sessionId: string; itemId: string; title: string; detail: string }
   | {
@@ -16,6 +25,7 @@ export type MobileAgentEvent =
       itemId: string;
       title: string;
       detail: string;
+      options?: AgentPermissionOption[];
     }
   | { type: "error"; message: string };
 
@@ -24,7 +34,7 @@ export interface MobileSession {
   title: string;
   cwd?: string;
   updatedAt?: number;
-  provider: "codex" | "claude";
+  provider: AgentProvider;
 }
 
 export interface MobileTimelineItem {

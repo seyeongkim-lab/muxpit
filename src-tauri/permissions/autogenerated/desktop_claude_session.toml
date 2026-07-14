@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-claude-session"
+description = "Enables the desktop_claude_session command without any pre-configured scope."
+commands.allow = ["desktop_claude_session"]
+
+[[permission]]
+identifier = "deny-desktop-claude-session"
+description = "Denies the desktop_claude_session command without any pre-configured scope."
+commands.deny = ["desktop_claude_session"]

@@ -21,8 +21,8 @@ interface AiPaneToolbarProps {
  * running an AI CLI. Buttons appear only for AI CLIs that the host probe
  * found installed (and excludes the one already running here).
  *
- * The probe itself is dispatched in `App.autoAiSplit` at connect time. If we
- * mount before the probe finished (e.g. session restore), we kick a deferred
+ * The probe normally runs before a legacy AI pane starts. If we mount before
+ * the probe finished (e.g. session restore), we kick a deferred
  * probe by reusing the parent leaf's ssh command — best-effort, silent on
  * failure.
  */
@@ -54,8 +54,8 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget, ssh
     [sshConnection, host, baseSshCommand],
   );
 
-  // Re-probe lazily if availability is unknown for this target (e.g. session
-  // restored before `App.autoAiSplit` got a chance to populate the cache).
+  // Re-probe lazily if availability is unknown for this target (e.g. a session
+  // restored before the cache was populated).
   useEffect(() => {
     if (available !== undefined) return;
     probe(sshTarget, baseSshCommand, baseSshConnection).catch(() => {});

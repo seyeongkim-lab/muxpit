@@ -13,7 +13,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { LaunchProfilesPanel } from "./components/LaunchProfilesPanel";
-import { AgentLauncherPanel } from "./components/AgentLauncherPanel";
+import { AgentWorkbenchPanel } from "./components/AgentWorkbenchPanel";
 import { OnboardingPanel } from "./components/OnboardingPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
 import {
@@ -23,11 +23,11 @@ import {
   quotePosixShellArg,
   type SshHost,
 } from "./stores/sshHosts";
-import { useAiCliStore, buildAiLaunchSpec, parseSshTarget } from "./stores/aiCli";
+import { parseSshTarget } from "./stores/aiCli";
 import { useNotificationStore } from "./stores/notifications";
 import { useAgentTaskStore } from "./stores/agentTasks";
 import { useLaunchProfileStore } from "./stores/launchProfiles";
-import { getTmuxActivePaneCwd, useTmuxSessionsStore } from "./stores/tmuxSessions";
+import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
 import { destroyTerminal, destroyAllTerminals, terminalInstances } from "./components/terminalRegistry";
@@ -98,55 +98,6 @@ const isTmuxVersionSupported = (version: string): boolean => {
 };
 
 
-/**
- * Probe the remote for installed AI CLIs and (when claude is found) auto-split a
- * second pane into it. Probe results are cached on `useAiCliStore` so the
- * per-pane toolbar can render the same set without a second SSH call.
- */
-const autoAiSplit = async (wsId: string, sshCommand: string, sshConnection?: SshConnection, host?: SshHost) => {
-  try {
-    const target = sshConnection?.target ?? (host ? `${host.user}@${host.host}` : parseSshTarget(sshCommand));
-    if (!target) return;
-    const connection = sshConnection ?? (host ? buildSshConnection(host) : parseSshCommandLine(sshCommand)?.connection);
-
-    await useAiCliStore.getState().probe(target, sshCommand, connection);
-    const available = useAiCliStore.getState().available(target);
-    if (!available || !available.has("claude")) return;
-
-    const state = useWorkspaceStore.getState();
-    const ws = state.workspaces.find((w) => w.id === wsId);
-    if (!ws) return;
-
-    // Skip if any AI pane already exists in this workspace. Backwards-compat:
-    // leaves saved before the aiKind field landed only carry a command string,
-    // so we also sniff the embedded remote command for a known AI CLI name.
-    const hasAiPane = (node: LayoutNode): boolean => {
-      if (node.type === "leaf") {
-        if (node.aiKind) return true;
-        return /(?:^|['" /])(claude|codex|gemini|copilot|opencode)\b/.test(node.command ?? "");
-      }
-      if (node.type === "split") return hasAiPane(node.children[0]) || hasAiPane(node.children[1]);
-      return false;
-    };
-    if (hasAiPane(ws.layout)) return;
-
-    const leafId = ws.layout.type === "leaf" ? ws.layout.id : ws.focusedLeafId;
-    const infoState = useWorkspaceInfoStore.getState();
-    const cwd = infoState.leafCwds[wsId]?.[leafId]
-      ?? await getTmuxActivePaneCwd(wsId).catch(() => undefined)
-      ?? infoState.info[wsId]?.cwd;
-    const claude = buildAiLaunchSpec("claude", sshCommand, connection, cwd);
-    useWorkspaceStore.getState().splitLeafWithCommand(wsId, leafId, "horizontal", claude.command, {
-      aiKind: "claude",
-      aiSshTarget: target,
-      sshConnection: claude.sshConnection,
-      sshRemoteCommand: claude.sshRemoteCommand,
-    });
-  } catch {
-    // Silently ignore — probe failures already cache an empty set.
-  }
-};
-
 export const App = () => {
   const { workspaces, activeId, addWorkspace, removeWorkspace, splitLeaf, closeLeaf, openBrowser } =
     useWorkspaceStore();
@@ -155,7 +106,7 @@ export const App = () => {
   const [sshPanelOpen, setSshPanelOpen] = useState(false);
   const [sshPanelEditId, setSshPanelEditId] = useState<string | null>(null);
   const [gridView, setGridView] = useState(false);
-  const [agentLauncherOpen, setAgentLauncherOpen] = useState(false);
+  const [agentWorkbenchOpen, setAgentWorkbenchOpen] = useState(true);
   const [filesRailVisible, setFilesRailVisible] = useState(true);
   const [sidebarMonitor, setSidebarMonitor] = useState<{ monitorId: string; sshTarget: string; sshCommand: string; sshConnection?: SshConnection } | null>(null);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
@@ -192,7 +143,6 @@ export const App = () => {
     sshPanelOpen ||
     closeConfirmOpen ||
     launchProfilesOpen ||
-    agentLauncherOpen ||
     !hasCompletedOnboarding ||
     notificationPanelOpen ||
     historyPanelOpen ||
@@ -361,8 +311,7 @@ export const App = () => {
       addWorkspace("Shell 1");
     }
 
-    // Auto claude split for restored SSH workspaces, and re-attach the tmux
-    // session list poller for any leaf that was persisted with a tmuxSession.
+    // Re-attach the tmux session list poller for restored SSH workspaces.
     if (restored) {
       const state = useWorkspaceStore.getState();
       for (const ws of state.workspaces) {
@@ -382,7 +331,6 @@ export const App = () => {
           if (ssh.tmuxSession) {
             useTmuxSessionsStore.getState().attach(ws.id, ssh.cmd, ssh.tmuxSession, ssh.sshConnection);
           }
-          autoAiSplit(ws.id, ssh.cmd, ssh.sshConnection);
         }
       }
     }
@@ -916,7 +864,6 @@ export const App = () => {
     monitorTargetRef.current = target;
     monitorCommandRef.current = cmd;
 
-    autoAiSplit(wsId, cmd, sshConnection, host);
   }, [addWorkspace]);
 
   const handleViewClaudeSession = useCallback((sshTarget: string, project: string, projectPath: string | undefined, sessionId: string, sshConnection?: SshConnection) => {
@@ -986,7 +933,7 @@ export const App = () => {
       ) : (
         <TopDashboardBar
           onOpenSettings={() => setSettingsOpen(true)}
-          onOpenAgentLauncher={() => setAgentLauncherOpen(true)}
+          onOpenAgentLauncher={() => setAgentWorkbenchOpen((open) => !open)}
           onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
           onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
           onConnectHost={handleConnectHost}
@@ -1005,7 +952,7 @@ export const App = () => {
         {dashboardLayout === "left" ? (
           <Sidebar
             onOpenSettings={() => setSettingsOpen(true)}
-            onOpenAgentLauncher={() => setAgentLauncherOpen(true)}
+            onOpenAgentLauncher={() => setAgentWorkbenchOpen((open) => !open)}
             onOpenSshPanel={() => { setSshPanelEditId(null); setSshPanelOpen(true); }}
             onEditHost={(hostId) => { setSshPanelEditId(hostId); setSshPanelOpen(true); }}
             onConnectHost={handleConnectHost}
@@ -1056,16 +1003,16 @@ export const App = () => {
             </div>
           )}
         </div>
+        <AgentWorkbenchPanel
+          open={agentWorkbenchOpen}
+          onClose={() => setAgentWorkbenchOpen(false)}
+        />
         <PrefixIndicator />
         <HistoryPanel />
         <NotificationPanel />
         <LaunchProfilesPanel
           open={launchProfilesOpen}
           onClose={() => setLaunchProfilesOpen(false)}
-        />
-        <AgentLauncherPanel
-          open={agentLauncherOpen}
-          onClose={() => setAgentLauncherOpen(false)}
         />
         <OnboardingPanel />
         <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
