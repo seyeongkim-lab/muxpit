@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CodexMobileClient } from "./codexMobileClient.ts";
 import {
   JsonLineDecoder,
@@ -184,6 +184,11 @@ export const MobileApp = () => {
   const activeTurnRef = useRef<string | null>(null);
   const runningRef = useRef(false);
   const queueRef = useRef<string[]>([]);
+  const timelineRef = useRef<HTMLElement | null>(null);
+  const pendingSessionScrollRef = useRef<{
+    sessionId: string;
+    items: MobileTimelineItem[];
+  } | null>(null);
   const normalizedHandlerRef = useRef<(event: MobileAgentEvent) => void>(() => {});
   const transportHandlerRef = useRef<(event: MobileAgentTransportEvent) => void>(() => {});
   const submitRef = useRef<(text: string, fromQueue?: boolean) => Promise<void>>(async () => {});
@@ -194,6 +199,14 @@ export const MobileApp = () => {
   useEffect(() => { activeTurnRef.current = activeTurnId; }, [activeTurnId]);
   useEffect(() => { runningRef.current = running; }, [running]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
+
+  useLayoutEffect(() => {
+    const pending = pendingSessionScrollRef.current;
+    const timeline = timelineRef.current;
+    if (!pending || pending.sessionId !== activeSessionId || pending.items !== items || !timeline) return;
+    timeline.scrollTop = timeline.scrollHeight;
+    pendingSessionScrollRef.current = null;
+  }, [activeSessionId, items]);
 
   useEffect(() => {
     if (MOBILE_DEMO) return;
@@ -224,6 +237,7 @@ export const MobileApp = () => {
     setActiveSessionId(null);
     activeSessionRef.current = null;
     setItems([]);
+    pendingSessionScrollRef.current = null;
     setApprovals([]);
     setQueue([]);
     queueRef.current = [];
@@ -356,6 +370,10 @@ export const MobileApp = () => {
         setSessions(event.sessions);
         return;
       case "sessionLoaded":
+        pendingSessionScrollRef.current = {
+          sessionId: event.session.id,
+          items: event.items,
+        };
         setActiveSessionId(event.session.id);
         activeSessionRef.current = event.session.id;
         setItems(event.items);
@@ -662,7 +680,7 @@ export const MobileApp = () => {
         </button>
       </nav>
 
-      <main className="activity-timeline" aria-live="polite">
+      <main ref={timelineRef} className="activity-timeline" aria-live="polite">
         <section className="session-heading">
           <div>
             <span className="eyebrow">{provider}</span>
