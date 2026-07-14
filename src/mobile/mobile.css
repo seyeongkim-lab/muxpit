@@ -43,7 +43,11 @@ textarea:focus-visible {
   --blue-dark: #1b3d70;
   --amber: #e8a64b;
   --red: #ef7777;
+  box-sizing: border-box;
   display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   height: 100dvh;
   background: #0f1115;

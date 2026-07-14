@@ -12,5 +12,6 @@ test("Claude session selection loads history without rescanning the full list", 
   assert.match(script, /"type": "wmux_claude_session"/);
   assert.match(bridge, /export const loadClaudeSession/);
   assert.match(app, /loadClaudeSession\(historyChannel, sessionId\)/);
+  assert.match(app, /openProvider\(profile, "claude", session\.id, true\)/);
   assert.match(rust, /const CLAUDE_SESSION_SCRIPT: &str = include_str!/);
 });

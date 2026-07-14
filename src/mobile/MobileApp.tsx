@@ -246,10 +246,10 @@ export const MobileApp = () => {
     });
   };
 
-  const resetAgentState = (): void => {
+  const resetAgentState = (preserveSessions = false): void => {
     codexClient.current?.close("Provider changed");
     codexClient.current = null;
-    setSessions([]);
+    if (!preserveSessions) setSessions([]);
     setActiveSessionId(null);
     activeSessionRef.current = null;
     setItems([]);
@@ -267,10 +267,11 @@ export const MobileApp = () => {
     profile: HostProfile,
     nextProvider: Provider,
     sessionId?: string,
+    preserveSessions = false,
   ): Promise<string | undefined> => {
     const previousChannel = activeChannel.current;
     if (previousChannel) await closeAgent(previousChannel).catch(() => {});
-    resetAgentState();
+    resetAgentState(preserveSessions);
     setProvider(nextProvider);
     providerRef.current = nextProvider;
     setError(null);
@@ -354,6 +355,7 @@ export const MobileApp = () => {
         trustedProfile,
         restore?.provider ?? providerRef.current,
         restore?.sessionId,
+        Boolean(restore?.sessionId),
       );
     } catch (reason) {
       setConnectionStatus("disconnected");
@@ -371,7 +373,7 @@ export const MobileApp = () => {
       const currentProvider = providerRef.current;
       const sessionId = activeSessionRef.current ?? undefined;
       if (await probeSsh()) {
-        if (!activeChannel.current) await openProvider(profile, currentProvider, sessionId);
+        if (!activeChannel.current) await openProvider(profile, currentProvider, sessionId, true);
         return;
       }
       const auth = credentialCache.current.get(profile.id);
@@ -641,7 +643,7 @@ export const MobileApp = () => {
       return;
     }
     const profile = currentProfileRef.current;
-    if (profile) await openProvider(profile, "claude", session.id);
+    if (profile) await openProvider(profile, "claude", session.id, true);
   };
 
   const newSession = async (): Promise<void> => {
