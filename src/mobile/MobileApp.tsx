@@ -891,69 +891,77 @@ const ConnectionView = ({
 
   return (
     <main className="connect-screen">
-      <header className="connect-brand">
-        <span className="brand-mark">w</span>
-        <div><strong>wmux</strong><small>Remote agent workbench</small></div>
-      </header>
+      <div className="connect-scroll">
+        <header className="connect-brand">
+          <span className="brand-mark">w</span>
+          <div><strong>wmux</strong><small>Remote agent workbench</small></div>
+        </header>
 
-      {profiles.length > 0 ? (
-        <section className="saved-hosts">
-          <div className="section-heading"><span>Saved hosts</span><button type="button" onClick={onNewProfile}>New</button></div>
-          <div className="saved-host-strip">
-            {profiles.map((profile) => (
-              <button
-                type="button"
-                key={profile.id}
-                className={profile.id === form.id ? "active" : ""}
-                onClick={() => onSelectProfile(profile)}
-              >
-                <strong>{profile.name}</strong>
-                <small>{profile.host}</small>
-              </button>
-            ))}
+        {profiles.length > 0 ? (
+          <section className="saved-hosts">
+            <div className="section-heading"><span>Saved hosts</span><button type="button" onClick={onNewProfile}>New</button></div>
+            <div className="saved-host-strip">
+              {profiles.map((profile) => (
+                <button
+                  type="button"
+                  key={profile.id}
+                  className={profile.id === form.id ? "active" : ""}
+                  onClick={() => onSelectProfile(profile)}
+                >
+                  <strong>{profile.name}</strong>
+                  <small>{profile.host}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="connect-form">
+          <div className="section-heading"><span>SSH connection</span><small>Secrets stay in memory</small></div>
+          <label>Profile name<input value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Build server" /></label>
+          <div className="field-pair host-port">
+            <label>Host<input value={form.host} onChange={(event) => update("host", event.target.value)} placeholder="192.168.0.9" inputMode="url" autoCapitalize="none" /></label>
+            <label>Port<input value={form.port} onChange={(event) => update("port", event.target.value)} inputMode="numeric" /></label>
           </div>
-        </section>
-      ) : null}
+          <label>User<input value={form.user} onChange={(event) => update("user", event.target.value)} placeholder="username" autoCapitalize="none" autoComplete="username" /></label>
+          <label>Working directory<input value={form.cwd} onChange={(event) => update("cwd", event.target.value)} placeholder="/home/me/Projects/app" autoCapitalize="none" /></label>
 
-      <section className="connect-form">
-        <div className="section-heading"><span>SSH connection</span><small>Secrets stay in memory</small></div>
-        <label>Profile name<input value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Build server" /></label>
-        <div className="field-pair host-port">
-          <label>Host<input value={form.host} onChange={(event) => update("host", event.target.value)} placeholder="192.168.0.9" inputMode="url" autoCapitalize="none" /></label>
-          <label>Port<input value={form.port} onChange={(event) => update("port", event.target.value)} inputMode="numeric" /></label>
-        </div>
-        <label>User<input value={form.user} onChange={(event) => update("user", event.target.value)} placeholder="username" autoCapitalize="none" autoComplete="username" /></label>
-        <label>Working directory<input value={form.cwd} onChange={(event) => update("cwd", event.target.value)} placeholder="/home/me/Projects/app" autoCapitalize="none" /></label>
+          <div className="auth-switch" aria-label="SSH authentication">
+            <button type="button" className={form.authMode === "password" ? "active" : ""} onClick={() => update("authMode", "password")}>Password</button>
+            <button type="button" className={form.authMode === "privateKey" ? "active" : ""} onClick={() => update("authMode", "privateKey")}>Private key</button>
+          </div>
 
-        <div className="auth-switch" aria-label="SSH authentication">
-          <button type="button" className={form.authMode === "password" ? "active" : ""} onClick={() => update("authMode", "password")}>Password</button>
-          <button type="button" className={form.authMode === "privateKey" ? "active" : ""} onClick={() => update("authMode", "privateKey")}>Private key</button>
-        </div>
+          {form.authMode === "password" ? (
+            <label>Password<input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} autoComplete="current-password" /></label>
+          ) : (
+            <>
+              <label>OpenSSH private key<textarea value={form.privateKey} onChange={(event) => update("privateKey", event.target.value)} rows={5} autoCapitalize="none" spellCheck={false} /></label>
+              <label>Key passphrase<input type="password" value={form.passphrase} onChange={(event) => update("passphrase", event.target.value)} /></label>
+            </>
+          )}
 
-        {form.authMode === "password" ? (
-          <label>Password<input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} autoComplete="current-password" /></label>
-        ) : (
-          <>
-            <label>OpenSSH private key<textarea value={form.privateKey} onChange={(event) => update("privateKey", event.target.value)} rows={5} autoCapitalize="none" spellCheck={false} /></label>
-            <label>Key passphrase<input type="password" value={form.passphrase} onChange={(event) => update("passphrase", event.target.value)} /></label>
-          </>
-        )}
+          {error ? <div className="connect-error" role="alert">{error}</div> : null}
 
-        {error ? <div className="connect-error" role="alert">{error}</div> : null}
-
-        {pendingTrust ? (
+          {pendingTrust ? (
           <div className="trust-panel">
             <strong>Verify this host key</strong>
             <code>{pendingTrust.fingerprint}</code>
             <p>Compare this SHA-256 fingerprint with the server before trusting it.</p>
-            <button type="button" onClick={onTrust}>Trust and connect</button>
           </div>
-        ) : (
-          <button type="button" className="connect-button" disabled={status === "connecting"} onClick={onConnect}>
-            {status === "connecting" ? "Connecting…" : "Connect"}
-          </button>
-        )}
-      </section>
+          ) : null}
+        </section>
+      </div>
+
+      <footer className="connect-footer">
+        <button
+          type="button"
+          className="connect-button"
+          disabled={status === "connecting"}
+          onClick={pendingTrust ? onTrust : onConnect}
+        >
+          {status === "connecting" ? "Connecting…" : pendingTrust ? "Trust and connect" : "Connect"}
+        </button>
+      </footer>
     </main>
   );
 };

@@ -655,11 +655,26 @@ textarea:focus-visible {
 
 .connect-screen {
   box-sizing: border-box;
-  min-height: 100dvh;
-  overflow-y: auto;
-  padding: max(22px, env(safe-area-inset-top)) 18px max(26px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100dvh;
+  overflow: hidden;
   background: #101217;
   color: #eef0f4;
+}
+
+.connect-scroll {
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: max(22px, env(safe-area-inset-top)) 18px 18px;
+  background: #101217;
+  overscroll-behavior: contain;
+}
+
+.connect-footer {
+  padding: 10px 18px max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid #2b313b;
+  background: #15181e;
 }
 
 .connect-brand {
@@ -819,10 +834,12 @@ textarea:focus-visible {
   flex: 1;
 }
 
-.connect-button,
-.trust-panel button {
+.connect-button {
+  display: block;
   width: 100%;
+  max-width: 560px;
   min-height: 50px;
+  margin: 0 auto;
   border: 1px solid #4a80c5;
   background: #285c9b;
   color: #ffffff;
@@ -861,7 +878,7 @@ textarea:focus-visible {
 }
 
 .trust-panel p {
-  margin: 10px 0 14px;
+  margin: 10px 0 0;
   color: #aaa294;
   font-size: 11px;
   line-height: 1.5;
