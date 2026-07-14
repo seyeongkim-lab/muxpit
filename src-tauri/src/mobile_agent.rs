@@ -109,7 +109,11 @@ pub struct SshConnectRequest {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum SshAuth {
     Password {
         password: String,
