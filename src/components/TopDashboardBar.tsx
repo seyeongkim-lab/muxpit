@@ -236,19 +236,68 @@ export const TopDashboardBar = ({
         </div>
         <div data-tauri-drag-region style={styles.dragSpacer} />
         <div style={styles.controls}>
-          <TopTabButton
-            active={visibleTab === "hosts"}
-            label="Hosts"
-            value={String(sshHosts.length)}
-            onMouseEnter={() => showTab("hosts")}
-            onClick={() => togglePinned("hosts")}
-          />
-          <MonitorTabButton
-            monitor={monitor}
-            active={visibleTab === "monitor"}
-            onMouseEnter={() => showTab("monitor")}
-            onClick={() => togglePinned("monitor")}
-          />
+          <div style={styles.dashboardTabs}>
+            <TopTabButton
+              active={visibleTab === "hosts"}
+              label="Hosts"
+              value={String(sshHosts.length)}
+              onMouseEnter={() => showTab("hosts")}
+              onClick={() => togglePinned("hosts")}
+            />
+            <MonitorTabButton
+              monitor={monitor}
+              active={visibleTab === "monitor"}
+              onMouseEnter={() => showTab("monitor")}
+              onClick={() => togglePinned("monitor")}
+            />
+            {visibleTab && (
+              <div
+                style={styles.popover}
+                onMouseEnter={() => setHoveredTab(visibleTab)}
+                onMouseLeave={hideTab}
+              >
+                {visibleTab === "hosts" && (
+                  <div style={styles.popoverList}>
+                    <div style={styles.popoverHeader}>
+                      <span className="wmux-section-label">HOSTS</span>
+                      <button className="wmux-btn" onClick={onOpenSshPanel} style={styles.smallButton}>
+                        +
+                      </button>
+                    </div>
+                    {sshHosts.length === 0 && (
+                      <button className="wmux-btn" onClick={onOpenSshPanel} style={styles.emptyButton}>
+                        Add host
+                      </button>
+                    )}
+                    {sshHosts.map((host) => {
+                      const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
+                      return (
+                        <div key={host.id} style={styles.hostRow} onClick={() => onConnectHost?.(host)}>
+                          <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "var(--wmux-accent)" }} />
+                          <span style={styles.hostName}>{host.name}</span>
+                          <span style={styles.hostTarget}>{target}</span>
+                          <button
+                            className="wmux-btn"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onEditHost?.(host.id);
+                            }}
+                            style={styles.closeBtn}
+                            title="Edit host"
+                          >
+                            e
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {visibleTab === "monitor" && (
+                  <MonitorPopover monitor={monitor} onCloseMonitor={onCloseMonitor} />
+                )}
+              </div>
+            )}
+          </div>
           <button
             className="wmux-btn"
             onClick={onToggleFilesRail}
@@ -304,53 +353,6 @@ export const TopDashboardBar = ({
           />
         </div>
       </div>
-      {visibleTab && (
-        <div
-          style={styles.popover}
-          onMouseEnter={() => setHoveredTab(visibleTab)}
-          onMouseLeave={hideTab}
-        >
-          {visibleTab === "hosts" && (
-            <div style={styles.popoverList}>
-              <div style={styles.popoverHeader}>
-                <span className="wmux-section-label">HOSTS</span>
-                <button className="wmux-btn" onClick={onOpenSshPanel} style={styles.smallButton}>
-                  +
-                </button>
-              </div>
-              {sshHosts.length === 0 && (
-                <button className="wmux-btn" onClick={onOpenSshPanel} style={styles.emptyButton}>
-                  Add host
-                </button>
-              )}
-              {sshHosts.map((host) => {
-                const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
-                return (
-                  <div key={host.id} style={styles.hostRow} onClick={() => onConnectHost?.(host)}>
-                    <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "var(--wmux-accent)" }} />
-                    <span style={styles.hostName}>{host.name}</span>
-                    <span style={styles.hostTarget}>{target}</span>
-                    <button
-                      className="wmux-btn"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onEditHost?.(host.id);
-                      }}
-                      style={styles.closeBtn}
-                      title="Edit host"
-                    >
-                      e
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {visibleTab === "monitor" && (
-            <MonitorPopover monitor={monitor} onCloseMonitor={onCloseMonitor} />
-          )}
-        </div>
-      )}
     </div>
   );
 };
@@ -784,6 +786,13 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100%",
     flexShrink: 0,
   },
+  dashboardTabs: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    height: "100%",
+  },
   tabButton: {
     height: 24,
     display: "flex",
@@ -836,7 +845,7 @@ const styles: Record<string, React.CSSProperties> = {
   popover: {
     position: "absolute",
     top: 36,
-    right: 138,
+    left: 0,
     width: 360,
     maxHeight: "min(440px, 70vh)",
     overflow: "auto",
