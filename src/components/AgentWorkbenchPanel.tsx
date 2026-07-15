@@ -28,11 +28,18 @@ import {
   readSessionRuntime,
   sessionRuntimeLabel,
   sessionRuntimeKey,
+  shouldProcessAgentChannelPayload,
   updateSessionRuntime,
   type AgentApprovalRequest,
+  type AgentChannelPurpose,
   type AgentSessionRuntime,
   type AgentSessionRuntimes,
 } from "../mobile/agentSessionRuntime.ts";
+import {
+  loadAgentWorkbenchSnapshot,
+  saveAgentWorkbenchSnapshot,
+  type AgentWorkbenchViewSnapshot,
+} from "../mobile/agentWorkbenchPersistence.ts";
 import { CodexMobileClient } from "../mobile/codexMobileClient.ts";
 import { AI_KINDS } from "../stores/aiCli.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
@@ -55,7 +62,7 @@ interface ProviderView {
 
 interface ChannelMeta {
   provider: AiKind;
-  purpose: "provider" | "claude-list" | "claude-history";
+  purpose: AgentChannelPurpose;
   handledPayload: boolean;
   sessionId?: string;
 }
@@ -63,6 +70,8 @@ interface ChannelMeta {
 const MIN_WORKBENCH_WIDTH = 420;
 const MIN_TERMINAL_WIDTH = 280;
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
+const DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v1:";
+const WORKBENCH_PERSIST_DELAY_MS = 200;
 
 const PROVIDER_NAMES: Record<AiKind, string> = {
   claude: "Claude",
@@ -95,6 +104,27 @@ const emptyViews = (): Record<AiKind, ProviderView> => ({
   copilot: emptyView(),
   opencode: emptyView(),
 });
+
+const restoreViews = (
+  snapshots: Partial<Record<AiKind, AgentWorkbenchViewSnapshot>>,
+): Record<AiKind, ProviderView> => {
+  const views = emptyViews();
+  for (const kind of AI_KINDS) {
+    const snapshot = snapshots[kind];
+    if (snapshot) views[kind] = { ...views[kind], ...snapshot };
+  }
+  return views;
+};
+
+const snapshotViews = (
+  views: Record<AiKind, ProviderView>,
+): Record<AiKind, AgentWorkbenchViewSnapshot> => Object.fromEntries(
+  AI_KINDS.map((kind) => [kind, {
+    sessions: views[kind].sessions,
+    activeSessionId: views[kind].activeSessionId,
+    runtimes: views[kind].runtimes,
+  }]),
+) as Record<AiKind, AgentWorkbenchViewSnapshot>;
 
 const relativeTime = (timestamp?: number): string => {
   if (!timestamp) return "";
@@ -163,12 +193,11 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   const [probedTarget, setProbedTarget] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
   const [views, setViews] = useState<Record<AiKind, ProviderView>>(emptyViews);
-  const [draft, setDraft] = useState("");
-  const [queueMode, setQueueMode] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
   const [width, setWidth] = useState(560);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const viewsRef = useRef(views);
+  const providerRef = useRef(provider);
   const channels = useRef(new Map<string, ChannelMeta>());
   const providerChannels = useRef(new Map<string, string>());
   const openingProviders = useRef(new Map<string, Promise<string | undefined>>());
@@ -217,6 +246,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   const view = views[provider];
   const runtime = readSessionRuntime(view.runtimes, view.activeSessionId);
   const latestTimelineTextLength = runtime.items[runtime.items.length - 1]?.text.length ?? 0;
+  providerRef.current = provider;
 
   const updateView = useCallback((kind: AiKind, update: (current: ProviderView) => ProviderView) => {
     const current = viewsRef.current;
@@ -471,6 +501,14 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           );
           codexClients.current.set(kind, client);
           await client.initialize();
+          const activeSessionId = sessionId ?? viewsRef.current[kind].activeSessionId ?? undefined;
+          if (activeSessionId) {
+            try {
+              await client.resumeSession(activeSessionId);
+            } catch (reason) {
+              updateView(kind, (current) => ({ ...current, error: String(reason) }));
+            }
+          }
         } else if (kind === "claude") {
           updateView(kind, (current) => ({ ...current, status: "ready" }));
           const current = viewsRef.current.claude;
@@ -488,6 +526,17 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           );
           acpClients.current.set(kind, client);
           await client.initialize();
+          const activeSessionId = sessionId ?? viewsRef.current[kind].activeSessionId ?? undefined;
+          if (activeSessionId) {
+            const activeSession = viewsRef.current[kind].sessions.find(
+              (candidate) => candidate.id === activeSessionId,
+            );
+            try {
+              await client.loadSession(activeSessionId, activeSession?.cwd ?? target.cwd ?? ".");
+            } catch (reason) {
+              updateView(kind, (current) => ({ ...current, error: String(reason) }));
+            }
+          }
           updateView(kind, (current) => ({ ...current, status: "ready" }));
         }
         return channelId;
@@ -601,6 +650,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       const decoder = decoders.current.get(event.channelId) ?? new JsonLineDecoder();
       decoders.current.set(event.channelId, decoder);
       for (const line of decoder.push(event.data)) {
+        if (!shouldProcessAgentChannelPayload(meta.purpose, meta.handledPayload)) break;
         if (meta.purpose === "provider" && meta.provider === "codex") {
           codexClients.current.get(meta.provider)?.receive(line);
           continue;
@@ -699,9 +749,22 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     setProbing(true);
     setInstalled(new Set());
     setProbedTarget(null);
-    setViews(emptyViews());
-    viewsRef.current = emptyViews();
     const currentChannels = [...channels.current.keys()];
+    channels.current.clear();
+    decoders.current.clear();
+    claudeNormalizers.current.clear();
+    stderr.current.clear();
+    for (const timeout of helperTimeouts.current.values()) clearTimeout(timeout);
+    helperTimeouts.current.clear();
+    const restored = loadAgentWorkbenchSnapshot(
+      `${DESKTOP_WORKBENCH_STORAGE_PREFIX}${targetKey}`,
+      AI_KINDS,
+    );
+    const nextViews = restoreViews(restored?.views ?? {});
+    const restoredProvider = restored?.provider ?? provider;
+    setViews(nextViews);
+    viewsRef.current = nextViews;
+    setProvider(restoredProvider);
     providerChannels.current.clear();
     openingProviders.current.clear();
     for (const client of codexClients.current.values()) client.close("Target changed");
@@ -714,10 +777,14 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         if (cancelled) return;
         setInstalled(found);
         setProbedTarget(targetKey);
-        if (!found.has(provider)) setProvider(AI_KINDS.find((kind) => found.has(kind)) ?? "codex");
+        if (!found.has(restoredProvider)) {
+          setProvider(AI_KINDS.find((kind) => found.has(kind)) ?? "codex");
+        }
       })
       .catch((reason) => {
-        if (!cancelled) updateView(provider, (current) => ({ ...current, error: String(reason) }));
+        if (!cancelled) {
+          updateView(restoredProvider, (current) => ({ ...current, error: String(reason) }));
+        }
       })
       .finally(() => {
         if (!cancelled) setProbing(false);
@@ -725,10 +792,34 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     return () => { cancelled = true; };
   }, [closeChannel, leaf?.id, open, probedTarget, targetKey]);
 
+  const persistWorkbench = useCallback((): void => {
+    if (probedTarget !== targetKey) return;
+    saveAgentWorkbenchSnapshot(`${DESKTOP_WORKBENCH_STORAGE_PREFIX}${targetKey}`, {
+      provider: providerRef.current,
+      views: snapshotViews(viewsRef.current),
+    });
+  }, [probedTarget, targetKey]);
+
+  useEffect(() => {
+    const timeout = setTimeout(persistWorkbench, WORKBENCH_PERSIST_DELAY_MS);
+    return () => clearTimeout(timeout);
+  }, [persistWorkbench, provider, views]);
+
+  useEffect(() => {
+    const persistWhenHidden = (): void => {
+      if (document.visibilityState === "hidden") persistWorkbench();
+    };
+    document.addEventListener("visibilitychange", persistWhenHidden);
+    return () => document.removeEventListener("visibilitychange", persistWhenHidden);
+  }, [persistWorkbench]);
+
   useEffect(() => {
     if (!open || probedTarget !== targetKey || !installed.has(provider)) return;
     if (provider === "claude") {
-      if (viewsRef.current.claude.status === "idle") void openClaudeAux("claude-list");
+      if (viewsRef.current.claude.status === "idle") {
+        const activeSessionId = viewsRef.current.claude.activeSessionId ?? undefined;
+        void openClaudeAux(activeSessionId ? "claude-history" : "claude-list", activeSessionId);
+      }
       return;
     }
     void openProvider(provider);
@@ -820,18 +911,18 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       : requestedSessionId;
     const currentRuntime = readSessionRuntime(current.runtimes, sessionId);
     if (currentRuntime.historyState === "loading") return;
-    if (currentRuntime.running && queueMode && !queued) {
+    if (currentRuntime.running && currentRuntime.queueMode && !queued) {
       updateRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         queue: [...runtime.queue, trimmed],
+        draft: "",
       }));
-      setDraft("");
       return;
     }
-    setDraft("");
     updateView(kind, (state) => ({ ...state, error: null }));
     updateRuntime(kind, sessionId, (runtime) => ({
       ...runtime,
+      draft: "",
       running: true,
       waiting: false,
       historyState: "loaded",
@@ -1099,25 +1190,28 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
               </div>
             ) : null}
 
-            <footer className={runtime.running && !queueMode ? "agent-composer steering" : "agent-composer"}>
+            <footer className={runtime.running && !runtime.queueMode ? "agent-composer steering" : "agent-composer"}>
               <textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
+                value={runtime.draft}
+                onChange={(event) => updateRuntime(provider, view.activeSessionId, (current) => ({
+                  ...current,
+                  draft: event.target.value,
+                }))}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                     event.preventDefault();
-                    void sendText(provider, draft);
+                    void sendText(provider, runtime.draft);
                   }
                 }}
-                placeholder={runtime.running && !queueMode ? "Redirect the active task…" : runtime.running ? "Add the next instruction…" : "Message the agent…"}
+                placeholder={runtime.running && !runtime.queueMode ? "Redirect the active task…" : runtime.running ? "Add the next instruction…" : "Message the agent…"}
                 rows={3}
               />
               <div className="agent-composer-actions">
                 <div>
                   {runtime.running ? (
                     <>
-                      <button type="button" className={!queueMode ? "active" : ""} onClick={() => setQueueMode(false)}>Steer</button>
-                      <button type="button" className={queueMode ? "active" : ""} onClick={() => setQueueMode(true)}>Queue</button>
+                      <button type="button" className={!runtime.queueMode ? "active" : ""} onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queueMode: false }))}>Steer</button>
+                      <button type="button" className={runtime.queueMode ? "active" : ""} onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queueMode: true }))}>Queue</button>
                     </>
                   ) : <span>Ctrl+Enter to send</span>}
                 </div>
@@ -1127,13 +1221,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                     type="button"
                     className="agent-send-button"
                     disabled={
-                      !draft.trim()
+                      !runtime.draft.trim()
                       || runtime.historyState === "loading"
-                      || (provider === "codex" && runtime.running && !runtime.activeTurnId && !queueMode)
+                      || (provider === "codex" && runtime.running && !runtime.activeTurnId && !runtime.queueMode)
                     }
-                    onClick={() => void sendText(provider, draft)}
+                    onClick={() => void sendText(provider, runtime.draft)}
                   >
-                    {runtime.running ? queueMode ? "Queue" : "Steer" : "Send"}
+                    {runtime.running ? runtime.queueMode ? "Queue" : "Steer" : "Send"}
                   </button>
                 </div>
               </div>

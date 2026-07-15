@@ -35,9 +35,10 @@ test("foreground reconnect keeps the current workbench until the provider resume
   assert.match(resetAgentState, /const next = preserveView[\s\S]*: \{\};/);
   assert.match(resetAgentState, /setRuntimes\(\(current\) =>/);
   assert.match(resetAgentState, /runtimesRef\.current = next/);
-  assert.match(connectProfile, /const reconnecting = restore !== undefined/);
+  assert.match(connectProfile, /const preservingView = restore !== undefined/);
+  assert.match(connectProfile, /const reconnecting = preservingView[\s\S]*connectionStatusRef\.current === "connected"[\s\S]*currentProfileRef\.current\?\.id === profile\.id/);
   assert.match(connectProfile, /if \(!reconnecting\) \{[\s\S]*setConnectionStatus\("connecting"\)/);
-  assert.match(connectProfile, /await openProvider\([\s\S]*reconnecting/);
+  assert.match(connectProfile, /await openProvider\([\s\S]*preservingView/);
   assert.doesNotMatch(connectProfile, /void openProvider\(/);
 });
 
@@ -62,4 +63,58 @@ test("failed Codex history resume restores the session input", () => {
   );
 
   assert.match(selectSession, /catch \(reason\) \{\s*updateRuntime\(session\.id, failSessionHistory\);/);
+});
+
+test("mobile workbench persists the selected session without credentials", () => {
+  assert.match(app, /loadAgentWorkbenchSnapshot/);
+  assert.match(app, /saveAgentWorkbenchSnapshot/);
+  assert.match(app, /const profileId = currentProfileRef\.current\?\.id \?\? restoredProfileId\.current/);
+  assert.match(app, /profileId,/);
+  assert.match(app, /value=\{runtime\.draft\}/);
+  assert.doesNotMatch(app, /const \[draft, setDraft\] = useState/);
+});
+
+test("mobile workbench scopes cached views by host and provider", () => {
+  assert.match(app, /mobileWorkbenchViewStorageKey/);
+  assert.match(app, /saveAgentWorkbenchSnapshot\(mobileWorkbenchViewStorageKey\(profileId, currentProvider\)/);
+  assert.match(app, /loadCachedWorkbenchView/);
+  assert.match(app, /persistWorkbenchRef\.current\(\);[\s\S]*loadCachedWorkbenchView\(profileId, nextProvider\)/);
+});
+
+test("connecting another host clears or restores only that host view", () => {
+  const connectFromForm = app.slice(
+    app.indexOf("const connectFromForm"),
+    app.indexOf("const trustAndConnect"),
+  );
+  const switchHost = app.slice(
+    app.indexOf("const switchHost"),
+    app.indexOf("const applyNormalizedEvent"),
+  );
+
+  assert.match(connectFromForm, /loadCachedWorkbenchView\(profile\.id, providerRef\.current\)/);
+  assert.match(switchHost, /loadCachedWorkbenchView\(profile\.id, providerRef\.current\)/);
+});
+
+test("switching to a host without cached credentials preserves the previous host cache", () => {
+  const switchHost = app.slice(
+    app.indexOf("const switchHost"),
+    app.indexOf("const applyNormalizedEvent"),
+  );
+  const missingCredentialBranch = switchHost.slice(
+    switchHost.indexOf("if (!auth)"),
+    switchHost.indexOf("await connectProfile"),
+  );
+
+  assert.match(missingCredentialBranch, /replaceWorkbenchView\(cachedView\)/);
+  assert.match(missingCredentialBranch, /restoredProfileId\.current = profile\.id/);
+});
+
+test("cold Claude reconnect refreshes cached history", () => {
+  const openProvider = app.slice(
+    app.indexOf("const openProvider"),
+    app.indexOf("const connectProfile"),
+  );
+
+  assert.match(openProvider, /const shouldRequestClaudeData = nextProvider === "claude"[\s\S]*preserveView/);
+  assert.match(openProvider, /preserveView[\s\S]*beginSessionHistory/);
 });

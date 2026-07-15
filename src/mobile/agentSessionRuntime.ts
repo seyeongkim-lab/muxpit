@@ -17,6 +17,8 @@ export interface AgentSessionRuntime {
   running: boolean;
   waiting: boolean;
   queue: string[];
+  draft: string;
+  queueMode: boolean;
   historyState: "idle" | "loading" | "loaded";
   historyBaseItems: MobileTimelineItem[];
 }
@@ -35,9 +37,18 @@ export const createSessionRuntime = (): AgentSessionRuntime => ({
   running: false,
   waiting: false,
   queue: [],
+  draft: "",
+  queueMode: false,
   historyState: "idle",
   historyBaseItems: [],
 });
+
+export type AgentChannelPurpose = "provider" | "claude-list" | "claude-history";
+
+export const shouldProcessAgentChannelPayload = (
+  purpose: AgentChannelPurpose,
+  handledPayload: boolean,
+): boolean => purpose === "provider" || !handledPayload;
 
 export const sessionRuntimeLabel = (runtime: AgentSessionRuntime): "Ready" | "Running" | "Waiting" =>
   runtime.waiting ? "Waiting" : runtime.running ? "Running" : "Ready";

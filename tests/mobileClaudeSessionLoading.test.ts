@@ -31,7 +31,7 @@ test("Claude provider browsing uses helpers and closes every previous channel", 
   );
 
   assert.match(changeProvider, /prepareProvider\(nextProvider\)/);
-  assert.match(changeProvider, /requestClaudeData\(\)/);
+  assert.match(changeProvider, /requestClaudeData\(activeSessionRef\.current \?\? undefined\)/);
   assert.doesNotMatch(changeProvider, /openProvider\(profile, "claude"\)/);
   assert.match(prepareProvider, /\[\.\.\.channels\.current\.keys\(\)\]/);
   assert.match(app, /openingProviders\.current\.get\(key\) === opening/);

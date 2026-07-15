@@ -58,6 +58,37 @@ test("AI workbench keeps the composer visible while session history loads", () =
   assert.match(styles, /\.agent-conversation \{[^}]*overflow: hidden;/);
 });
 
+test("AI workbench stores composer state in each session runtime", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.doesNotMatch(workbench, /const \[draft, setDraft\] = useState/);
+  assert.doesNotMatch(workbench, /const \[queueMode, setQueueMode\] = useState/);
+  assert.match(workbench, /value=\{runtime\.draft\}/);
+  assert.match(workbench, /runtime\.queueMode/);
+});
+
+test("AI workbench reconnects the cached active session after provider startup", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const openProvider = workbench.slice(
+    workbench.indexOf("const openProvider"),
+    workbench.indexOf("useEffect(() =>", workbench.indexOf("const openProvider")),
+  );
+
+  assert.match(openProvider, /viewsRef\.current\[kind\]\.activeSessionId/);
+  assert.match(openProvider, /client\.resumeSession\(activeSessionId\)/);
+  assert.match(openProvider, /client\.loadSession\(activeSessionId/);
+});
+
+test("AI workbench invalidates old target channels before restoring the next target", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const targetEffect = workbench.slice(
+    workbench.indexOf("if (!open || !leaf || probedTarget === targetKey) return"),
+    workbench.indexOf("const persistWorkbench"),
+  );
+
+  assert.ok(targetEffect.indexOf("channels.current.clear()") < targetEffect.indexOf("setViews(nextViews)"));
+});
+
 test("AI workbench loads Claude history without starting an idle process", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
   const selectSession = workbench.slice(
@@ -79,7 +110,7 @@ test("AI workbench provider tab lists Claude sessions without starting a process
   );
 
   assert.match(providerEffect, /provider === "claude"/);
-  assert.match(providerEffect, /openClaudeAux\("claude-list"\)/);
+  assert.match(providerEffect, /openClaudeAux\(activeSessionId \? "claude-history" : "claude-list", activeSessionId\)/);
   assert.match(providerEffect, /return;[\s\S]*openProvider\(provider\)/);
   assert.match(workbench, /openingProviders\.current\.get\(key\) === opening/);
 });

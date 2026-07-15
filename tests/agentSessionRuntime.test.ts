@@ -4,9 +4,11 @@ import assert from "node:assert/strict";
 import {
   beginSessionHistory,
   completeSessionHistory,
+  createSessionRuntime,
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
+  shouldProcessAgentChannelPayload,
   updateSessionRuntime,
 } from "../src/mobile/agentSessionRuntime.ts";
 
@@ -35,16 +37,45 @@ test("new session runtime moves to the provider session id", () => {
   let runtimes = updateSessionRuntime({}, null, (runtime) => ({
     ...runtime,
     running: true,
+    draft: "continue here",
+    queueMode: true,
     items: [{ id: "draft", kind: "user", text: "Start" }],
   }));
 
   runtimes = moveSessionRuntime(runtimes, null, "session-new");
 
   assert.equal(readSessionRuntime(runtimes, "session-new").running, true);
+  assert.equal(readSessionRuntime(runtimes, "session-new").draft, "continue here");
+  assert.equal(readSessionRuntime(runtimes, "session-new").queueMode, true);
   assert.deepEqual(readSessionRuntime(runtimes, "session-new").items, [
     { id: "draft", kind: "user", text: "Start" },
   ]);
   assert.deepEqual(readSessionRuntime(runtimes, null).items, []);
+});
+
+test("composer state stays isolated by session", () => {
+  let runtimes = updateSessionRuntime({}, "session-a", (runtime) => ({
+    ...runtime,
+    draft: "draft A",
+    queueMode: true,
+  }));
+  runtimes = updateSessionRuntime(runtimes, "session-b", (runtime) => ({
+    ...runtime,
+    draft: "draft B",
+  }));
+
+  assert.equal(readSessionRuntime(runtimes, "session-a").draft, "draft A");
+  assert.equal(readSessionRuntime(runtimes, "session-a").queueMode, true);
+  assert.equal(readSessionRuntime(runtimes, "session-b").draft, "draft B");
+  assert.equal(readSessionRuntime(runtimes, "session-b").queueMode, false);
+  assert.equal(createSessionRuntime().draft, "");
+});
+
+test("completed or timed out Claude helpers reject late stdout", () => {
+  assert.equal(shouldProcessAgentChannelPayload("provider", true), true);
+  assert.equal(shouldProcessAgentChannelPayload("claude-history", false), true);
+  assert.equal(shouldProcessAgentChannelPayload("claude-history", true), false);
+  assert.equal(shouldProcessAgentChannelPayload("claude-list", true), false);
 });
 
 test("session history preserves events received while loading", () => {
