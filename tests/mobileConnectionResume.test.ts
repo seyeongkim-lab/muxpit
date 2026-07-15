@@ -33,7 +33,9 @@ test("foreground reconnect keeps the current workbench until the provider resume
   );
 
   assert.match(resetAgentState, /const next = preserveView[\s\S]*: \{\};/);
-  assert.match(resetAgentState, /setRuntimes\(\(current\) =>/);
+  assert.match(resetAgentState, /Object\.entries\(runtimesRef\.current\)/);
+  assert.doesNotMatch(resetAgentState, /setRuntimes\(\(current\) =>/);
+  assert.match(resetAgentState, /setRuntimes\(next\)/);
   assert.match(resetAgentState, /runtimesRef\.current = next/);
   assert.match(connectProfile, /const preservingView = restore !== undefined/);
   assert.match(connectProfile, /const reconnecting = preservingView[\s\S]*connectionStatusRef\.current === "connected"[\s\S]*currentProfileRef\.current\?\.id === profile\.id/);

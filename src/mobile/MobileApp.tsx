@@ -370,18 +370,16 @@ export const MobileApp = () => {
       activeSessionRef.current = null;
       pendingSessionScrollRef.current = null;
     }
-    setRuntimes((current) => {
-      const next = preserveView
-        ? Object.fromEntries(Object.entries(current).map(([key, runtime]) => [key, {
-            ...runtime,
-            activeTurnId: null,
-            running: false,
-            waiting: false,
-          }]))
-        : {};
-      runtimesRef.current = next;
-      return next;
-    });
+    const next = preserveView
+      ? Object.fromEntries(Object.entries(runtimesRef.current).map(([key, runtime]) => [key, {
+          ...runtime,
+          activeTurnId: null,
+          running: false,
+          waiting: false,
+        }]))
+      : {};
+    runtimesRef.current = next;
+    setRuntimes(next);
   };
 
   const replaceWorkbenchView = (view?: AgentWorkbenchViewSnapshot): void => {
