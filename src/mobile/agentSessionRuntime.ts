@@ -102,8 +102,11 @@ export const completeSessionHistory = (
   runtime: AgentSessionRuntime,
   historyItems: MobileTimelineItem[],
 ): AgentSessionRuntime => {
+  const baselineItems = runtime.historyState === "loading"
+    ? runtime.historyBaseItems
+    : withoutLoadingItems(runtime.items);
   const exactlyMatchesBaseline = (item: MobileTimelineItem): boolean =>
-    runtime.historyBaseItems.some((baseline) =>
+    baselineItems.some((baseline) =>
       baseline.id === item.id
       && baseline.kind === item.kind
       && baseline.text === item.text
@@ -117,14 +120,14 @@ export const completeSessionHistory = (
         && historyItem.title === item.title
       ));
   let lastHistoryItemIndex = -1;
-  for (let index = runtime.historyBaseItems.length - 1; index >= 0; index -= 1) {
-    if (!appearsInHistory(runtime.historyBaseItems[index])) continue;
+  for (let index = baselineItems.length - 1; index >= 0; index -= 1) {
+    if (!appearsInHistory(baselineItems[index])) continue;
     lastHistoryItemIndex = index;
     break;
   }
-  const cachedTail = runtime.historyState === "loading"
-    ? runtime.historyBaseItems.slice(lastHistoryItemIndex + 1).filter((item) => !appearsInHistory(item))
-    : [];
+  const cachedTail = baselineItems
+    .slice(lastHistoryItemIndex + 1)
+    .filter((item) => !appearsInHistory(item));
   const liveItems = runtime.historyState === "loading"
     ? withoutLoadingItems(runtime.items).filter((item) => !exactlyMatchesBaseline(item))
     : [];
