@@ -252,17 +252,19 @@ export const MobileApp = () => {
     });
   };
 
-  const resetAgentState = (preserveSessions = false): void => {
+  const resetAgentState = (preserveView = false): void => {
     codexClient.current?.close("Provider changed");
     codexClient.current = null;
-    if (!preserveSessions) setSessions([]);
-    setActiveSessionId(null);
-    activeSessionRef.current = null;
-    setItems([]);
-    pendingSessionScrollRef.current = null;
+    if (!preserveView) {
+      setSessions([]);
+      setActiveSessionId(null);
+      activeSessionRef.current = null;
+      setItems([]);
+      pendingSessionScrollRef.current = null;
+      setQueue([]);
+      queueRef.current = [];
+    }
     setApprovals([]);
-    setQueue([]);
-    queueRef.current = [];
     setRunning(false);
     runningRef.current = false;
     setActiveTurnId(null);
@@ -273,12 +275,12 @@ export const MobileApp = () => {
     profile: HostProfile,
     nextProvider: Provider,
     sessionId?: string,
-    preserveSessions = false,
+    preserveView = false,
     cwd = profile.cwd,
   ): Promise<string | undefined> => {
     const previousChannel = activeChannel.current;
     if (previousChannel) await closeAgent(previousChannel).catch(() => {});
-    resetAgentState(preserveSessions);
+    resetAgentState(preserveView);
     setProvider(nextProvider);
     providerRef.current = nextProvider;
     setError(null);
@@ -291,7 +293,9 @@ export const MobileApp = () => {
         if (sessionId) {
           setActiveSessionId(sessionId);
           activeSessionRef.current = sessionId;
-          setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
+          if (!preserveView) {
+            setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
+          }
         }
         const historyChannel = `${sessionId ? "claude-history" : "claude-sessions"}-${Date.now()}`;
         decoders.current.set(historyChannel, new JsonLineDecoder());
@@ -306,7 +310,9 @@ export const MobileApp = () => {
         if (sessionId) {
           setActiveSessionId(sessionId);
           activeSessionRef.current = sessionId;
-          setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
+          if (!preserveView) {
+            setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
+          }
         }
         await openAgent(channelId, nextProvider, undefined, cwd || undefined);
         const client = new CodexMobileClient(
@@ -332,8 +338,11 @@ export const MobileApp = () => {
     trustedFingerprint = profile.trustedFingerprint,
     restore?: { provider: Provider; sessionId?: string; cwd?: string },
   ): Promise<void> => {
-    setConnectionStatus("connecting");
-    connectionStatusRef.current = "connecting";
+    const reconnecting = restore !== undefined;
+    if (!reconnecting) {
+      setConnectionStatus("connecting");
+      connectionStatusRef.current = "connecting";
+    }
     setPendingTrust(null);
     setError(null);
     try {
@@ -358,11 +367,11 @@ export const MobileApp = () => {
       setForm(formFromProfile(trustedProfile));
       setConnectionStatus("connected");
       connectionStatusRef.current = "connected";
-      void openProvider(
+      await openProvider(
         trustedProfile,
         restore?.provider ?? providerRef.current,
         restore?.sessionId,
-        Boolean(restore?.sessionId),
+        reconnecting,
         restore?.cwd,
       );
     } catch (reason) {
@@ -374,6 +383,7 @@ export const MobileApp = () => {
 
   const resumeConnection = async (): Promise<void> => {
     if (connectionStatusRef.current !== "connected" || resumeInFlightRef.current) return;
+    if (activeChannel.current) return;
     const profile = currentProfileRef.current;
     if (!profile) return;
     resumeInFlightRef.current = true;

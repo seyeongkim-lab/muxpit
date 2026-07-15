@@ -15,3 +15,32 @@ test("mobile app checks and restores SSH when returning to the foreground", () =
   assert.match(bridge, /export const probeSsh/);
   assert.match(rust, /pub async fn mobile_ssh_probe/);
 });
+
+test("foreground reconnect keeps the current workbench until the provider resumes", () => {
+  const resetAgentState = app.slice(
+    app.indexOf("const resetAgentState"),
+    app.indexOf("const openProvider"),
+  );
+  const connectProfile = app.slice(
+    app.indexOf("const connectProfile"),
+    app.indexOf("const resumeConnection = async"),
+  );
+
+  assert.match(resetAgentState, /if \(!preserveView\) \{[\s\S]*setItems\(\[\]\)/);
+  assert.match(connectProfile, /const reconnecting = restore !== undefined/);
+  assert.match(connectProfile, /if \(!reconnecting\) \{[\s\S]*setConnectionStatus\("connecting"\)/);
+  assert.match(connectProfile, /await openProvider\([\s\S]*reconnecting/);
+  assert.doesNotMatch(connectProfile, /void openProvider\(/);
+});
+
+test("foreground resume does not probe a live provider channel", () => {
+  const resumeConnection = app.slice(
+    app.indexOf("const resumeConnection = async"),
+    app.indexOf("resumeConnectionRef.current = resumeConnection"),
+  );
+  const activeChannelGuard = resumeConnection.indexOf("if (activeChannel.current) return;");
+  const probe = resumeConnection.indexOf("await probeSsh()");
+
+  assert.notEqual(activeChannelGuard, -1);
+  assert.ok(activeChannelGuard < probe);
+});
