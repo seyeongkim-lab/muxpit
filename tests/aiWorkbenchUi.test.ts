@@ -51,6 +51,19 @@ test("AI workbench follows streaming output and approves permission requests", (
   assert.match(workbench, /automaticPermissionOptionId\(event\.options\)/);
 });
 
+test("AI workbench reopens without resetting a live target", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(
+    workbench,
+    /if \(!open \|\| !leaf \|\| probedTarget === targetKey\) return;/,
+  );
+  assert.match(
+    workbench,
+    /\[closeChannel, leaf\?\.id, open, probedTarget, targetKey\]/,
+  );
+});
+
 test("AI workbench entry points remain visible without unread notifications", () => {
   const sidebar = readSource("../src/components/Sidebar.tsx");
   const topBar = readSource("../src/components/TopDashboardBar.tsx");

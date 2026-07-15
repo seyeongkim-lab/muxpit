@@ -506,7 +506,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   }, [applyEvent, updateView]);
 
   useEffect(() => {
-    if (!open || !leaf) return;
+    if (!open || !leaf || probedTarget === targetKey) return;
     let cancelled = false;
     runtimeGeneration.current += 1;
     setProbing(true);
@@ -536,7 +536,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         if (!cancelled) setProbing(false);
       });
     return () => { cancelled = true; };
-  }, [closeChannel, leaf?.id, open, targetKey]);
+  }, [closeChannel, leaf?.id, open, probedTarget, targetKey]);
 
   useEffect(() => {
     if (open && probedTarget === targetKey && installed.has(provider)) void openProvider(provider);
