@@ -106,6 +106,27 @@ test("session history preserves events received while loading", () => {
   ]);
 });
 
+test("session history preserves cached tail missing from refreshed history", () => {
+  const runtime = completeSessionHistory(beginSessionHistory({
+    ...readSessionRuntime({}, "session-a"),
+    historyState: "loaded",
+    items: [
+      { id: "history-user", kind: "user", text: "old input" },
+      { id: "history-agent", kind: "assistant", text: "old output" },
+      { id: "local-user", kind: "user", text: "new input" },
+    ],
+  }, "session-a"), [
+    { id: "history-user", kind: "user", text: "old input" },
+    { id: "history-agent", kind: "assistant", text: "old output" },
+  ]);
+
+  assert.deepEqual(runtime.items, [
+    { id: "history-user", kind: "user", text: "old input" },
+    { id: "history-agent", kind: "assistant", text: "old output" },
+    { id: "local-user", kind: "user", text: "new input" },
+  ]);
+});
+
 test("failed session history can be retried", () => {
   const loading = beginSessionHistory(readSessionRuntime({}, "session-a"), "session-a");
   const failed = failSessionHistory(loading);

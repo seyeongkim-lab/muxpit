@@ -102,21 +102,42 @@ export const completeSessionHistory = (
   runtime: AgentSessionRuntime,
   historyItems: MobileTimelineItem[],
 ): AgentSessionRuntime => {
-  const matchesBaseline = (item: MobileTimelineItem): boolean =>
+  const exactlyMatchesBaseline = (item: MobileTimelineItem): boolean =>
     runtime.historyBaseItems.some((baseline) =>
       baseline.id === item.id
       && baseline.kind === item.kind
       && baseline.text === item.text
       && baseline.title === item.title);
-  const liveItems = runtime.historyState === "loading"
-    ? withoutLoadingItems(runtime.items).filter((item) => !matchesBaseline(item))
+  const appearsInHistory = (item: MobileTimelineItem): boolean =>
+    historyItems.some((historyItem) =>
+      historyItem.id === item.id
+      || (
+        historyItem.kind === item.kind
+        && historyItem.text === item.text
+        && historyItem.title === item.title
+      ));
+  let lastHistoryItemIndex = -1;
+  for (let index = runtime.historyBaseItems.length - 1; index >= 0; index -= 1) {
+    if (!appearsInHistory(runtime.historyBaseItems[index])) continue;
+    lastHistoryItemIndex = index;
+    break;
+  }
+  const cachedTail = runtime.historyState === "loading"
+    ? runtime.historyBaseItems.slice(lastHistoryItemIndex + 1).filter((item) => !appearsInHistory(item))
     : [];
-  const liveIds = new Set(liveItems.map((item) => item.id));
+  const liveItems = runtime.historyState === "loading"
+    ? withoutLoadingItems(runtime.items).filter((item) => !exactlyMatchesBaseline(item))
+    : [];
+  const preservedItems = [
+    ...cachedTail.filter((item) => !liveItems.some((liveItem) => liveItem.id === item.id)),
+    ...liveItems,
+  ];
+  const preservedIds = new Set(preservedItems.map((item) => item.id));
   return {
     ...runtime,
     historyState: "loaded",
     historyBaseItems: [],
-    items: [...historyItems.filter((item) => !liveIds.has(item.id)), ...liveItems],
+    items: [...historyItems.filter((item) => !preservedIds.has(item.id)), ...preservedItems],
     approvals: [],
   };
 };
