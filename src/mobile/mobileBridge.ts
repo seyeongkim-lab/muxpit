@@ -54,6 +54,9 @@ export const loadClaudeSession = (channelId: string, sessionId: string): Promise
 export const writeAgentLine = (channelId: string, line: string): Promise<void> =>
   invoke("mobile_agent_write", { channelId, line });
 
+export const probeAgent = (channelId: string): Promise<boolean> =>
+  invoke("mobile_agent_probe", { channelId });
+
 export const closeAgent = (channelId: string): Promise<void> =>
   invoke("mobile_agent_close", { channelId });
 

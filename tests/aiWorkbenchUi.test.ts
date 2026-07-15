@@ -46,9 +46,42 @@ test("AI workbench follows streaming output and approves permission requests", (
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 
   assert.match(workbench, /latestTimelineTextLength/);
-  assert.match(workbench, /view\.running/);
+  assert.match(workbench, /runtime\.running/);
   assert.match(workbench, /resolveApproval\(event\.requestId, true\)/);
   assert.match(workbench, /automaticPermissionOptionId\(event\.options\)/);
+});
+
+test("AI workbench keeps the composer visible while session history loads", () => {
+  const styles = readSource("../src/components/AgentWorkbenchPanel.css");
+
+  assert.match(styles, /\.agent-workbench-body \{[^}]*overflow: hidden;/);
+  assert.match(styles, /\.agent-conversation \{[^}]*overflow: hidden;/);
+});
+
+test("AI workbench loads Claude history without starting an idle process", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const selectSession = workbench.slice(
+    workbench.indexOf("const selectSession"),
+    workbench.indexOf("const newSession"),
+  );
+
+  assert.match(selectSession, /if \(shouldLoadHistory\) await openClaudeAux\("claude-history", session\.id\)/);
+  assert.doesNotMatch(selectSession, /openProvider\(provider, session\.id\)/);
+  assert.doesNotMatch(selectSession, /closeChannel\(/);
+  assert.match(workbench, /sessionRuntimeLabel\(sessionRuntime\)/);
+});
+
+test("AI workbench provider tab lists Claude sessions without starting a process", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const providerEffect = workbench.slice(
+    workbench.indexOf("if (!open || probedTarget !== targetKey"),
+    workbench.indexOf("useLayoutEffect", workbench.indexOf("if (!open || probedTarget !== targetKey")),
+  );
+
+  assert.match(providerEffect, /provider === "claude"/);
+  assert.match(providerEffect, /openClaudeAux\("claude-list"\)/);
+  assert.match(providerEffect, /return;[\s\S]*openProvider\(provider\)/);
+  assert.match(workbench, /openingProviders\.current\.get\(key\) === opening/);
 });
 
 test("AI workbench reopens without resetting a live target", () => {

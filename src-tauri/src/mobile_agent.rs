@@ -178,7 +178,7 @@ fn agent_command(
                 None => String::new(),
             };
             format!(
-                "{prefix}exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose{resume}"
+                "{prefix}exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose{resume}"
             )
         }
     };
@@ -462,6 +462,14 @@ pub async fn mobile_agent_write(
 }
 
 #[tauri::command]
+pub async fn mobile_agent_probe(
+    state: State<'_, MobileSshManager>,
+    channel_id: String,
+) -> Result<bool, String> {
+    Ok(state.channels.read().await.contains_key(&channel_id))
+}
+
+#[tauri::command]
 pub async fn mobile_agent_close(
     state: State<'_, MobileSshManager>,
     channel_id: String,
@@ -487,6 +495,7 @@ pub fn run() {
             mobile_ssh_disconnect,
             mobile_ssh_probe,
             mobile_agent_open,
+            mobile_agent_probe,
             mobile_agent_write,
             mobile_agent_close,
             mobile_claude_sessions,
@@ -514,7 +523,7 @@ mod tests {
 
         let claude = agent_command(MobileAgentProvider::Claude, None, None).unwrap();
         assert!(claude.contains(
-            "exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose"
+            "exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose"
         ));
     }
 }

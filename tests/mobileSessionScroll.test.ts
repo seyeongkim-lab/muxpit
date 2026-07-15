@@ -8,7 +8,7 @@ const component = readFileSync(
 );
 
 test("loaded mobile sessions scroll the rendered timeline to the end", () => {
-  assert.match(component, /pendingSessionScrollRef\.current = \{\s*sessionId: event\.session\.id,\s*items: event\.items,\s*\};/);
+  assert.match(component, /pendingSessionScrollRef\.current = \{ sessionId: event\.session\.id \};/);
   assert.match(component, /timeline\.scrollTop = timeline\.scrollHeight;/);
   assert.match(component, /<main ref=\{timelineRef\} className="activity-timeline"/);
 });

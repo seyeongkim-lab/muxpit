@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ClaudeStreamNormalizer,
   JsonLineDecoder,
   composerAction,
   normalizeClaudeMessage,
@@ -42,6 +43,54 @@ test("Codex notifications become structured mobile events", () => {
       text: "수정 중",
     }],
   );
+});
+
+test("Codex thread status reports active and waiting sessions", () => {
+  assert.deepEqual(normalizeCodexMessage({
+    method: "thread/status/changed",
+    params: {
+      threadId: "thread-1",
+      status: { type: "active", activeFlags: ["waitingOnUserInput"] },
+    },
+  }), [{
+    type: "sessionStatus",
+    sessionId: "thread-1",
+    running: true,
+    waiting: true,
+  }]);
+
+  assert.deepEqual(normalizeCodexMessage({
+    id: 3,
+    result: {
+      thread: {
+        id: "thread-1",
+        name: "Active task",
+        cwd: "/project",
+        updatedAt: 1_752_500_000,
+        status: { type: "active", activeFlags: [] },
+        turns: [{ id: "turn-1", status: "inProgress", items: [] }],
+      },
+    },
+  }), [
+    {
+      type: "sessionLoaded",
+      session: {
+        id: "thread-1",
+        title: "Active task",
+        cwd: "/project",
+        updatedAt: 1_752_500_000,
+        provider: "codex",
+      },
+      items: [],
+    },
+    {
+      type: "sessionStatus",
+      sessionId: "thread-1",
+      running: true,
+      waiting: false,
+      turnId: "turn-1",
+    },
+  ]);
 });
 
 test("Codex approval request keeps request id and command", () => {
@@ -99,6 +148,47 @@ test("Claude stream messages become text, tool, and completion events", () => {
   );
 });
 
+test("Claude partial stream reuses the message id for delta and completion", () => {
+  const normalizer = new ClaudeStreamNormalizer();
+
+  assert.deepEqual(normalizer.receive({
+    type: "stream_event",
+    session_id: "session-1",
+    event: {
+      type: "message_start",
+      message: { id: "message-1" },
+    },
+  }), []);
+  assert.deepEqual(normalizer.receive({
+    type: "stream_event",
+    session_id: "session-1",
+    event: {
+      type: "content_block_delta",
+      index: 1,
+      delta: { type: "text_delta", text: "진행 중" },
+    },
+  }), [{
+    type: "messageDelta",
+    sessionId: "session-1",
+    turnId: "message-1",
+    itemId: "message-1",
+    text: "진행 중",
+  }]);
+  assert.deepEqual(normalizer.receive({
+    type: "assistant",
+    session_id: "session-1",
+    message: {
+      id: "message-1",
+      content: [{ type: "text", text: "진행 중" }],
+    },
+  }), [{
+    type: "messageCompleted",
+    sessionId: "session-1",
+    itemId: "message-1",
+    text: "진행 중",
+  }]);
+});
+
 test("Claude history payload becomes a loaded mobile session", () => {
   const session = {
     id: "session-1",
@@ -120,6 +210,42 @@ test("Claude history payload becomes a loaded mobile session", () => {
     }),
     [{ type: "sessionLoaded", session, items }],
   );
+});
+
+test("Claude history errors stay attached to the requested session", () => {
+  assert.deepEqual(
+    normalizeClaudeHistoryMessage({ type: "wmux_error", message: "not found" }, "session-2"),
+    [{ type: "error", message: "not found", sessionId: "session-2" }],
+  );
+});
+
+test("Claude assistant text blocks complete one streamed message", () => {
+  assert.deepEqual(normalizeClaudeMessage({
+    type: "assistant",
+    session_id: "session-1",
+    message: {
+      id: "message-1",
+      content: [
+        { type: "text", text: "first" },
+        { type: "tool_use", id: "tool-1", name: "Read", input: { path: "a" } },
+        { type: "text", text: "second" },
+      ],
+    },
+  }), [
+    {
+      type: "messageCompleted",
+      sessionId: "session-1",
+      itemId: "message-1",
+      text: "firstsecond",
+    },
+    {
+      type: "toolStarted",
+      sessionId: "session-1",
+      itemId: "tool-1",
+      title: "Read",
+      detail: "a",
+    },
+  ]);
 });
 
 test("composer action distinguishes send, steer, and queue", () => {

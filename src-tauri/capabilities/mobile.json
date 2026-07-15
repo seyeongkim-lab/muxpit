@@ -13,6 +13,7 @@
     "allow-mobile-ssh-disconnect",
     "allow-mobile-ssh-probe",
     "allow-mobile-agent-open",
+    "allow-mobile-agent-probe",
     "allow-mobile-agent-write",
     "allow-mobile-agent-close",
     "allow-mobile-claude-sessions",

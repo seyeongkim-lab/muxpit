@@ -10,6 +10,7 @@ fn main() {
             "mobile_ssh_disconnect",
             "mobile_ssh_probe",
             "mobile_agent_open",
+            "mobile_agent_probe",
             "mobile_agent_write",
             "mobile_agent_close",
             "mobile_claude_sessions",

@@ -1,14 +1,28 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CodexMobileClient } from "./codexMobileClient.ts";
 import {
+  ClaudeStreamNormalizer,
   JsonLineDecoder,
   composerAction,
   normalizeClaudeHistoryMessage,
-  normalizeClaudeMessage,
   type MobileAgentEvent,
   type MobileSession,
   type MobileTimelineItem,
 } from "./agentProtocol.ts";
+import {
+  beginSessionHistory,
+  completeSessionHistory,
+  createSessionRuntime,
+  failSessionHistory,
+  moveSessionRuntime,
+  readSessionRuntime,
+  sessionRuntimeLabel,
+  sessionRuntimeKey,
+  updateSessionRuntime,
+  type AgentApprovalRequest,
+  type AgentSessionRuntime,
+  type AgentSessionRuntimes,
+} from "./agentSessionRuntime.ts";
 import {
   closeAgent,
   connectSsh,
@@ -17,6 +31,7 @@ import {
   loadClaudeSession,
   onAgentTransport,
   openAgent,
+  probeAgent,
   probeSsh,
   writeAgentLine,
   type MobileAgentTransportEvent,
@@ -32,6 +47,14 @@ import "./mobile.css";
 
 type Provider = "codex" | "claude";
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
+const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
+
+interface MobileChannelMeta {
+  provider: Provider;
+  purpose: "provider" | "claude-list" | "claude-history";
+  handledPayload: boolean;
+  sessionId?: string;
+}
 
 const MOBILE_DEMO = import.meta.env.DEV
   && new URLSearchParams(window.location.search).has("demo");
@@ -68,12 +91,6 @@ interface ConnectionForm {
   password: string;
   privateKey: string;
   passphrase: string;
-}
-
-interface ApprovalRequest {
-  requestId: string | number;
-  title: string;
-  detail: string;
 }
 
 interface PendingTrust {
@@ -154,6 +171,9 @@ const relativeTime = (timestamp?: number): string => {
   return `${Math.floor(hours / 24)}d`;
 };
 
+const providerChannelKey = (provider: Provider, sessionId?: string | null): string =>
+  provider === "claude" ? `${provider}:${sessionRuntimeKey(sessionId)}` : provider;
+
 export const MobileApp = () => {
   const initialProfiles = useRef(MOBILE_DEMO ? [DEMO_PROFILE] : loadHostProfiles()).current;
   const [profiles, setProfiles] = useState(initialProfiles);
@@ -165,53 +185,77 @@ export const MobileApp = () => {
   const [provider, setProvider] = useState<Provider>("codex");
   const [sessions, setSessions] = useState<MobileSession[]>(MOBILE_DEMO ? DEMO_SESSIONS : []);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(MOBILE_DEMO ? "demo-1" : null);
-  const [items, setItems] = useState<MobileTimelineItem[]>(MOBILE_DEMO ? DEMO_ITEMS : []);
-  const [activeTurnId, setActiveTurnId] = useState<string | null>(MOBILE_DEMO ? "demo-turn" : null);
-  const [running, setRunning] = useState(MOBILE_DEMO);
+  const [runtimes, setRuntimes] = useState<AgentSessionRuntimes>(() => MOBILE_DEMO ? {
+    [sessionRuntimeKey("demo-1")]: {
+      ...createSessionRuntime(),
+      items: DEMO_ITEMS,
+      activeTurnId: "demo-turn",
+      running: true,
+      approvals: [{ requestId: "demo-approval", title: "cargo test", detail: "Run the Rust test suite" }],
+    },
+  } : {});
   const [queueMode, setQueueMode] = useState(false);
-  const [queue, setQueue] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
-  const [approvals, setApprovals] = useState<ApprovalRequest[]>(MOBILE_DEMO ? [{ requestId: "demo-approval", title: "cargo test", detail: "Run the Rust test suite" }] : []);
   const [error, setError] = useState<string | null>(null);
   const [hostSheetOpen, setHostSheetOpen] = useState(false);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
+  const runtime = readSessionRuntime(runtimes, activeSessionId);
+  const { approvals, items, queue, running } = runtime;
   const latestTimelineTextLength = items[items.length - 1]?.text.length ?? 0;
 
   const credentialCache = useRef(new Map<string, SshAuth>());
   const decoders = useRef(new Map<string, JsonLineDecoder>());
+  const claudeNormalizers = useRef(new Map<string, ClaudeStreamNormalizer>());
+  const channels = useRef(new Map<string, MobileChannelMeta>());
+  const providerChannels = useRef(new Map<string, string>());
+  const openingProviders = useRef(new Map<string, Promise<string | undefined>>());
+  const helperTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const codexClient = useRef<CodexMobileClient | null>(null);
   const activeChannel = useRef<string | null>(null);
   const currentProfileRef = useRef<HostProfile | null>(null);
   const connectionStatusRef = useRef<ConnectionStatus>(connectionStatus);
   const providerRef = useRef<Provider>(provider);
   const activeSessionRef = useRef<string | null>(null);
-  const activeTurnRef = useRef<string | null>(null);
-  const runningRef = useRef(false);
-  const queueRef = useRef<string[]>([]);
+  const runtimesRef = useRef<AgentSessionRuntimes>(runtimes);
   const timelineRef = useRef<HTMLElement | null>(null);
-  const pendingSessionScrollRef = useRef<{
-    sessionId: string;
-    items: MobileTimelineItem[];
-  } | null>(null);
+  const pendingSessionScrollRef = useRef<{ sessionId: string } | null>(null);
   const normalizedHandlerRef = useRef<(event: MobileAgentEvent) => void>(() => {});
   const transportHandlerRef = useRef<(event: MobileAgentTransportEvent) => void>(() => {});
   const resumeConnectionRef = useRef<() => Promise<void>>(async () => {});
   const resumeInFlightRef = useRef(false);
-  const submitRef = useRef<(text: string, fromQueue?: boolean) => Promise<void>>(async () => {});
+  const runtimeGeneration = useRef(0);
+  const channelSequence = useRef(0);
+  const submitRef = useRef<(
+    sessionId: string | null,
+    text: string,
+    fromQueue?: boolean,
+  ) => Promise<void>>(async () => {});
 
   useEffect(() => { connectionStatusRef.current = connectionStatus; }, [connectionStatus]);
   useEffect(() => { providerRef.current = provider; }, [provider]);
   useEffect(() => { currentProfileRef.current = currentProfile; }, [currentProfile]);
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
-  useEffect(() => { activeTurnRef.current = activeTurnId; }, [activeTurnId]);
-  useEffect(() => { runningRef.current = running; }, [running]);
-  useEffect(() => { queueRef.current = queue; }, [queue]);
+
+  const updateRuntime = (
+    sessionId: string | null | undefined,
+    update: (current: AgentSessionRuntime) => AgentSessionRuntime,
+  ): void => {
+    const next = updateSessionRuntime(runtimesRef.current, sessionId, update);
+    runtimesRef.current = next;
+    setRuntimes(next);
+  };
+
+  const moveRuntime = (fromSessionId: string | null, toSessionId: string): void => {
+    const next = moveSessionRuntime(runtimesRef.current, fromSessionId, toSessionId);
+    runtimesRef.current = next;
+    setRuntimes(next);
+  };
 
   useLayoutEffect(() => {
     const pending = pendingSessionScrollRef.current;
     const timeline = timelineRef.current;
-    if (!pending || pending.sessionId !== activeSessionId || pending.items !== items || !timeline) return;
+    if (!pending || pending.sessionId !== activeSessionId || !timeline) return;
     timeline.scrollTop = timeline.scrollHeight;
     pendingSessionScrollRef.current = null;
   }, [activeSessionId, items]);
@@ -253,22 +297,83 @@ export const MobileApp = () => {
   };
 
   const resetAgentState = (preserveView = false): void => {
+    runtimeGeneration.current += 1;
     codexClient.current?.close("Provider changed");
     codexClient.current = null;
+    activeChannel.current = null;
+    channels.current.clear();
+    providerChannels.current.clear();
+    openingProviders.current.clear();
+    for (const timeout of helperTimeouts.current.values()) clearTimeout(timeout);
+    helperTimeouts.current.clear();
+    decoders.current.clear();
+    claudeNormalizers.current.clear();
     if (!preserveView) {
       setSessions([]);
       setActiveSessionId(null);
       activeSessionRef.current = null;
-      setItems([]);
       pendingSessionScrollRef.current = null;
-      setQueue([]);
-      queueRef.current = [];
     }
-    setApprovals([]);
-    setRunning(false);
-    runningRef.current = false;
-    setActiveTurnId(null);
-    activeTurnRef.current = null;
+    setRuntimes((current) => {
+      const next = preserveView
+        ? Object.fromEntries(Object.entries(current).map(([key, runtime]) => [key, {
+            ...runtime,
+            activeTurnId: null,
+            running: false,
+            waiting: false,
+          }]))
+        : {};
+      runtimesRef.current = next;
+      return next;
+    });
+  };
+
+  const requestClaudeData = async (sessionId?: string): Promise<void> => {
+    const purpose = sessionId ? "claude-history" : "claude-list";
+    channelSequence.current += 1;
+    const channelId = `${purpose}-${Date.now()}-${channelSequence.current}`;
+    decoders.current.set(channelId, new JsonLineDecoder());
+    channels.current.set(channelId, {
+      provider: "claude",
+      purpose,
+      handledPayload: false,
+      ...(sessionId ? { sessionId } : {}),
+    });
+    helperTimeouts.current.set(channelId, setTimeout(() => {
+      const meta = channels.current.get(channelId);
+      if (!meta || meta.handledPayload) return;
+      meta.handledPayload = true;
+      if (sessionId) updateRuntime(sessionId, failSessionHistory);
+      setError(sessionId ? "Claude session history timed out." : "Claude session list timed out.");
+      void closeAgent(channelId).catch(() => {});
+    }, CLAUDE_HELPER_TIMEOUT_MS));
+    try {
+      if (sessionId) await loadClaudeSession(channelId, sessionId);
+      else await listClaudeSessions(channelId);
+    } catch (reason) {
+      channels.current.delete(channelId);
+      decoders.current.delete(channelId);
+      const timeout = helperTimeouts.current.get(channelId);
+      if (timeout) clearTimeout(timeout);
+      helperTimeouts.current.delete(channelId);
+      if (sessionId) {
+        updateRuntime(sessionId, (runtime) => ({
+          ...failSessionHistory(runtime),
+        }));
+      }
+      setError(String(reason));
+    }
+  };
+
+  const prepareProvider = async (nextProvider: Provider): Promise<void> => {
+    if (nextProvider !== providerRef.current) {
+      const openChannels = [...channels.current.keys()];
+      await Promise.all(openChannels.map((channelId) => closeAgent(channelId).catch(() => {})));
+      resetAgentState();
+    }
+    setProvider(nextProvider);
+    providerRef.current = nextProvider;
+    setError(null);
   };
 
   const openProvider = async (
@@ -278,58 +383,86 @@ export const MobileApp = () => {
     preserveView = false,
     cwd = profile.cwd,
   ): Promise<string | undefined> => {
-    const previousChannel = activeChannel.current;
-    if (previousChannel) await closeAgent(previousChannel).catch(() => {});
-    resetAgentState(preserveView);
-    setProvider(nextProvider);
-    providerRef.current = nextProvider;
-    setError(null);
+    await prepareProvider(nextProvider);
+    const sessionRuntime = sessionId
+      ? readSessionRuntime(runtimesRef.current, sessionId)
+      : undefined;
+    const shouldRequestClaudeData = nextProvider === "claude"
+      && (sessionId ? sessionRuntime?.historyState !== "loaded" : sessions.length === 0);
+    if (sessionId) {
+      setActiveSessionId(sessionId);
+      activeSessionRef.current = sessionId;
+      const shouldBeginHistory = sessionRuntime?.historyState !== "loading"
+        && (
+          (!preserveView && sessionRuntime?.historyState !== "loaded")
+          || (preserveView && nextProvider === "codex")
+        );
+      if (shouldBeginHistory) {
+        updateRuntime(sessionId, (runtime) => beginSessionHistory(runtime, sessionId));
+      }
+    }
 
-    const channelId = `${nextProvider}-${Date.now()}`;
+    const key = providerChannelKey(nextProvider, sessionId);
+    const existingChannel = providerChannels.current.get(key);
+    if (existingChannel) {
+      activeChannel.current = existingChannel;
+      return existingChannel;
+    }
+    const existingOpening = openingProviders.current.get(key);
+    if (existingOpening) return existingOpening;
+
+    const generation = runtimeGeneration.current;
+    channelSequence.current += 1;
+    const channelId = `${nextProvider}-${Date.now()}-${channelSequence.current}`;
     activeChannel.current = channelId;
     decoders.current.set(channelId, new JsonLineDecoder());
-    try {
-      if (nextProvider === "claude") {
-        if (sessionId) {
-          setActiveSessionId(sessionId);
-          activeSessionRef.current = sessionId;
-          if (!preserveView) {
-            setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
-          }
-        }
-        const historyChannel = `${sessionId ? "claude-history" : "claude-sessions"}-${Date.now()}`;
-        decoders.current.set(historyChannel, new JsonLineDecoder());
-        const historyRequest = sessionId
-          ? loadClaudeSession(historyChannel, sessionId)
-          : listClaudeSessions(historyChannel);
-        await Promise.all([
-          openAgent(channelId, nextProvider, sessionId, cwd || undefined),
-          historyRequest.catch((reason) => setError(String(reason))),
-        ]);
-      } else {
-        if (sessionId) {
-          setActiveSessionId(sessionId);
-          activeSessionRef.current = sessionId;
-          if (!preserveView) {
-            setItems([{ id: `loading-${sessionId}`, kind: "status", text: "Loading session…" }]);
-          }
-        }
-        await openAgent(channelId, nextProvider, undefined, cwd || undefined);
-        const client = new CodexMobileClient(
-          (line) => writeAgentLine(channelId, line),
-          (event) => normalizedHandlerRef.current(event),
-        );
-        codexClient.current = client;
-        void client.initialize()
-          .then(() => sessionId ? client.resumeSession(sessionId) : undefined)
-          .catch((reason) => setError(String(reason)));
-      }
-      return channelId;
-    } catch (reason) {
-      if (activeChannel.current === channelId) activeChannel.current = null;
-      setError(reason instanceof Error ? reason.message : String(reason));
-      return undefined;
+    channels.current.set(channelId, {
+      provider: nextProvider,
+      purpose: "provider",
+      handledPayload: false,
+      ...(sessionId ? { sessionId } : {}),
+    });
+    if (nextProvider === "claude") {
+      claudeNormalizers.current.set(channelId, new ClaudeStreamNormalizer());
     }
+    let opening!: Promise<string | undefined>;
+    opening = (async (): Promise<string | undefined> => {
+      try {
+        if (nextProvider === "claude") {
+          await openAgent(channelId, nextProvider, sessionId, cwd || undefined);
+          if (shouldRequestClaudeData) await requestClaudeData(sessionId);
+        } else {
+          await openAgent(channelId, nextProvider, undefined, cwd || undefined);
+          const client = new CodexMobileClient(
+            (line) => writeAgentLine(channelId, line),
+            (event) => normalizedHandlerRef.current(event),
+          );
+          codexClient.current = client;
+          void client.initialize()
+            .then(() => sessionId ? client.resumeSession(sessionId) : undefined)
+            .catch((reason) => setError(String(reason)));
+        }
+        if (generation !== runtimeGeneration.current || !channels.current.has(channelId)) {
+          await closeAgent(channelId).catch(() => {});
+          return undefined;
+        }
+        providerChannels.current.set(key, channelId);
+        return channelId;
+      } catch (reason) {
+        if (activeChannel.current === channelId) activeChannel.current = null;
+        channels.current.delete(channelId);
+        decoders.current.delete(channelId);
+        claudeNormalizers.current.delete(channelId);
+        setError(reason instanceof Error ? reason.message : String(reason));
+        return undefined;
+      } finally {
+        if (openingProviders.current.get(key) === opening) {
+          openingProviders.current.delete(key);
+        }
+      }
+    })();
+    openingProviders.current.set(key, opening);
+    return opening;
   };
 
   const connectProfile = async (
@@ -367,6 +500,7 @@ export const MobileApp = () => {
       setForm(formFromProfile(trustedProfile));
       setConnectionStatus("connected");
       connectionStatusRef.current = "connected";
+      if (reconnecting) resetAgentState(true);
       await openProvider(
         trustedProfile,
         restore?.provider ?? providerRef.current,
@@ -383,7 +517,6 @@ export const MobileApp = () => {
 
   const resumeConnection = async (): Promise<void> => {
     if (connectionStatusRef.current !== "connected" || resumeInFlightRef.current) return;
-    if (activeChannel.current) return;
     const profile = currentProfileRef.current;
     if (!profile) return;
     resumeInFlightRef.current = true;
@@ -392,9 +525,37 @@ export const MobileApp = () => {
       const sessionId = activeSessionRef.current ?? undefined;
       const sessionCwd = sessions.find((session) => session.id === sessionId)?.cwd;
       if (await probeSsh()) {
-        if (!activeChannel.current) {
-          await openProvider(profile, currentProvider, sessionId, true, sessionCwd);
+        const channelEntries = [...providerChannels.current.entries()];
+        const channelHealth = await Promise.all(channelEntries.map(async ([key, channelId]) => ({
+          key,
+          channelId,
+          alive: await probeAgent(channelId).catch(() => false),
+        })));
+        const aliveChannels = channelHealth.filter((entry) => entry.alive);
+        for (const entry of channelHealth) {
+          if (entry.alive) continue;
+          providerChannels.current.delete(entry.key);
+          const meta = channels.current.get(entry.channelId);
+          if (meta?.sessionId) {
+            updateRuntime(meta.sessionId, (runtime) => ({
+              ...runtime,
+              activeTurnId: null,
+              running: false,
+              waiting: false,
+            }));
+          }
+          channels.current.delete(entry.channelId);
+          decoders.current.delete(entry.channelId);
+          claudeNormalizers.current.delete(entry.channelId);
         }
+        if (aliveChannels.length > 0) {
+          const activeKey = providerChannelKey(currentProvider, sessionId);
+          activeChannel.current = aliveChannels.find((entry) => entry.key === activeKey)?.channelId
+            ?? aliveChannels[0].channelId;
+          return;
+        }
+        resetAgentState(true);
+        await openProvider(profile, currentProvider, sessionId, true, sessionCwd);
         return;
       }
       const auth = credentialCache.current.get(profile.id);
@@ -462,60 +623,74 @@ export const MobileApp = () => {
         setSessions(event.sessions);
         return;
       case "sessionLoaded":
-        pendingSessionScrollRef.current = {
-          sessionId: event.session.id,
-          items: event.items,
-        };
-        setActiveSessionId(event.session.id);
-        activeSessionRef.current = event.session.id;
-        setItems(event.items);
+        pendingSessionScrollRef.current = { sessionId: event.session.id };
+        updateRuntime(event.session.id, (runtime) => completeSessionHistory(runtime, event.items));
         setSessions((previous) => upsertSession(previous, event.session));
         return;
+      case "sessionStatus":
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          activeTurnId: event.running
+            ? event.turnId ?? runtime.activeTurnId
+            : null,
+          running: event.running,
+          waiting: event.waiting,
+        }));
+        return;
       case "turnStarted":
-        setActiveSessionId(event.sessionId);
-        activeSessionRef.current = event.sessionId;
-        setActiveTurnId(event.turnId);
-        activeTurnRef.current = event.turnId;
-        setRunning(true);
-        runningRef.current = true;
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          activeTurnId: event.turnId,
+          running: true,
+          waiting: false,
+        }));
         return;
       case "turnCompleted": {
-        setRunning(false);
-        runningRef.current = false;
-        setActiveTurnId(null);
-        activeTurnRef.current = null;
-        const next = queueRef.current[0];
+        const sessionRuntime = readSessionRuntime(runtimesRef.current, event.sessionId);
+        const next = sessionRuntime.queue[0];
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          activeTurnId: null,
+          running: false,
+          waiting: false,
+          queue: runtime.queue.slice(1),
+        }));
         if (next) {
-          const remaining = queueRef.current.slice(1);
-          queueRef.current = remaining;
-          setQueue(remaining);
-          setTimeout(() => void submitRef.current(next, true), 0);
+          setTimeout(() => void submitRef.current(event.sessionId, next, true), 0);
         }
         return;
       }
       case "messageDelta":
-        setItems((previous) => appendMessageDelta(previous, event.itemId, event.text));
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          items: appendMessageDelta(runtime.items, event.itemId, event.text),
+        }));
         return;
       case "userMessage":
-        setItems((previous) => appendUnique(previous, {
-          id: event.itemId,
-          kind: "user",
-          text: event.text,
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          items: appendUnique(runtime.items, {
+            id: event.itemId,
+            kind: "user",
+            text: event.text,
+          }),
         }));
         return;
       case "messageCompleted":
-        setItems((previous) => completeMessage(previous, event.itemId, event.text));
-        if (event.sessionId) {
-          setActiveSessionId(event.sessionId);
-          activeSessionRef.current = event.sessionId;
-        }
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          items: completeMessage(runtime.items, event.itemId, event.text),
+        }));
         return;
       case "toolStarted":
-        setItems((previous) => appendUnique(previous, {
-          id: event.itemId,
-          kind: "tool",
-          title: event.title,
-          text: event.detail,
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          items: appendUnique(runtime.items, {
+            id: event.itemId,
+            kind: "tool",
+            title: event.title,
+            text: event.detail,
+          }),
         }));
         return;
       case "approvalRequested": {
@@ -526,19 +701,25 @@ export const MobileApp = () => {
           void request.catch((reason) => setError(String(reason)));
           return;
         }
-        setApprovals((previous) => [
-          ...previous,
-          { requestId: event.requestId, title: event.title, detail: event.detail },
-        ]);
+        updateRuntime(event.sessionId, (runtime) => ({
+          ...runtime,
+          approvals: [
+            ...runtime.approvals.filter((approval) => approval.requestId !== event.requestId),
+            { requestId: event.requestId, title: event.title, detail: event.detail },
+          ],
+        }));
         return;
       }
       case "error":
+        if (event.sessionId) updateRuntime(event.sessionId, failSessionHistory);
         setError(event.message);
     }
   };
   normalizedHandlerRef.current = applyNormalizedEvent;
 
   const handleTransport = (event: MobileAgentTransportEvent): void => {
+    const meta = channels.current.get(event.channelId);
+    if (!meta) return;
     if (
       event.kind === "stderr"
       && activeChannel.current === event.channelId
@@ -557,12 +738,42 @@ export const MobileApp = () => {
       return;
     }
     if (event.kind === "closed") {
+      const timeout = helperTimeouts.current.get(event.channelId);
+      if (timeout) clearTimeout(timeout);
+      helperTimeouts.current.delete(event.channelId);
+      if (meta.purpose === "claude-history" && !meta.handledPayload) {
+        updateRuntime(meta.sessionId, failSessionHistory);
+        setError("Claude session history returned no data.");
+      }
       decoders.current.delete(event.channelId);
+      claudeNormalizers.current.delete(event.channelId);
+      channels.current.delete(event.channelId);
+      const key = providerChannelKey(meta.provider, meta.sessionId);
+      const ownsRuntime = providerChannels.current.get(key) === event.channelId;
+      if (ownsRuntime) {
+        providerChannels.current.delete(key);
+      }
       if (activeChannel.current === event.channelId) {
+        activeChannel.current = [...providerChannels.current.values()][0] ?? null;
+      }
+      if (meta.purpose === "provider" && meta.provider === "codex" && ownsRuntime) {
         codexClient.current?.close();
-        activeChannel.current = null;
-        setRunning(false);
-        runningRef.current = false;
+        codexClient.current = null;
+        const next = Object.fromEntries(Object.entries(runtimesRef.current).map(([runtimeKey, runtime]) => [runtimeKey, {
+          ...runtime,
+          activeTurnId: null,
+          running: false,
+          waiting: false,
+        }]));
+        runtimesRef.current = next;
+        setRuntimes(next);
+      } else if (meta.purpose === "provider" && ownsRuntime) {
+        updateRuntime(meta.sessionId, (runtime) => ({
+          ...runtime,
+          activeTurnId: null,
+          running: false,
+          waiting: false,
+        }));
       }
       return;
     }
@@ -570,40 +781,92 @@ export const MobileApp = () => {
     const decoder = decoders.current.get(event.channelId) ?? new JsonLineDecoder();
     decoders.current.set(event.channelId, decoder);
     for (const line of decoder.push(event.data)) {
-      if (event.channelId.startsWith("codex-")) {
+      if (meta.purpose === "provider" && meta.provider === "codex") {
         codexClient.current?.receive(line);
         continue;
       }
       try {
         const message = JSON.parse(line) as Record<string, unknown>;
         if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
+          meta.handledPayload = true;
+          const timeout = helperTimeouts.current.get(event.channelId);
+          if (timeout) clearTimeout(timeout);
+          helperTimeouts.current.delete(event.channelId);
           setSessions(message.sessions as MobileSession[]);
           continue;
         }
-        const historyEvents = normalizeClaudeHistoryMessage(message);
-        if (historyEvents.length > 0) {
-          for (const normalized of historyEvents) normalizedHandlerRef.current(normalized);
-          continue;
+        const historyEvents = normalizeClaudeHistoryMessage(message, meta.sessionId);
+        const normalizedEvents = historyEvents.length > 0
+          ? historyEvents
+          : claudeNormalizers.current.get(event.channelId)?.receive(message) ?? [];
+        if (normalizedEvents.length > 0) meta.handledPayload = true;
+        if (normalizedEvents.length > 0 && meta.purpose !== "provider") {
+          const timeout = helperTimeouts.current.get(event.channelId);
+          if (timeout) clearTimeout(timeout);
+          helperTimeouts.current.delete(event.channelId);
         }
-        for (const normalized of normalizeClaudeMessage(message)) {
+        for (const normalized of normalizedEvents) {
+          const eventSessionId = normalized.type === "sessionLoaded"
+            ? normalized.session.id
+            : "sessionId" in normalized
+              ? normalized.sessionId
+              : undefined;
+          if (
+            meta.purpose === "provider"
+            && eventSessionId
+            && eventSessionId !== meta.sessionId
+          ) {
+            const previousId = meta.sessionId ?? null;
+            const previousKey = providerChannelKey("claude", previousId);
+            if (providerChannels.current.get(previousKey) === event.channelId) {
+              providerChannels.current.delete(previousKey);
+            }
+            providerChannels.current.set(providerChannelKey("claude", eventSessionId), event.channelId);
+            meta.sessionId = eventSessionId;
+            moveRuntime(previousId, eventSessionId);
+            if (activeSessionRef.current === previousId) {
+              setActiveSessionId(eventSessionId);
+              activeSessionRef.current = eventSessionId;
+            }
+          }
           normalizedHandlerRef.current(normalized);
         }
       } catch {
+        if (meta.purpose !== "provider") {
+          meta.handledPayload = true;
+          const timeout = helperTimeouts.current.get(event.channelId);
+          if (timeout) clearTimeout(timeout);
+          helperTimeouts.current.delete(event.channelId);
+          if (meta.purpose === "claude-history") {
+            updateRuntime(meta.sessionId, failSessionHistory);
+          }
+          void closeAgent(event.channelId).catch(() => {});
+        }
         setError("The remote agent returned an invalid JSON line.");
       }
     }
   };
   transportHandlerRef.current = handleTransport;
 
-  const submitText = async (text: string, fromQueue = false): Promise<void> => {
+  const submitText = async (
+    text: string,
+    fromQueue = false,
+    requestedSessionId?: string | null,
+  ): Promise<void> => {
     const trimmed = text.trim();
     const profile = currentProfileRef.current;
     if (!trimmed || !profile) return;
-    const action = fromQueue ? "send" : composerAction(runningRef.current, queueMode);
+    let sessionId = requestedSessionId === undefined
+      ? activeSessionRef.current
+      : requestedSessionId;
+    let sessionRuntime = readSessionRuntime(runtimesRef.current, sessionId);
+    if (sessionRuntime.historyState === "loading") return;
+    const action = fromQueue ? "send" : composerAction(sessionRuntime.running, queueMode);
     if (action === "queue") {
-      const next = [...queueRef.current, trimmed];
-      queueRef.current = next;
-      setQueue(next);
+      updateRuntime(sessionId, (runtime) => ({
+        ...runtime,
+        queue: [...runtime.queue, trimmed],
+      }));
       setDraft("");
       return;
     }
@@ -616,93 +879,126 @@ export const MobileApp = () => {
         setError("Codex channel is not ready.");
         return;
       }
-      let sessionId = activeSessionRef.current;
       if (!sessionId) {
         try {
-          sessionId = await client.startSession(profile.cwd || undefined);
-          setActiveSessionId(sessionId);
-          activeSessionRef.current = sessionId;
+          const createdSessionId = await client.startSession(profile.cwd || undefined);
+          moveRuntime(null, createdSessionId);
+          sessionId = createdSessionId;
+          if (activeSessionRef.current === null) {
+            setActiveSessionId(createdSessionId);
+            activeSessionRef.current = createdSessionId;
+          }
+          sessionRuntime = readSessionRuntime(runtimesRef.current, createdSessionId);
         } catch (reason) {
           setError(String(reason));
           return;
         }
       }
-      appendUserMessage(trimmed, setItems);
-      setRunning(true);
-      runningRef.current = true;
+      updateRuntime(sessionId, (runtime) => ({
+        ...runtime,
+        items: appendUserMessage(runtime.items, trimmed),
+        running: true,
+        waiting: false,
+        historyState: "loaded",
+      }));
       try {
-        if (action === "steer" && activeTurnRef.current) {
-          await client.steer(sessionId, activeTurnRef.current, trimmed);
+        if (action === "steer" && sessionRuntime.activeTurnId) {
+          await client.steer(sessionId, sessionRuntime.activeTurnId, trimmed);
         } else {
           await client.startTurn(sessionId, trimmed, profile.cwd || undefined);
         }
       } catch (reason) {
-        setRunning(false);
-        runningRef.current = false;
+        updateRuntime(sessionId, (runtime) => ({ ...runtime, running: false, waiting: false }));
         setError(String(reason));
       }
       return;
     }
 
-    let channelId = activeChannel.current;
+    let channelId = providerChannels.current.get(providerChannelKey("claude", sessionId));
     if (!channelId) {
-      channelId = await openProvider(profile, "claude", activeSessionRef.current ?? undefined) ?? null;
+      channelId = await openProvider(profile, "claude", sessionId ?? undefined) ?? undefined;
     }
     if (!channelId) return;
-    appendUserMessage(trimmed, setItems);
-    setRunning(true);
-    runningRef.current = true;
+    updateRuntime(sessionId, (runtime) => ({
+      ...runtime,
+      items: appendUserMessage(runtime.items, trimmed),
+      running: true,
+      waiting: false,
+      historyState: "loaded",
+    }));
     try {
       await writeAgentLine(channelId, claudeInput(trimmed));
     } catch (reason) {
-      setRunning(false);
-      runningRef.current = false;
+      updateRuntime(sessionId, (runtime) => ({ ...runtime, running: false, waiting: false }));
       setError(String(reason));
     }
   };
-  submitRef.current = submitText;
+  submitRef.current = (sessionId, text, fromQueue) =>
+    submitText(text, fromQueue, sessionId);
 
   const stopTurn = async (): Promise<void> => {
-    if (!runningRef.current) return;
+    const sessionId = activeSessionRef.current;
+    const sessionRuntime = readSessionRuntime(runtimesRef.current, sessionId);
+    if (!sessionRuntime.running) return;
     if (providerRef.current === "codex") {
-      const sessionId = activeSessionRef.current;
-      const turnId = activeTurnRef.current;
+      const turnId = sessionRuntime.activeTurnId;
       if (sessionId && turnId) await codexClient.current?.interrupt(sessionId, turnId);
-    } else if (activeChannel.current) {
-      await closeAgent(activeChannel.current).catch(() => {});
-      activeChannel.current = null;
-      setRunning(false);
-      runningRef.current = false;
+    } else {
+      const key = providerChannelKey("claude", sessionId);
+      const channelId = providerChannels.current.get(key);
+      if (channelId) {
+        providerChannels.current.delete(key);
+        await closeAgent(channelId).catch(() => {});
+        if (activeChannel.current === channelId) activeChannel.current = null;
+      }
     }
+    updateRuntime(sessionId, (runtime) => ({
+      ...runtime,
+      activeTurnId: null,
+      running: false,
+      waiting: false,
+    }));
   };
 
   const selectSession = async (session: MobileSession): Promise<void> => {
     setSessionSheetOpen(false);
-    setItems([]);
-    setApprovals([]);
+    setActiveSessionId(session.id);
+    activeSessionRef.current = session.id;
+    const shouldLoadHistory = readSessionRuntime(runtimesRef.current, session.id).historyState === "idle";
+    if (shouldLoadHistory) {
+      updateRuntime(session.id, (runtime) => beginSessionHistory(runtime, session.id));
+    }
     if (providerRef.current === "codex") {
       try {
-        await codexClient.current?.resumeSession(session.id);
+        if (shouldLoadHistory) await codexClient.current?.resumeSession(session.id);
       } catch (reason) {
+        updateRuntime(session.id, failSessionHistory);
         setError(String(reason));
       }
       return;
     }
     const profile = currentProfileRef.current;
-    if (profile) await openProvider(profile, "claude", session.id, true, session.cwd);
+    if (profile) {
+      if (shouldLoadHistory) await requestClaudeData(session.id);
+    }
   };
 
   const newSession = async (): Promise<void> => {
     const profile = currentProfileRef.current;
     if (!profile) return;
     setSessionSheetOpen(false);
+    setActiveSessionId(null);
+    activeSessionRef.current = null;
+    const next = { ...runtimesRef.current, [sessionRuntimeKey(null)]: createSessionRuntime() };
+    runtimesRef.current = next;
+    setRuntimes(next);
     if (providerRef.current === "codex") {
       try {
         const id = await codexClient.current?.startSession(profile.cwd || undefined);
         if (id) {
+          moveRuntime(null, id);
           setActiveSessionId(id);
           activeSessionRef.current = id;
-          setItems([]);
         }
       } catch (reason) {
         setError(String(reason));
@@ -715,13 +1011,22 @@ export const MobileApp = () => {
   const changeProvider = async (nextProvider: Provider): Promise<void> => {
     if (nextProvider === providerRef.current) return;
     const profile = currentProfileRef.current;
-    if (profile) await openProvider(profile, nextProvider);
+    if (!profile) return;
+    if (nextProvider === "claude") {
+      await prepareProvider(nextProvider);
+      await requestClaudeData();
+      return;
+    }
+    await openProvider(profile, nextProvider);
   };
 
-  const resolveApproval = async (approval: ApprovalRequest, accepted: boolean): Promise<void> => {
+  const resolveApproval = async (approval: AgentApprovalRequest, accepted: boolean): Promise<void> => {
     try {
       await codexClient.current?.resolveApproval(approval.requestId, accepted);
-      setApprovals((previous) => previous.filter((item) => item.requestId !== approval.requestId));
+      updateRuntime(activeSessionRef.current, (runtime) => ({
+        ...runtime,
+        approvals: runtime.approvals.filter((item) => item.requestId !== approval.requestId),
+      }));
     } catch (reason) {
       setError(String(reason));
     }
@@ -783,17 +1088,23 @@ export const MobileApp = () => {
       <nav className="session-strip" aria-label="Recent sessions">
         <button className="new-session-button" type="button" onClick={() => void newSession()} aria-label="New session">+</button>
         <div className="recent-sessions">
-          {sessions.slice(0, 5).map((session) => (
-            <button
-              type="button"
-              key={session.id}
-              className={session.id === activeSessionId ? "session-chip active" : "session-chip"}
-              onClick={() => void selectSession(session)}
-            >
-              <span>{session.title}</span>
-              {session.updatedAt ? <small>{relativeTime(session.updatedAt)}</small> : null}
-            </button>
-          ))}
+          {sessions.slice(0, 5).map((session) => {
+            const sessionRuntime = readSessionRuntime(runtimes, session.id);
+            const sessionRunning = sessionRuntime.running;
+            return (
+              <button
+                type="button"
+                key={session.id}
+                className={session.id === activeSessionId ? "session-chip active" : "session-chip"}
+                onClick={() => void selectSession(session)}
+              >
+                <span>{session.title}</span>
+                <small className={sessionRunning ? "running" : ""}>
+                  {sessionRunning ? sessionRuntimeLabel(sessionRuntime) : relativeTime(session.updatedAt)}
+                </small>
+              </button>
+            );
+          })}
           {sessions.length === 0 ? <span className="session-empty">No saved sessions</span> : null}
         </div>
         <button className="all-sessions-button" type="button" onClick={() => setSessionSheetOpen(true)} aria-label="All sessions">
@@ -808,7 +1119,7 @@ export const MobileApp = () => {
             <h1>{activeSession?.title ?? "New session"}</h1>
           </div>
           <span className={running ? "run-state running" : "run-state"}>
-            {running ? "Running" : "Ready"}
+            {sessionRuntimeLabel(runtime)}
           </span>
         </section>
 
@@ -855,7 +1166,7 @@ export const MobileApp = () => {
         <aside className="queue-preview">
           <span>{queue.length} queued</span>
           <p>{queue[0]}</p>
-          <button type="button" onClick={() => { setQueue([]); queueRef.current = []; }}>Clear</button>
+          <button type="button" onClick={() => updateRuntime(activeSessionId, (runtime) => ({ ...runtime, queue: [] }))}>Clear</button>
         </aside>
       ) : null}
 
@@ -889,7 +1200,11 @@ export const MobileApp = () => {
             <button
               type="button"
               className="send-button"
-              disabled={!draft.trim()}
+              disabled={
+                !draft.trim()
+                || runtime.historyState === "loading"
+                || (provider === "codex" && running && !runtime.activeTurnId && !queueMode)
+              }
               onClick={() => void submitText(draft)}
             >{action === "send" ? "Send" : action === "steer" ? "Steer" : "Queue"}</button>
           </div>
@@ -934,15 +1249,19 @@ export const MobileApp = () => {
           />
           <button type="button" className="sheet-secondary" onClick={() => void newSession()}>New session</button>
           <div className="sheet-list session-list">
-            {filteredSessions.map((session) => (
-              <button type="button" key={session.id} onClick={() => void selectSession(session)}>
-                <span className={session.id === activeSessionId ? "online-dot" : "host-dot"} />
-                <span>
-                  <strong>{session.title}</strong>
-                  <small>{session.cwd || session.id} {relativeTime(session.updatedAt)}</small>
-                </span>
-              </button>
-            ))}
+            {filteredSessions.map((session) => {
+              const sessionRuntime = readSessionRuntime(runtimes, session.id);
+              const sessionRunning = sessionRuntime.running;
+              return (
+                <button type="button" key={session.id} onClick={() => void selectSession(session)}>
+                  <span className={sessionRunning ? "online-dot" : "host-dot"} />
+                  <span>
+                    <strong>{session.title}</strong>
+                    <small>{session.cwd || session.id} {sessionRunning ? sessionRuntimeLabel(sessionRuntime) : relativeTime(session.updatedAt)}</small>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </BottomSheet>
       ) : null}
@@ -980,14 +1299,12 @@ const completeMessage = (
 };
 
 const appendUserMessage = (
+  items: MobileTimelineItem[],
   text: string,
-  setItems: React.Dispatch<React.SetStateAction<MobileTimelineItem[]>>,
-): void => {
-  setItems((previous) => [
-    ...previous,
-    { id: `user-${Date.now()}-${previous.length}`, kind: "user", text },
-  ]);
-};
+): MobileTimelineItem[] => [
+  ...items,
+  { id: `user-${Date.now()}-${items.length}`, kind: "user", text },
+];
 
 const TimelineRow = ({ item }: { item: MobileTimelineItem }) => (
   <article className={`timeline-row ${item.kind}`}>

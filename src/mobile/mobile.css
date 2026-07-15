@@ -216,6 +216,11 @@ textarea:focus-visible {
   font: 10px/1 monospace;
 }
 
+.session-chip small.running {
+  color: #66a3ff;
+  font-weight: 700;
+}
+
 .session-chip.active {
   border-color: #345b92;
   background: #17243a;

@@ -94,7 +94,7 @@ fn provider_command(
                 None => String::new(),
             };
             Ok(format!(
-                "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose{resume}"
+                "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose{resume}"
             ))
         }
         DesktopAgentProvider::Copilot => Ok("copilot --acp --stdio".into()),
@@ -546,7 +546,7 @@ mod tests {
         );
         assert_eq!(
             provider_command(DesktopAgentProvider::Claude, None).unwrap(),
-            "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --verbose"
+            "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose"
         );
         assert_eq!(
             provider_command(DesktopAgentProvider::Copilot, None).unwrap(),

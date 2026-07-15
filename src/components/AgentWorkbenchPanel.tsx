@@ -12,14 +12,27 @@ import {
 } from "../agent/desktopAgentBridge.ts";
 import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo.ts";
 import {
+  ClaudeStreamNormalizer,
   JsonLineDecoder,
   normalizeClaudeHistoryMessage,
-  normalizeClaudeMessage,
-  type AgentPermissionOption,
   type MobileAgentEvent,
   type MobileSession,
   type MobileTimelineItem,
 } from "../mobile/agentProtocol.ts";
+import {
+  beginSessionHistory,
+  completeSessionHistory,
+  createSessionRuntime,
+  failSessionHistory,
+  moveSessionRuntime,
+  readSessionRuntime,
+  sessionRuntimeLabel,
+  sessionRuntimeKey,
+  updateSessionRuntime,
+  type AgentApprovalRequest,
+  type AgentSessionRuntime,
+  type AgentSessionRuntimes,
+} from "../mobile/agentSessionRuntime.ts";
 import { CodexMobileClient } from "../mobile/codexMobileClient.ts";
 import { AI_KINDS } from "../stores/aiCli.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
@@ -32,21 +45,10 @@ interface AgentWorkbenchPanelProps {
   onClose: () => void;
 }
 
-interface ApprovalRequest {
-  requestId: string | number;
-  title: string;
-  detail: string;
-  options?: AgentPermissionOption[];
-}
-
 interface ProviderView {
   sessions: MobileSession[];
   activeSessionId: string | null;
-  items: MobileTimelineItem[];
-  approvals: ApprovalRequest[];
-  activeTurnId: string | null;
-  running: boolean;
-  queue: string[];
+  runtimes: AgentSessionRuntimes;
   error: string | null;
   status: "idle" | "connecting" | "ready";
 }
@@ -55,10 +57,12 @@ interface ChannelMeta {
   provider: AiKind;
   purpose: "provider" | "claude-list" | "claude-history";
   handledPayload: boolean;
+  sessionId?: string;
 }
 
 const MIN_WORKBENCH_WIDTH = 420;
 const MIN_TERMINAL_WIDTH = 280;
+const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
 
 const PROVIDER_NAMES: Record<AiKind, string> = {
   claude: "Claude",
@@ -79,11 +83,7 @@ const PROVIDER_MARKS: Record<AiKind, string> = {
 const emptyView = (): ProviderView => ({
   sessions: [],
   activeSessionId: null,
-  items: [],
-  approvals: [],
-  activeTurnId: null,
-  running: false,
-  queue: [],
+  runtimes: {},
   error: null,
   status: "idle",
 });
@@ -130,8 +130,16 @@ const appendDelta = (
     : [...items, { id, kind, text }];
 };
 
-const withoutLoadingItem = (items: MobileTimelineItem[]): MobileTimelineItem[] =>
-  items.filter((item) => !item.id.startsWith("loading-"));
+const providerChannelKey = (kind: AiKind, sessionId?: string | null): string =>
+  kind === "claude" ? `${kind}:${sessionRuntimeKey(sessionId)}` : kind;
+
+const stoppedRuntimes = (runtimes: AgentSessionRuntimes): AgentSessionRuntimes =>
+  Object.fromEntries(Object.entries(runtimes).map(([key, runtime]) => [key, {
+    ...runtime,
+    activeTurnId: null,
+    running: false,
+    waiting: false,
+  }]));
 
 const claudeInput = (text: string): string => JSON.stringify({
   type: "user",
@@ -162,16 +170,23 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const viewsRef = useRef(views);
   const channels = useRef(new Map<string, ChannelMeta>());
-  const providerChannels = useRef(new Map<AiKind, string>());
-  const openingProviders = useRef(new Map<AiKind, Promise<void>>());
+  const providerChannels = useRef(new Map<string, string>());
+  const openingProviders = useRef(new Map<string, Promise<string | undefined>>());
   const decoders = useRef(new Map<string, JsonLineDecoder>());
+  const claudeNormalizers = useRef(new Map<string, ClaudeStreamNormalizer>());
   const codexClients = useRef(new Map<AiKind, CodexMobileClient>());
   const acpClients = useRef(new Map<AiKind, AcpClient>());
   const expectedClose = useRef(new Set<string>());
   const stderr = useRef(new Map<string, string>());
+  const helperTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const channelSequence = useRef(0);
   const runtimeGeneration = useRef(0);
-  const submitRef = useRef<(provider: AiKind, text: string, queued?: boolean) => Promise<void>>(async () => {});
+  const submitRef = useRef<(
+    provider: AiKind,
+    sessionId: string | null,
+    text: string,
+    queued?: boolean,
+  ) => Promise<void>>(async () => {});
 
   const workspace = workspaces.find((candidate) => candidate.id === activeId);
   const leaf = workspace
@@ -200,15 +215,26 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   ]);
   const targetKey = `${target.sshConnection?.target ?? target.sshCommand ?? "local"}|${target.cwd ?? ""}`;
   const view = views[provider];
-  const latestTimelineTextLength = view.items[view.items.length - 1]?.text.length ?? 0;
+  const runtime = readSessionRuntime(view.runtimes, view.activeSessionId);
+  const latestTimelineTextLength = runtime.items[runtime.items.length - 1]?.text.length ?? 0;
 
   const updateView = useCallback((kind: AiKind, update: (current: ProviderView) => ProviderView) => {
-    setViews((current) => {
-      const next = { ...current, [kind]: update(current[kind]) };
-      viewsRef.current = next;
-      return next;
-    });
+    const current = viewsRef.current;
+    const next = { ...current, [kind]: update(current[kind]) };
+    viewsRef.current = next;
+    setViews(next);
   }, []);
+
+  const updateRuntime = useCallback((
+    kind: AiKind,
+    sessionId: string | null | undefined,
+    update: (current: AgentSessionRuntime) => AgentSessionRuntime,
+  ): void => {
+    updateView(kind, (current) => ({
+      ...current,
+      runtimes: updateSessionRuntime(current.runtimes, sessionId, update),
+    }));
+  }, [updateView]);
 
   const nextChannelId = useCallback((kind: AiKind, purpose: ChannelMeta["purpose"]): string => {
     channelSequence.current += 1;
@@ -216,10 +242,14 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   }, []);
 
   const closeChannel = useCallback(async (channelId: string): Promise<void> => {
+    const timeout = helperTimeouts.current.get(channelId);
+    if (timeout) clearTimeout(timeout);
+    helperTimeouts.current.delete(channelId);
     expectedClose.current.add(channelId);
     await closeDesktopAgent(channelId).catch(() => {});
     channels.current.delete(channelId);
     decoders.current.delete(channelId);
+    claudeNormalizers.current.delete(channelId);
   }, []);
 
   const applyEvent = useCallback((kind: AiKind, event: MobileAgentEvent): void => {
@@ -230,50 +260,66 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       case "sessionLoaded":
         updateView(kind, (current) => ({
           ...current,
-          activeSessionId: event.session.id,
-          items: event.items,
+          runtimes: updateSessionRuntime(
+            current.runtimes,
+            event.session.id,
+            (runtime) => completeSessionHistory(runtime, event.items),
+          ),
           sessions: [event.session, ...current.sessions.filter((session) => session.id !== event.session.id)],
           status: "ready",
         }));
-        requestAnimationFrame(() => {
-          if (timelineRef.current) timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-        });
+        return;
+      case "sessionStatus":
+        updateRuntime(kind, event.sessionId, (current) => ({
+          ...current,
+          activeTurnId: event.running
+            ? event.turnId ?? current.activeTurnId
+            : null,
+          running: event.running,
+          waiting: event.waiting,
+        }));
         return;
       case "turnStarted":
-        updateView(kind, (current) => ({
+        updateRuntime(kind, event.sessionId, (current) => ({
           ...current,
-          activeSessionId: event.sessionId,
           activeTurnId: event.turnId,
           running: true,
+          waiting: false,
         }));
         return;
       case "turnCompleted": {
-        const queued = viewsRef.current[kind].queue;
-        updateView(kind, (current) => ({
-          ...current,
-          activeTurnId: null,
-          running: false,
-          queue: queued.slice(1),
-        }));
-        if (queued[0]) setTimeout(() => void submitRef.current(kind, queued[0], true), 0);
+        let queued: string | undefined;
+        updateRuntime(kind, event.sessionId, (current) => {
+          queued = current.queue[0];
+          return {
+            ...current,
+            activeTurnId: null,
+            running: false,
+            waiting: false,
+            queue: current.queue.slice(1),
+          };
+        });
+        const next = queued;
+        if (next) {
+          setTimeout(() => void submitRef.current(kind, event.sessionId, next, true), 0);
+        }
         return;
       }
       case "messageDelta":
-        updateView(kind, (current) => ({
+        updateRuntime(kind, event.sessionId, (current) => ({
           ...current,
           items: appendDelta(current.items, event.itemId, event.text),
         }));
         return;
       case "userMessage":
-        updateView(kind, (current) => ({
+        updateRuntime(kind, event.sessionId, (current) => ({
           ...current,
           items: appendDelta(current.items, event.itemId, event.text, "user"),
         }));
         return;
       case "messageCompleted":
-        updateView(kind, (current) => ({
+        updateRuntime(kind, event.sessionId, (current) => ({
           ...current,
-          activeSessionId: event.sessionId || current.activeSessionId,
           items: appendItem(current.items, {
             id: event.itemId ?? `assistant-${Date.now()}-${current.items.length}`,
             kind: "assistant",
@@ -282,7 +328,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         }));
         return;
       case "toolStarted":
-        updateView(kind, (current) => ({
+        updateRuntime(kind, event.sessionId, (current) => ({
           ...current,
           items: appendItem(current.items, {
             id: event.itemId,
@@ -309,7 +355,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           });
           return;
         }
-        updateView(kind, (current) => ({
+        updateRuntime(kind, event.sessionId, (current) => ({
           ...current,
           approvals: [
             ...current.approvals.filter((approval) => approval.requestId !== event.requestId),
@@ -326,51 +372,98 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       case "error":
         updateView(kind, (current) => ({
           ...current,
-          items: withoutLoadingItem(current.items),
+          runtimes: updateSessionRuntime(
+            current.runtimes,
+            event.sessionId ?? current.activeSessionId,
+            failSessionHistory,
+          ),
           status: "ready",
           error: event.message,
         }));
     }
-  }, [updateView]);
+  }, [updateRuntime, updateView]);
 
   const openClaudeAux = useCallback(async (
     purpose: "claude-list" | "claude-history",
     sessionId?: string,
   ): Promise<void> => {
+    if (purpose === "claude-list") {
+      updateView("claude", (current) => ({ ...current, status: "connecting", error: null }));
+    }
     const channelId = nextChannelId("claude", purpose);
-    channels.current.set(channelId, { provider: "claude", purpose, handledPayload: false });
+    channels.current.set(channelId, {
+      provider: "claude",
+      purpose,
+      handledPayload: false,
+      ...(sessionId ? { sessionId } : {}),
+    });
     decoders.current.set(channelId, new JsonLineDecoder());
+    helperTimeouts.current.set(channelId, setTimeout(() => {
+      const meta = channels.current.get(channelId);
+      if (!meta || meta.handledPayload) return;
+      meta.handledPayload = true;
+      updateView("claude", (current) => ({
+        ...current,
+        runtimes: purpose === "claude-history"
+          ? updateSessionRuntime(current.runtimes, sessionId, failSessionHistory)
+          : current.runtimes,
+        status: "ready",
+        error: purpose === "claude-history"
+          ? "Claude session history timed out"
+          : "Claude session list timed out",
+      }));
+      void closeChannel(channelId);
+    }, CLAUDE_HELPER_TIMEOUT_MS));
     try {
       if (sessionId) await loadDesktopClaudeSession(channelId, sessionId, target);
       else await listDesktopClaudeSessions(channelId, target);
     } catch (reason) {
       channels.current.delete(channelId);
+      decoders.current.delete(channelId);
+      const timeout = helperTimeouts.current.get(channelId);
+      if (timeout) clearTimeout(timeout);
+      helperTimeouts.current.delete(channelId);
       updateView("claude", (current) => ({
         ...current,
-        items: withoutLoadingItem(current.items),
+        runtimes: updateSessionRuntime(
+          current.runtimes,
+          sessionId ?? current.activeSessionId,
+          failSessionHistory,
+        ),
         status: "ready",
         error: String(reason),
       }));
     }
-  }, [nextChannelId, target, updateView]);
+  }, [closeChannel, nextChannelId, target, updateView]);
 
-  const openProvider = useCallback((kind: AiKind, sessionId?: string): Promise<void> => {
-    if (providerChannels.current.has(kind)) return Promise.resolve();
-    const existing = openingProviders.current.get(kind);
+  const openProvider = useCallback((kind: AiKind, sessionId?: string): Promise<string | undefined> => {
+    const key = providerChannelKey(kind, sessionId);
+    const currentChannel = providerChannels.current.get(key);
+    if (currentChannel) return Promise.resolve(currentChannel);
+    const existing = openingProviders.current.get(key);
     if (existing) return existing;
     const generation = runtimeGeneration.current;
-    const opening = (async () => {
+    let opening!: Promise<string | undefined>;
+    opening = (async () => {
       const channelId = nextChannelId(kind, "provider");
-      channels.current.set(channelId, { provider: kind, purpose: "provider", handledPayload: false });
+      channels.current.set(channelId, {
+        provider: kind,
+        purpose: "provider",
+        handledPayload: false,
+        ...(sessionId ? { sessionId } : {}),
+      });
       decoders.current.set(channelId, new JsonLineDecoder());
+      if (kind === "claude") {
+        claudeNormalizers.current.set(channelId, new ClaudeStreamNormalizer());
+      }
       updateView(kind, (current) => ({ ...current, status: "connecting", error: null }));
       try {
         await openDesktopAgent(channelId, kind, target, kind === "claude" ? sessionId : undefined);
-        if (generation !== runtimeGeneration.current) {
+        if (generation !== runtimeGeneration.current || !channels.current.has(channelId)) {
           await closeChannel(channelId);
-          return;
+          return undefined;
         }
-        providerChannels.current.set(kind, channelId);
+        providerChannels.current.set(key, channelId);
         if (kind === "codex") {
           const client = new CodexMobileClient(
             (line) => writeDesktopAgentLine(channelId, line),
@@ -380,7 +473,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           await client.initialize();
         } else if (kind === "claude") {
           updateView(kind, (current) => ({ ...current, status: "ready" }));
-          await openClaudeAux(sessionId ? "claude-history" : "claude-list", sessionId);
+          const current = viewsRef.current.claude;
+          const shouldLoadData = sessionId
+            ? readSessionRuntime(current.runtimes, sessionId).historyState !== "loaded"
+            : current.sessions.length === 0;
+          if (shouldLoadData) {
+            await openClaudeAux(sessionId ? "claude-history" : "claude-list", sessionId);
+          }
         } else {
           const client = new AcpClient(
             kind,
@@ -391,19 +490,23 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           await client.initialize();
           updateView(kind, (current) => ({ ...current, status: "ready" }));
         }
+        return channelId;
       } catch (reason) {
         updateView(kind, (current) => ({ ...current, status: "idle", error: String(reason) }));
-        providerChannels.current.delete(kind);
+        providerChannels.current.delete(key);
         codexClients.current.get(kind)?.close();
         acpClients.current.get(kind)?.close();
         codexClients.current.delete(kind);
         acpClients.current.delete(kind);
         await closeChannel(channelId);
+        return undefined;
       } finally {
-        openingProviders.current.delete(kind);
+        if (openingProviders.current.get(key) === opening) {
+          openingProviders.current.delete(key);
+        }
       }
     })();
-    openingProviders.current.set(kind, opening);
+    openingProviders.current.set(key, opening);
     return opening;
   }, [applyEvent, closeChannel, nextChannelId, openClaudeAux, target, updateView]);
 
@@ -421,23 +524,49 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         const expected = expectedClose.current.delete(event.channelId);
         if (!expected && event.exitStatus && event.exitStatus !== 0) {
           const detail = stderr.current.get(event.channelId);
+          if (meta.purpose !== "provider") {
+            meta.handledPayload = true;
+            updateView("claude", (current) => ({
+              ...current,
+              runtimes: meta.purpose === "claude-history"
+                ? updateSessionRuntime(current.runtimes, meta.sessionId, failSessionHistory)
+                : current.runtimes,
+              status: "ready",
+              error: detail || `Claude helper exited with status ${event.exitStatus}`,
+            }));
+            return;
+          }
           updateView(meta.provider, (current) => ({
             ...current,
-            running: false,
-            status: "idle",
+            runtimes: meta.sessionId
+              ? updateSessionRuntime(current.runtimes, meta.sessionId, (runtime) => ({
+                  ...runtime,
+                  activeTurnId: null,
+                  running: false,
+                  waiting: false,
+                }))
+              : stoppedRuntimes(current.runtimes),
+            status: meta.provider === "claude" ? current.status : "idle",
             error: detail || `${PROVIDER_NAMES[meta.provider]} exited with status ${event.exitStatus}`,
           }));
         }
         return;
       }
       if (event.kind === "closed") {
+        const timeout = helperTimeouts.current.get(event.channelId);
+        if (timeout) clearTimeout(timeout);
+        helperTimeouts.current.delete(event.channelId);
         if (meta.purpose !== "provider" && !meta.handledPayload) {
           const detail = stderr.current.get(event.channelId);
           updateView("claude", (current) => ({
             ...current,
-            items: meta.purpose === "claude-history"
-              ? withoutLoadingItem(current.items)
-              : current.items,
+            runtimes: meta.purpose === "claude-history"
+              ? updateSessionRuntime(
+                  current.runtimes,
+                  meta.sessionId ?? current.activeSessionId,
+                  failSessionHistory,
+                )
+              : current.runtimes,
             status: "ready",
             error: detail || (meta.purpose === "claude-history"
               ? "Claude session history returned no data"
@@ -446,9 +575,21 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         }
         channels.current.delete(event.channelId);
         decoders.current.delete(event.channelId);
+        claudeNormalizers.current.delete(event.channelId);
         stderr.current.delete(event.channelId);
-        if (providerChannels.current.get(meta.provider) === event.channelId) {
-          providerChannels.current.delete(meta.provider);
+        const key = providerChannelKey(meta.provider, meta.sessionId);
+        const ownsRuntime = providerChannels.current.get(key) === event.channelId;
+        if (ownsRuntime) {
+          providerChannels.current.delete(key);
+        }
+        if (meta.purpose === "provider" && meta.provider === "claude" && ownsRuntime) {
+          updateRuntime("claude", meta.sessionId, (runtime) => ({
+            ...runtime,
+            activeTurnId: null,
+            running: false,
+            waiting: false,
+          }));
+        } else if (meta.purpose === "provider" && ownsRuntime) {
           codexClients.current.get(meta.provider)?.close();
           acpClients.current.get(meta.provider)?.close();
           codexClients.current.delete(meta.provider);
@@ -472,25 +613,71 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           const message = JSON.parse(line) as Record<string, unknown>;
           if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
             meta.handledPayload = true;
+            const timeout = helperTimeouts.current.get(event.channelId);
+            if (timeout) clearTimeout(timeout);
+            helperTimeouts.current.delete(event.channelId);
             applyEvent("claude", {
               type: "sessionsLoaded",
               sessions: message.sessions as MobileSession[],
             });
             continue;
           }
-          const historyEvents = normalizeClaudeHistoryMessage(message);
+          const historyEvents = normalizeClaudeHistoryMessage(message, meta.sessionId);
+          const normalizer = claudeNormalizers.current.get(event.channelId);
           const normalized = historyEvents.length > 0
             ? historyEvents
-            : normalizeClaudeMessage(message);
+            : normalizer?.receive(message) ?? [];
           if (normalized.length > 0) meta.handledPayload = true;
-          for (const item of normalized) applyEvent("claude", item);
+          if (normalized.length > 0 && meta.purpose !== "provider") {
+            const timeout = helperTimeouts.current.get(event.channelId);
+            if (timeout) clearTimeout(timeout);
+            helperTimeouts.current.delete(event.channelId);
+          }
+          for (const item of normalized) {
+            const eventSessionId = item.type === "sessionLoaded"
+              ? item.session.id
+              : "sessionId" in item
+                ? item.sessionId
+                : undefined;
+            if (
+              meta.purpose === "provider"
+              && eventSessionId
+              && eventSessionId !== meta.sessionId
+            ) {
+              const previousId = meta.sessionId;
+              const previousKey = providerChannelKey("claude", previousId);
+              if (providerChannels.current.get(previousKey) === event.channelId) {
+                providerChannels.current.delete(previousKey);
+              }
+              providerChannels.current.set(providerChannelKey("claude", eventSessionId), event.channelId);
+              meta.sessionId = eventSessionId;
+              updateView("claude", (current) => ({
+                ...current,
+                activeSessionId: current.activeSessionId === (previousId ?? null)
+                  ? eventSessionId
+                  : current.activeSessionId,
+                runtimes: moveSessionRuntime(current.runtimes, previousId, eventSessionId),
+              }));
+            }
+            applyEvent("claude", item);
+          }
         } catch {
           meta.handledPayload = true;
+          if (meta.purpose !== "provider") {
+            const timeout = helperTimeouts.current.get(event.channelId);
+            if (timeout) clearTimeout(timeout);
+            helperTimeouts.current.delete(event.channelId);
+            void closeChannel(event.channelId);
+          }
           updateView(meta.provider, (current) => ({
             ...current,
-            items: meta.purpose === "claude-history"
-              ? withoutLoadingItem(current.items)
-              : current.items,
+            runtimes: meta.purpose === "claude-history"
+              ? updateSessionRuntime(
+                  current.runtimes,
+                  meta.sessionId ?? current.activeSessionId,
+                  failSessionHistory,
+                )
+              : current.runtimes,
             error: `${PROVIDER_NAMES[meta.provider]} returned an invalid JSON line`,
           }));
         }
@@ -503,7 +690,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       disposed = true;
       unlisten?.();
     };
-  }, [applyEvent, updateView]);
+  }, [applyEvent, updateRuntime, updateView]);
 
   useEffect(() => {
     if (!open || !leaf || probedTarget === targetKey) return;
@@ -539,8 +726,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   }, [closeChannel, leaf?.id, open, probedTarget, targetKey]);
 
   useEffect(() => {
-    if (open && probedTarget === targetKey && installed.has(provider)) void openProvider(provider);
-  }, [installed, open, openProvider, probedTarget, provider, targetKey]);
+    if (!open || probedTarget !== targetKey || !installed.has(provider)) return;
+    if (provider === "claude") {
+      if (viewsRef.current.claude.status === "idle") void openClaudeAux("claude-list");
+      return;
+    }
+    void openProvider(provider);
+  }, [installed, open, openClaudeAux, openProvider, probedTarget, provider, targetKey]);
 
   useLayoutEffect(() => {
     if (!open || !timelineRef.current) return;
@@ -549,138 +741,178 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     latestTimelineTextLength,
     open,
     provider,
-    view.approvals.length,
-    view.items.length,
-    view.running,
+    runtime.approvals.length,
+    runtime.items.length,
+    runtime.running,
   ]);
 
   const selectSession = async (session: MobileSession): Promise<void> => {
+    const selectedRuntime = readSessionRuntime(viewsRef.current[provider].runtimes, session.id);
+    const shouldLoadHistory = selectedRuntime.historyState === "idle";
     updateView(provider, (current) => ({
       ...current,
       activeSessionId: session.id,
-      items: [{ id: `loading-${session.id}`, kind: "status", text: "Loading session…" }],
-      approvals: [],
+      runtimes: updateSessionRuntime(
+        current.runtimes,
+        session.id,
+        (runtime) => shouldLoadHistory ? beginSessionHistory(runtime, session.id) : runtime,
+      ),
       error: null,
     }));
     try {
       if (provider === "codex") {
-        await codexClients.current.get(provider)?.resumeSession(session.id);
+        if (shouldLoadHistory) await codexClients.current.get(provider)?.resumeSession(session.id);
       } else if (provider === "claude") {
-        const previous = providerChannels.current.get(provider);
-        if (previous) {
-          providerChannels.current.delete(provider);
-          await closeChannel(previous);
-        }
-        await openProvider(provider, session.id);
+        if (shouldLoadHistory) await openClaudeAux("claude-history", session.id);
       } else {
-        await acpClients.current.get(provider)?.loadSession(session.id, session.cwd ?? target.cwd ?? ".");
+        if (shouldLoadHistory) {
+          await acpClients.current.get(provider)?.loadSession(session.id, session.cwd ?? target.cwd ?? ".");
+        }
       }
     } catch (reason) {
       updateView(provider, (current) => ({
         ...current,
-        items: withoutLoadingItem(current.items),
+        runtimes: updateSessionRuntime(current.runtimes, session.id, failSessionHistory),
         error: String(reason),
       }));
     }
   };
 
   const newSession = async (): Promise<void> => {
-    updateView(provider, (current) => ({ ...current, items: [], approvals: [], error: null }));
+    updateView(provider, (current) => ({
+      ...current,
+      activeSessionId: null,
+      runtimes: { ...current.runtimes, [sessionRuntimeKey(null)]: createSessionRuntime() },
+      error: null,
+    }));
     try {
       let sessionId: string | undefined;
       if (provider === "codex") {
         sessionId = await codexClients.current.get(provider)?.startSession(target.cwd);
       } else if (provider === "claude") {
-        const previous = providerChannels.current.get(provider);
-        if (previous) {
-          providerChannels.current.delete(provider);
-          await closeChannel(previous);
-        }
         await openProvider(provider);
       } else {
         sessionId = await acpClients.current.get(provider)?.newSession(target.cwd ?? ".");
       }
-      updateView(provider, (current) => ({ ...current, activeSessionId: sessionId ?? null }));
+      if (sessionId) {
+        updateView(provider, (current) => ({
+          ...current,
+          activeSessionId: sessionId,
+          runtimes: moveSessionRuntime(current.runtimes, null, sessionId),
+        }));
+      }
     } catch (reason) {
       updateView(provider, (current) => ({ ...current, error: String(reason) }));
     }
   };
 
-  const sendText = async (kind: AiKind, text: string, queued = false): Promise<void> => {
+  const sendText = async (
+    kind: AiKind,
+    text: string,
+    queued = false,
+    requestedSessionId?: string | null,
+  ): Promise<void> => {
     const trimmed = text.trim();
     if (!trimmed) return;
     const current = viewsRef.current[kind];
-    if (current.running && queueMode && !queued) {
-      updateView(kind, (state) => ({ ...state, queue: [...state.queue, trimmed] }));
+    let sessionId = requestedSessionId === undefined
+      ? current.activeSessionId
+      : requestedSessionId;
+    const currentRuntime = readSessionRuntime(current.runtimes, sessionId);
+    if (currentRuntime.historyState === "loading") return;
+    if (currentRuntime.running && queueMode && !queued) {
+      updateRuntime(kind, sessionId, (runtime) => ({
+        ...runtime,
+        queue: [...runtime.queue, trimmed],
+      }));
       setDraft("");
       return;
     }
     setDraft("");
-    updateView(kind, (state) => ({
-      ...state,
-      error: null,
+    updateView(kind, (state) => ({ ...state, error: null }));
+    updateRuntime(kind, sessionId, (runtime) => ({
+      ...runtime,
       running: true,
-      items: [...state.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
+      waiting: false,
+      historyState: "loaded",
+      items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
     }));
     try {
-      await openProvider(kind, kind === "claude" ? current.activeSessionId ?? undefined : undefined);
-      let sessionId = viewsRef.current[kind].activeSessionId;
+      const channelId = await openProvider(kind, kind === "claude" ? sessionId ?? undefined : undefined);
       if (kind === "codex") {
         const client = codexClients.current.get(kind);
         if (!client) throw new Error("Codex channel is not ready");
         if (!sessionId) {
-          sessionId = await client.startSession(target.cwd);
-          updateView(kind, (state) => ({ ...state, activeSessionId: sessionId ?? null }));
+          const createdSessionId = await client.startSession(target.cwd);
+          sessionId = createdSessionId;
+          updateView(kind, (state) => ({
+            ...state,
+            activeSessionId: state.activeSessionId === null ? createdSessionId : state.activeSessionId,
+            runtimes: moveSessionRuntime(state.runtimes, null, createdSessionId),
+          }));
         }
-        if (current.running && current.activeTurnId && !queued) {
-          await client.steer(sessionId, current.activeTurnId, trimmed);
+        if (currentRuntime.running && currentRuntime.activeTurnId && !queued) {
+          await client.steer(sessionId, currentRuntime.activeTurnId, trimmed);
         } else {
           await client.startTurn(sessionId, trimmed, target.cwd);
         }
       } else if (kind === "claude") {
-        const channelId = providerChannels.current.get(kind);
         if (!channelId) throw new Error("Claude channel is not ready");
         await writeDesktopAgentLine(channelId, claudeInput(trimmed));
       } else {
         const client = acpClients.current.get(kind);
         if (!client) throw new Error(`${PROVIDER_NAMES[kind]} channel is not ready`);
         if (!sessionId) {
-          sessionId = await client.newSession(target.cwd ?? ".");
-          updateView(kind, (state) => ({ ...state, activeSessionId: sessionId ?? null }));
+          const createdSessionId = await client.newSession(target.cwd ?? ".");
+          sessionId = createdSessionId;
+          updateView(kind, (state) => ({
+            ...state,
+            activeSessionId: state.activeSessionId === null ? createdSessionId : state.activeSessionId,
+            runtimes: moveSessionRuntime(state.runtimes, null, createdSessionId),
+          }));
         }
-        if (current.running && !queued) await client.cancel(sessionId);
+        if (currentRuntime.running && !queued) await client.cancel(sessionId);
         const stopReason = await client.prompt(sessionId, trimmed);
         applyEvent(kind, { type: "turnCompleted", sessionId, status: stopReason });
       }
     } catch (reason) {
-      updateView(kind, (state) => ({ ...state, running: false, error: String(reason) }));
+      updateRuntime(kind, sessionId, (runtime) => ({ ...runtime, running: false, waiting: false }));
+      updateView(kind, (state) => ({ ...state, error: String(reason) }));
     }
   };
-  submitRef.current = sendText;
+  submitRef.current = (kind, sessionId, text, queued) =>
+    sendText(kind, text, queued, sessionId);
 
   const stop = async (): Promise<void> => {
     const current = viewsRef.current[provider];
     const sessionId = current.activeSessionId;
+    const currentRuntime = readSessionRuntime(current.runtimes, sessionId);
     try {
-      if (provider === "codex" && sessionId && current.activeTurnId) {
-        await codexClients.current.get(provider)?.interrupt(sessionId, current.activeTurnId);
+      if (provider === "codex" && sessionId && currentRuntime.activeTurnId) {
+        await codexClients.current.get(provider)?.interrupt(sessionId, currentRuntime.activeTurnId);
       } else if (provider === "claude") {
-        const channelId = providerChannels.current.get(provider);
+        const key = providerChannelKey(provider, sessionId);
+        const channelId = providerChannels.current.get(key);
         if (channelId) {
-          providerChannels.current.delete(provider);
+          providerChannels.current.delete(key);
           await closeChannel(channelId);
         }
       } else if (sessionId) {
         await acpClients.current.get(provider)?.cancel(sessionId);
       }
-      updateView(provider, (state) => ({ ...state, running: false, activeTurnId: null }));
+      updateRuntime(provider, sessionId, (runtime) => ({
+        ...runtime,
+        running: false,
+        waiting: false,
+        activeTurnId: null,
+      }));
     } catch (reason) {
       updateView(provider, (state) => ({ ...state, error: String(reason) }));
     }
   };
 
   const resolveApproval = async (
-    approval: ApprovalRequest,
+    approval: AgentApprovalRequest,
     optionId?: string,
     accepted = false,
   ): Promise<void> => {
@@ -690,7 +922,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       } else if (provider !== "claude") {
         await acpClients.current.get(provider)?.resolvePermission(approval.requestId, optionId);
       }
-      updateView(provider, (current) => ({
+      updateRuntime(provider, view.activeSessionId, (current) => ({
         ...current,
         approvals: current.approvals.filter((item) => item.requestId !== approval.requestId),
       }));
@@ -780,18 +1012,23 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
               aria-label="Search sessions"
             />
             <div className="agent-session-list">
-              {filteredSessions.map((session) => (
-                <button
-                  type="button"
-                  key={session.id}
-                  className={session.id === view.activeSessionId ? "active" : ""}
-                  onClick={() => void selectSession(session)}
-                >
-                  <strong>{session.title}</strong>
-                  <span>{session.cwd ?? session.id}</span>
-                  <small>{relativeTime(session.updatedAt)}</small>
-                </button>
-              ))}
+              {filteredSessions.map((session) => {
+                const sessionRuntime = readSessionRuntime(view.runtimes, session.id);
+                return (
+                  <button
+                    type="button"
+                    key={session.id}
+                    className={session.id === view.activeSessionId ? "active" : ""}
+                    onClick={() => void selectSession(session)}
+                  >
+                    <strong>{session.title}</strong>
+                    <span>{session.cwd ?? session.id}</span>
+                    <small className={sessionRuntime.running ? "running" : ""}>
+                      {sessionRuntime.running ? sessionRuntimeLabel(sessionRuntime) : relativeTime(session.updatedAt)}
+                    </small>
+                  </button>
+                );
+              })}
               {filteredSessions.length === 0 ? <p>No saved sessions</p> : null}
             </div>
           </section>
@@ -802,8 +1039,8 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                 <span>{PROVIDER_NAMES[provider]}</span>
                 <strong>{activeSession?.title ?? "New session"}</strong>
               </div>
-              <span className={view.running ? "agent-run-state running" : "agent-run-state"}>
-                {view.status === "connecting" ? "Connecting" : view.running ? "Running" : "Ready"}
+              <span className={runtime.running ? "agent-run-state running" : "agent-run-state"}>
+                {view.status === "connecting" ? "Connecting" : sessionRuntimeLabel(runtime)}
               </span>
             </header>
 
@@ -814,13 +1051,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   <button type="button" onClick={() => updateView(provider, (current) => ({ ...current, error: null }))}>Dismiss</button>
                 </div>
               ) : null}
-              {view.items.length === 0 && view.approvals.length === 0 ? (
+              {runtime.items.length === 0 && runtime.approvals.length === 0 ? (
                 <div className="agent-timeline-empty">
                   <strong>Send the next instruction</strong>
                   <p>Messages and tool activity appear here. The provider terminal stays hidden.</p>
                 </div>
               ) : null}
-              {view.items.map((item) => (
+              {runtime.items.map((item) => (
                 <article key={item.id} className={`agent-timeline-row ${item.kind}`}>
                   <span className="agent-timeline-rail" />
                   <div>
@@ -829,7 +1066,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   </div>
                 </article>
               ))}
-              {view.approvals.map((approval) => (
+              {runtime.approvals.map((approval) => (
                 <article key={approval.requestId} className="agent-approval">
                   <small>Approval required</small>
                   <strong>{approval.title}</strong>
@@ -851,18 +1088,18 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   </div>
                 </article>
               ))}
-              {view.running ? <div className="agent-working"><span /><span /><span /> Working</div> : null}
+              {runtime.running ? <div className="agent-working"><span /><span /><span /> Working</div> : null}
             </div>
 
-            {view.queue.length > 0 ? (
+            {runtime.queue.length > 0 ? (
               <div className="agent-queue-preview">
-                <span>{view.queue.length} queued</span>
-                <p>{view.queue[0]}</p>
-                <button type="button" onClick={() => updateView(provider, (current) => ({ ...current, queue: [] }))}>Clear</button>
+                <span>{runtime.queue.length} queued</span>
+                <p>{runtime.queue[0]}</p>
+                <button type="button" onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queue: [] }))}>Clear</button>
               </div>
             ) : null}
 
-            <footer className={view.running && !queueMode ? "agent-composer steering" : "agent-composer"}>
+            <footer className={runtime.running && !queueMode ? "agent-composer steering" : "agent-composer"}>
               <textarea
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -872,12 +1109,12 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                     void sendText(provider, draft);
                   }
                 }}
-                placeholder={view.running && !queueMode ? "Redirect the active task…" : view.running ? "Add the next instruction…" : "Message the agent…"}
+                placeholder={runtime.running && !queueMode ? "Redirect the active task…" : runtime.running ? "Add the next instruction…" : "Message the agent…"}
                 rows={3}
               />
               <div className="agent-composer-actions">
                 <div>
-                  {view.running ? (
+                  {runtime.running ? (
                     <>
                       <button type="button" className={!queueMode ? "active" : ""} onClick={() => setQueueMode(false)}>Steer</button>
                       <button type="button" className={queueMode ? "active" : ""} onClick={() => setQueueMode(true)}>Queue</button>
@@ -885,9 +1122,18 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   ) : <span>Ctrl+Enter to send</span>}
                 </div>
                 <div>
-                  {view.running ? <button type="button" className="agent-stop-button" onClick={() => void stop()}>Stop</button> : null}
-                  <button type="button" className="agent-send-button" disabled={!draft.trim()} onClick={() => void sendText(provider, draft)}>
-                    {view.running ? queueMode ? "Queue" : "Steer" : "Send"}
+                  {runtime.running ? <button type="button" className="agent-stop-button" onClick={() => void stop()}>Stop</button> : null}
+                  <button
+                    type="button"
+                    className="agent-send-button"
+                    disabled={
+                      !draft.trim()
+                      || runtime.historyState === "loading"
+                      || (provider === "codex" && runtime.running && !runtime.activeTurnId && !queueMode)
+                    }
+                    onClick={() => void sendText(provider, draft)}
+                  >
+                    {runtime.running ? queueMode ? "Queue" : "Steer" : "Send"}
                   </button>
                 </div>
               </div>

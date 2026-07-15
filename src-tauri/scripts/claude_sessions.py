@@ -167,18 +167,20 @@ def list_sessions(root):
 
 
 def load_session(root, session_id):
-    matches = [
-        (updated_at, path)
-        for updated_at, path in session_files(root)
-        if os.path.splitext(os.path.basename(path))[0] == session_id
-    ]
+    matches = []
+    pattern = os.path.join(root, "**", f"{glob.escape(session_id)}.jsonl")
+    for path in glob.iglob(pattern, recursive=True):
+        try:
+            matches.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
     if not matches:
         print(json.dumps({
             "type": "wmux_error",
             "message": "Claude session was not found",
         }), flush=True)
         return
-    updated_at, path = matches[0]
+    updated_at, path = max(matches)
     try:
         entries = list(json_items(read_tail(path, HISTORY_TAIL_BYTES)))
     except OSError:
