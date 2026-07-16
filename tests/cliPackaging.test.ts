@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 import {
   cliExecutableNameForTarget,
@@ -57,7 +58,7 @@ test("resolveCliTargets prefers explicit env over host platform", () => {
 test("packaging paths are rooted in target sidecars and wmux-cli target output", () => {
   assert.equal(
     sidecarOutputPathForTarget({ root: "/repo", target: "x86_64-pc-windows-msvc" }),
-    "/repo/target/sidecars/wmux-cli-x86_64-pc-windows-msvc.exe",
+    join("/repo", "target", "sidecars", "wmux-cli-x86_64-pc-windows-msvc.exe"),
   );
   assert.equal(
     cliOutputPathForTarget({
@@ -65,7 +66,7 @@ test("packaging paths are rooted in target sidecars and wmux-cli target output",
       target: "x86_64-pc-windows-msvc",
       hostTriple: "x86_64-unknown-linux-gnu",
     }),
-    "/repo/wmux-cli/target/x86_64-pc-windows-msvc/release/wmux-cli.exe",
+    join("/repo", "wmux-cli", "target", "x86_64-pc-windows-msvc", "release", "wmux-cli.exe"),
   );
   assert.equal(
     cliOutputPathForTarget({
@@ -73,6 +74,6 @@ test("packaging paths are rooted in target sidecars and wmux-cli target output",
       target: "x86_64-unknown-linux-gnu",
       hostTriple: "x86_64-unknown-linux-gnu",
     }),
-    "/repo/wmux-cli/target/release/wmux-cli",
+    join("/repo", "wmux-cli", "target", "release", "wmux-cli"),
   );
 });

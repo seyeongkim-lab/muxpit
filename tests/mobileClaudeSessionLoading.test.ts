@@ -20,7 +20,7 @@ test("Claude session selection loads history without rescanning the full list", 
   assert.match(rust, /const CLAUDE_SESSION_SCRIPT: &str = include_str!/);
 });
 
-test("Claude provider browsing uses helpers and closes every previous channel", () => {
+test("Claude provider browsing uses helpers and keeps provider channels alive", () => {
   const changeProvider = app.slice(
     app.indexOf("const changeProvider"),
     app.indexOf("const resolveApproval"),
@@ -31,8 +31,12 @@ test("Claude provider browsing uses helpers and closes every previous channel", 
   );
 
   assert.match(changeProvider, /prepareProvider\(nextProvider\)/);
-  assert.match(changeProvider, /requestClaudeData\(activeSessionRef\.current \?\? undefined\)/);
+  assert.match(changeProvider, /const shouldRequestClaudeData = sessionId/);
+  assert.match(changeProvider, /if \(shouldRequestClaudeData\) await requestClaudeData\(sessionId\)/);
   assert.doesNotMatch(changeProvider, /openProvider\(profile, "claude"\)/);
-  assert.match(prepareProvider, /\[\.\.\.channels\.current\.keys\(\)\]/);
+  assert.doesNotMatch(prepareProvider, /closeAgent\(|resetAgentState\(/);
+  assert.match(prepareProvider, /providerViews\.current\[nextProvider\]/);
+  assert.match(app, /normalizedHandlerRef\.current\("codex", event\)/);
+  assert.match(app, /normalizedHandlerRef\.current\(meta\.provider, normalized\)/);
   assert.match(app, /openingProviders\.current\.get\(key\) === opening/);
 });

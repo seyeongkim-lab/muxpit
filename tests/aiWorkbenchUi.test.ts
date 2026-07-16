@@ -55,7 +55,10 @@ test("AI workbench keeps the composer visible while session history loads", () =
   const styles = readSource("../src/components/AgentWorkbenchPanel.css");
 
   assert.match(styles, /\.agent-workbench-body \{[^}]*overflow: hidden;/);
-  assert.match(styles, /\.agent-conversation \{[^}]*overflow: hidden;/);
+  assert.match(styles, /\.agent-conversation \{[^}]*display: grid;/);
+  assert.match(styles, /\.agent-conversation \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto auto;/);
+  assert.match(styles, /\.agent-composer \{[^}]*grid-row: 4;/);
+  assert.match(styles, /\.agent-composer textarea \{[^}]*resize: none;/);
 });
 
 test("AI workbench stores composer state in each session runtime", () => {
@@ -97,9 +100,19 @@ test("AI workbench loads Claude history without starting an idle process", () =>
   );
 
   assert.match(selectSession, /if \(shouldLoadHistory\) await openClaudeAux\("claude-history", session\.id\)/);
-  assert.doesNotMatch(selectSession, /openProvider\(provider, session\.id\)/);
   assert.doesNotMatch(selectSession, /closeChannel\(/);
   assert.match(workbench, /sessionRuntimeLabel\(sessionRuntime\)/);
+});
+
+test("AI workbench resumes a disconnected session when it is opened", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const selectSession = workbench.slice(
+    workbench.indexOf("const selectSession"),
+    workbench.indexOf("const newSession"),
+  );
+
+  assert.match(selectSession, /selectedRuntime\.connectionState === "disconnected"/);
+  assert.match(selectSession, /await openProvider\(provider, provider === "claude" \? session\.id : undefined\)/);
 });
 
 test("AI workbench provider tab lists Claude sessions without starting a process", () => {

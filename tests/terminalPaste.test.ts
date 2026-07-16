@@ -166,6 +166,7 @@ test("terminal paste saves clipboard images for local panes", async () => {
     surface,
     spawnCommand: null,
     spawnSshConnection: null,
+    platform: "linux",
   });
 
   assert.deepEqual(pasted, ["/home/me/.wmux/screenshots/local.png "]);
@@ -335,6 +336,7 @@ test("terminal paste event saves native clipboard images for local panes", async
     surface,
     spawnCommand: null,
     spawnSshConnection: null,
+    platform: "linux",
   });
 
   assert.equal(handled, true);

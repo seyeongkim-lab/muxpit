@@ -69,6 +69,12 @@ const loadCachedWorkbenchView = (
   MOBILE_PROVIDERS,
 )?.views[provider];
 
+const emptyWorkbenchView = (): AgentWorkbenchViewSnapshot => ({
+  sessions: [],
+  activeSessionId: null,
+  runtimes: {},
+});
+
 interface MobileChannelMeta {
   provider: Provider;
   purpose: "provider" | "claude-list" | "claude-history";
@@ -200,9 +206,17 @@ export const MobileApp = () => {
     ? undefined
     : loadAgentWorkbenchSnapshot(MOBILE_WORKBENCH_STORAGE_KEY, MOBILE_PROVIDERS)).current;
   const initialProvider = initialWorkbench?.provider ?? "codex";
-  const initialView = initialWorkbench?.views[initialProvider];
   const initialProfile = initialProfiles.find((profile) => profile.id === initialWorkbench?.profileId)
     ?? initialProfiles[0];
+  const [initialViews] = useState<Partial<Record<Provider, AgentWorkbenchViewSnapshot>>>(() =>
+    MOBILE_DEMO
+      ? {}
+      : Object.fromEntries(MOBILE_PROVIDERS.flatMap((kind) => {
+          const view = initialWorkbench?.views[kind]
+            ?? (initialProfile ? loadCachedWorkbenchView(initialProfile.id, kind) : undefined);
+          return view ? [[kind, view]] : [];
+        })));
+  const initialView = initialViews[initialProvider];
   const [profiles, setProfiles] = useState(initialProfiles);
   const [form, setForm] = useState<ConnectionForm>(() =>
     initialProfile ? formFromProfile(initialProfile) : blankForm());
@@ -245,16 +259,18 @@ export const MobileApp = () => {
   const sessionsRef = useRef<MobileSession[]>(sessions);
   const activeSessionRef = useRef<string | null>(activeSessionId);
   const runtimesRef = useRef<AgentSessionRuntimes>(runtimes);
+  const providerViews = useRef<Partial<Record<Provider, AgentWorkbenchViewSnapshot>>>(initialViews);
   const timelineRef = useRef<HTMLElement | null>(null);
   const pendingSessionScrollRef = useRef<{ sessionId: string } | null>(null);
   const persistWorkbenchRef = useRef<() => void>(() => {});
-  const normalizedHandlerRef = useRef<(event: MobileAgentEvent) => void>(() => {});
+  const normalizedHandlerRef = useRef<(provider: Provider, event: MobileAgentEvent) => void>(() => {});
   const transportHandlerRef = useRef<(event: MobileAgentTransportEvent) => void>(() => {});
   const resumeConnectionRef = useRef<() => Promise<void>>(async () => {});
   const resumeInFlightRef = useRef(false);
   const runtimeGeneration = useRef(0);
   const channelSequence = useRef(0);
   const submitRef = useRef<(
+    provider: Provider,
     sessionId: string | null,
     text: string,
     fromQueue?: boolean,
@@ -266,24 +282,96 @@ export const MobileApp = () => {
   useEffect(() => { currentProfileRef.current = currentProfile; }, [currentProfile]);
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
 
+  const activeProviderView = (): AgentWorkbenchViewSnapshot => ({
+    sessions: sessionsRef.current,
+    activeSessionId: activeSessionRef.current,
+    runtimes: runtimesRef.current,
+  });
+
+  const readProviderView = (kind: Provider): AgentWorkbenchViewSnapshot =>
+    kind === providerRef.current
+      ? activeProviderView()
+      : providerViews.current[kind] ?? emptyWorkbenchView();
+
+  const replaceProviderView = (
+    kind: Provider,
+    view: AgentWorkbenchViewSnapshot,
+  ): void => {
+    providerViews.current = { ...providerViews.current, [kind]: view };
+    if (kind !== providerRef.current) return;
+    sessionsRef.current = view.sessions;
+    activeSessionRef.current = view.activeSessionId;
+    runtimesRef.current = view.runtimes;
+    setSessions(view.sessions);
+    setActiveSessionId(view.activeSessionId);
+    setRuntimes(view.runtimes);
+  };
+
+  const updateProviderView = (
+    kind: Provider,
+    update: (current: AgentWorkbenchViewSnapshot) => AgentWorkbenchViewSnapshot,
+  ): void => replaceProviderView(kind, update(readProviderView(kind)));
+
+  const updateProviderRuntime = (
+    kind: Provider,
+    sessionId: string | null | undefined,
+    update: (current: AgentSessionRuntime) => AgentSessionRuntime,
+  ): void => updateProviderView(kind, (view) => ({
+    ...view,
+    runtimes: updateSessionRuntime(view.runtimes, sessionId, update),
+  }));
+
+  const moveProviderRuntime = (
+    kind: Provider,
+    fromSessionId: string | null,
+    toSessionId: string,
+  ): void => updateProviderView(kind, (view) => ({
+    ...view,
+    runtimes: moveSessionRuntime(view.runtimes, fromSessionId, toSessionId),
+  }));
+
+  const disconnectProviderRuntimes = (kind: Provider): void => {
+    updateProviderView(kind, (view) => ({
+      ...view,
+      runtimes: Object.fromEntries(
+        Object.entries(view.runtimes).map(([key, runtime]) => [key, {
+          ...runtime,
+          activeTurnId: null,
+          connectionState: "disconnected",
+          running: false,
+          waiting: false,
+        }]),
+      ),
+    }));
+  };
+
+  const setProviderError = (kind: Provider, message: string | null): void => {
+    if (kind === providerRef.current) setError(message);
+  };
+
   persistWorkbenchRef.current = (): void => {
     if (MOBILE_DEMO) return;
     const profileId = currentProfileRef.current?.id ?? restoredProfileId.current;
     if (!profileId) return;
     const currentProvider = providerRef.current;
+    providerViews.current = {
+      ...providerViews.current,
+      [currentProvider]: activeProviderView(),
+    };
     const snapshot = {
       provider: currentProvider,
       profileId,
-      views: {
-        [currentProvider]: {
-          sessions: sessionsRef.current,
-          activeSessionId: activeSessionRef.current,
-          runtimes: runtimesRef.current,
-        },
-      },
+      views: providerViews.current,
     };
     saveAgentWorkbenchSnapshot(MOBILE_WORKBENCH_STORAGE_KEY, snapshot);
-    saveAgentWorkbenchSnapshot(mobileWorkbenchViewStorageKey(profileId, currentProvider), snapshot);
+    for (const kind of MOBILE_PROVIDERS) {
+      const view = providerViews.current[kind];
+      if (!view) continue;
+      saveAgentWorkbenchSnapshot(mobileWorkbenchViewStorageKey(profileId, kind), {
+        ...snapshot,
+        views: { [kind]: view },
+      });
+    }
   };
 
   useEffect(() => {
@@ -294,16 +382,10 @@ export const MobileApp = () => {
   const updateRuntime = (
     sessionId: string | null | undefined,
     update: (current: AgentSessionRuntime) => AgentSessionRuntime,
-  ): void => {
-    const next = updateSessionRuntime(runtimesRef.current, sessionId, update);
-    runtimesRef.current = next;
-    setRuntimes(next);
-  };
+  ): void => updateProviderRuntime(providerRef.current, sessionId, update);
 
   const moveRuntime = (fromSessionId: string | null, toSessionId: string): void => {
-    const next = moveSessionRuntime(runtimesRef.current, fromSessionId, toSessionId);
-    runtimesRef.current = next;
-    setRuntimes(next);
+    moveProviderRuntime(providerRef.current, fromSessionId, toSessionId);
   };
 
   useLayoutEffect(() => {
@@ -353,7 +435,27 @@ export const MobileApp = () => {
 
   const resetAgentState = (preserveView = false): void => {
     runtimeGeneration.current += 1;
-    codexClient.current?.close("Provider changed");
+    if (preserveView) {
+      providerViews.current = {
+        ...providerViews.current,
+        [providerRef.current]: activeProviderView(),
+      };
+      for (const meta of channels.current.values()) {
+        if (meta.purpose !== "provider") continue;
+        if (meta.provider === "codex") {
+          disconnectProviderRuntimes("codex");
+        } else {
+          updateProviderRuntime(meta.provider, meta.sessionId, (runtime) => ({
+            ...runtime,
+            activeTurnId: null,
+            connectionState: "disconnected",
+            running: false,
+            waiting: false,
+          }));
+        }
+      }
+    }
+    codexClient.current?.close("Connection reset");
     codexClient.current = null;
     activeChannel.current = null;
     channels.current.clear();
@@ -380,18 +482,20 @@ export const MobileApp = () => {
       : {};
     runtimesRef.current = next;
     setRuntimes(next);
+    providerViews.current = preserveView
+      ? {
+          ...providerViews.current,
+          [providerRef.current]: {
+            sessions: sessionsRef.current,
+            activeSessionId: activeSessionRef.current,
+            runtimes: next,
+          },
+        }
+      : {};
   };
 
   const replaceWorkbenchView = (view?: AgentWorkbenchViewSnapshot): void => {
-    const nextSessions = view?.sessions ?? [];
-    const nextSessionId = view?.activeSessionId ?? null;
-    const nextRuntimes = view?.runtimes ?? {};
-    sessionsRef.current = nextSessions;
-    activeSessionRef.current = nextSessionId;
-    runtimesRef.current = nextRuntimes;
-    setSessions(nextSessions);
-    setActiveSessionId(nextSessionId);
-    setRuntimes(nextRuntimes);
+    replaceProviderView(providerRef.current, view ?? emptyWorkbenchView());
   };
 
   const requestClaudeData = async (sessionId?: string): Promise<void> => {
@@ -409,8 +513,11 @@ export const MobileApp = () => {
       const meta = channels.current.get(channelId);
       if (!meta || meta.handledPayload) return;
       meta.handledPayload = true;
-      if (sessionId) updateRuntime(sessionId, failSessionHistory);
-      setError(sessionId ? "Claude session history timed out." : "Claude session list timed out.");
+      if (sessionId) updateProviderRuntime("claude", sessionId, failSessionHistory);
+      setProviderError(
+        "claude",
+        sessionId ? "Claude session history timed out." : "Claude session list timed out.",
+      );
       void closeAgent(channelId).catch(() => {});
     }, CLAUDE_HELPER_TIMEOUT_MS));
     try {
@@ -423,27 +530,30 @@ export const MobileApp = () => {
       if (timeout) clearTimeout(timeout);
       helperTimeouts.current.delete(channelId);
       if (sessionId) {
-        updateRuntime(sessionId, (runtime) => ({
+        updateProviderRuntime("claude", sessionId, (runtime) => ({
           ...failSessionHistory(runtime),
         }));
       }
-      setError(String(reason));
+      setProviderError("claude", String(reason));
     }
   };
 
   const prepareProvider = async (nextProvider: Provider): Promise<void> => {
-    if (nextProvider !== providerRef.current) {
-      persistWorkbenchRef.current();
-      const openChannels = [...channels.current.keys()];
-      await Promise.all(openChannels.map((channelId) => closeAgent(channelId).catch(() => {})));
-      resetAgentState();
-      const profileId = currentProfileRef.current?.id ?? restoredProfileId.current;
-      replaceWorkbenchView(profileId
-        ? loadCachedWorkbenchView(profileId, nextProvider)
-        : undefined);
+    if (nextProvider === providerRef.current) {
+      setError(null);
+      return;
     }
+    persistWorkbenchRef.current();
+    const profileId = currentProfileRef.current?.id ?? restoredProfileId.current;
+    const nextView = providerViews.current[nextProvider]
+      ?? (profileId ? loadCachedWorkbenchView(profileId, nextProvider) : undefined)
+      ?? emptyWorkbenchView();
     setProvider(nextProvider);
     providerRef.current = nextProvider;
+    replaceProviderView(nextProvider, nextView);
+    activeChannel.current = providerChannels.current.get(
+      providerChannelKey(nextProvider, nextView.activeSessionId),
+    ) ?? null;
     setError(null);
   };
 
@@ -484,6 +594,10 @@ export const MobileApp = () => {
     const existingChannel = providerChannels.current.get(key);
     if (existingChannel) {
       activeChannel.current = existingChannel;
+      updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
+        ...runtime,
+        connectionState: "connected",
+      }));
       return existingChannel;
     }
     const existingOpening = openingProviders.current.get(key);
@@ -513,27 +627,36 @@ export const MobileApp = () => {
           await openAgent(channelId, nextProvider, undefined, cwd || undefined);
           const client = new CodexMobileClient(
             (line) => writeAgentLine(channelId, line),
-            (event) => normalizedHandlerRef.current(event),
+            (event) => normalizedHandlerRef.current("codex", event),
           );
           codexClient.current = client;
-          void client.initialize()
-            .then(() => activeProviderSessionId
-              ? client.resumeSession(activeProviderSessionId)
-              : undefined)
-            .catch((reason) => setError(String(reason)));
+          await client.initialize();
+          if (activeProviderSessionId) await client.resumeSession(activeProviderSessionId);
         }
         if (generation !== runtimeGeneration.current || !channels.current.has(channelId)) {
           await closeAgent(channelId).catch(() => {});
           return undefined;
         }
         providerChannels.current.set(key, channelId);
+        updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
+          ...runtime,
+          connectionState: "connected",
+        }));
         return channelId;
       } catch (reason) {
         if (activeChannel.current === channelId) activeChannel.current = null;
+        await closeAgent(channelId).catch(() => {});
         channels.current.delete(channelId);
         decoders.current.delete(channelId);
         claudeNormalizers.current.delete(channelId);
-        setError(reason instanceof Error ? reason.message : String(reason));
+        updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
+          ...failSessionHistory(runtime),
+          connectionState: "disconnected",
+        }));
+        setProviderError(
+          nextProvider,
+          reason instanceof Error ? reason.message : String(reason),
+        );
         return undefined;
       } finally {
         if (openingProviders.current.get(key) === opening) {
@@ -620,10 +743,15 @@ export const MobileApp = () => {
           if (entry.alive) continue;
           providerChannels.current.delete(entry.key);
           const meta = channels.current.get(entry.channelId);
-          if (meta?.sessionId) {
-            updateRuntime(meta.sessionId, (runtime) => ({
+          if (meta?.purpose === "provider" && meta.provider === "codex") {
+            codexClient.current?.close();
+            codexClient.current = null;
+            disconnectProviderRuntimes("codex");
+          } else if (meta?.sessionId) {
+            updateProviderRuntime(meta.provider, meta.sessionId, (runtime) => ({
               ...runtime,
               activeTurnId: null,
+              connectionState: "disconnected",
               running: false,
               waiting: false,
             }));
@@ -634,8 +762,16 @@ export const MobileApp = () => {
         }
         if (aliveChannels.length > 0) {
           const activeKey = providerChannelKey(currentProvider, sessionId);
-          activeChannel.current = aliveChannels.find((entry) => entry.key === activeKey)?.channelId
-            ?? aliveChannels[0].channelId;
+          const activeHealth = channelHealth.find((entry) => entry.key === activeKey);
+          if (!activeHealth) {
+            activeChannel.current = null;
+            return;
+          }
+          if (activeHealth.alive) {
+            activeChannel.current = activeHealth.channelId;
+            return;
+          }
+          await openProvider(profile, currentProvider, sessionId, true, sessionCwd);
           return;
         }
         resetAgentState(true);
@@ -736,18 +872,27 @@ export const MobileApp = () => {
     );
   };
 
-  const applyNormalizedEvent = (event: MobileAgentEvent): void => {
+  const applyNormalizedEvent = (kind: Provider, event: MobileAgentEvent): void => {
     switch (event.type) {
       case "sessionsLoaded":
-        setSessions(event.sessions);
+        updateProviderView(kind, (view) => ({ ...view, sessions: event.sessions }));
         return;
       case "sessionLoaded":
-        pendingSessionScrollRef.current = { sessionId: event.session.id };
-        updateRuntime(event.session.id, (runtime) => completeSessionHistory(runtime, event.items));
-        setSessions((previous) => upsertSession(previous, event.session));
+        if (kind === providerRef.current) {
+          pendingSessionScrollRef.current = { sessionId: event.session.id };
+        }
+        updateProviderView(kind, (view) => ({
+          ...view,
+          sessions: upsertSession(view.sessions, event.session),
+          runtimes: updateSessionRuntime(
+            view.runtimes,
+            event.session.id,
+            (runtime) => completeSessionHistory(runtime, event.items),
+          ),
+        }));
         return;
       case "sessionStatus":
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           activeTurnId: event.running
             ? event.turnId ?? runtime.activeTurnId
@@ -757,7 +902,7 @@ export const MobileApp = () => {
         }));
         return;
       case "turnStarted":
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           activeTurnId: event.turnId,
           running: true,
@@ -765,9 +910,9 @@ export const MobileApp = () => {
         }));
         return;
       case "turnCompleted": {
-        const sessionRuntime = readSessionRuntime(runtimesRef.current, event.sessionId);
+        const sessionRuntime = readSessionRuntime(readProviderView(kind).runtimes, event.sessionId);
         const next = sessionRuntime.queue[0];
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           activeTurnId: null,
           running: false,
@@ -775,18 +920,18 @@ export const MobileApp = () => {
           queue: runtime.queue.slice(1),
         }));
         if (next) {
-          setTimeout(() => void submitRef.current(event.sessionId, next, true), 0);
+          setTimeout(() => void submitRef.current(kind, event.sessionId, next, true), 0);
         }
         return;
       }
       case "messageDelta":
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           items: appendMessageDelta(runtime.items, event.itemId, event.text),
         }));
         return;
       case "userMessage":
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           items: appendUnique(runtime.items, {
             id: event.itemId,
@@ -796,13 +941,13 @@ export const MobileApp = () => {
         }));
         return;
       case "messageCompleted":
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           items: completeMessage(runtime.items, event.itemId, event.text),
         }));
         return;
       case "toolStarted":
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           items: appendUnique(runtime.items, {
             id: event.itemId,
@@ -813,14 +958,14 @@ export const MobileApp = () => {
         }));
         return;
       case "approvalRequested": {
-        const request = providerRef.current === "codex"
+        const request = kind === "codex"
           ? codexClient.current?.resolveApproval(event.requestId, true)
           : undefined;
         if (request) {
-          void request.catch((reason) => setError(String(reason)));
+          void request.catch((reason) => setProviderError(kind, String(reason)));
           return;
         }
-        updateRuntime(event.sessionId, (runtime) => ({
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
           ...runtime,
           approvals: [
             ...runtime.approvals.filter((approval) => approval.requestId !== event.requestId),
@@ -830,8 +975,8 @@ export const MobileApp = () => {
         return;
       }
       case "error":
-        if (event.sessionId) updateRuntime(event.sessionId, failSessionHistory);
-        setError(event.message);
+        if (event.sessionId) updateProviderRuntime(kind, event.sessionId, failSessionHistory);
+        setProviderError(kind, event.message);
     }
   };
   normalizedHandlerRef.current = applyNormalizedEvent;
@@ -861,8 +1006,8 @@ export const MobileApp = () => {
       if (timeout) clearTimeout(timeout);
       helperTimeouts.current.delete(event.channelId);
       if (meta.purpose === "claude-history" && !meta.handledPayload) {
-        updateRuntime(meta.sessionId, failSessionHistory);
-        setError("Claude session history returned no data.");
+        updateProviderRuntime(meta.provider, meta.sessionId, failSessionHistory);
+        setProviderError(meta.provider, "Claude session history returned no data.");
       }
       decoders.current.delete(event.channelId);
       claudeNormalizers.current.delete(event.channelId);
@@ -873,23 +1018,19 @@ export const MobileApp = () => {
         providerChannels.current.delete(key);
       }
       if (activeChannel.current === event.channelId) {
-        activeChannel.current = [...providerChannels.current.values()][0] ?? null;
+        activeChannel.current = providerChannels.current.get(
+          providerChannelKey(providerRef.current, activeSessionRef.current),
+        ) ?? null;
       }
       if (meta.purpose === "provider" && meta.provider === "codex" && ownsRuntime) {
         codexClient.current?.close();
         codexClient.current = null;
-        const next = Object.fromEntries(Object.entries(runtimesRef.current).map(([runtimeKey, runtime]) => [runtimeKey, {
-          ...runtime,
-          activeTurnId: null,
-          running: false,
-          waiting: false,
-        }]));
-        runtimesRef.current = next;
-        setRuntimes(next);
+        disconnectProviderRuntimes("codex");
       } else if (meta.purpose === "provider" && ownsRuntime) {
-        updateRuntime(meta.sessionId, (runtime) => ({
+        updateProviderRuntime(meta.provider, meta.sessionId, (runtime) => ({
           ...runtime,
           activeTurnId: null,
+          connectionState: "disconnected",
           running: false,
           waiting: false,
         }));
@@ -912,7 +1053,10 @@ export const MobileApp = () => {
           const timeout = helperTimeouts.current.get(event.channelId);
           if (timeout) clearTimeout(timeout);
           helperTimeouts.current.delete(event.channelId);
-          setSessions(message.sessions as MobileSession[]);
+          updateProviderView(meta.provider, (view) => ({
+            ...view,
+            sessions: message.sessions as MobileSession[],
+          }));
           continue;
         }
         const historyEvents = normalizeClaudeHistoryMessage(message, meta.sessionId);
@@ -943,13 +1087,15 @@ export const MobileApp = () => {
             }
             providerChannels.current.set(providerChannelKey("claude", eventSessionId), event.channelId);
             meta.sessionId = eventSessionId;
-            moveRuntime(previousId, eventSessionId);
-            if (activeSessionRef.current === previousId) {
-              setActiveSessionId(eventSessionId);
-              activeSessionRef.current = eventSessionId;
-            }
+            updateProviderView("claude", (view) => ({
+              ...view,
+              activeSessionId: view.activeSessionId === previousId
+                ? eventSessionId
+                : view.activeSessionId,
+              runtimes: moveSessionRuntime(view.runtimes, previousId, eventSessionId),
+            }));
           }
-          normalizedHandlerRef.current(normalized);
+          normalizedHandlerRef.current(meta.provider, normalized);
         }
       } catch {
         if (meta.purpose !== "provider") {
@@ -958,11 +1104,11 @@ export const MobileApp = () => {
           if (timeout) clearTimeout(timeout);
           helperTimeouts.current.delete(event.channelId);
           if (meta.purpose === "claude-history") {
-            updateRuntime(meta.sessionId, failSessionHistory);
+            updateProviderRuntime(meta.provider, meta.sessionId, failSessionHistory);
           }
           void closeAgent(event.channelId).catch(() => {});
         }
-        setError("The remote agent returned an invalid JSON line.");
+        setProviderError(meta.provider, "The remote agent returned an invalid JSON line.");
       }
     }
   };
@@ -972,48 +1118,53 @@ export const MobileApp = () => {
     text: string,
     fromQueue = false,
     requestedSessionId?: string | null,
+    requestedProvider = providerRef.current,
   ): Promise<void> => {
     const trimmed = text.trim();
     const profile = currentProfileRef.current;
     if (!trimmed || !profile) return;
+    const kind = requestedProvider;
+    const providerView = readProviderView(kind);
     let sessionId = requestedSessionId === undefined
-      ? activeSessionRef.current
+      ? providerView.activeSessionId
       : requestedSessionId;
-    let sessionRuntime = readSessionRuntime(runtimesRef.current, sessionId);
+    let sessionRuntime = readSessionRuntime(providerView.runtimes, sessionId);
     if (sessionRuntime.historyState === "loading") return;
     const action = fromQueue ? "send" : composerAction(sessionRuntime.running, sessionRuntime.queueMode);
     if (action === "queue") {
-      updateRuntime(sessionId, (runtime) => ({
+      updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         queue: [...runtime.queue, trimmed],
         draft: "",
       }));
       return;
     }
-    setError(null);
+    setProviderError(kind, null);
 
-    if (providerRef.current === "codex") {
+    if (kind === "codex") {
       const client = codexClient.current;
       if (!client) {
-        setError("Codex channel is not ready.");
+        setProviderError(kind, "Codex channel is not ready.");
         return;
       }
       if (!sessionId) {
         try {
           const createdSessionId = await client.startSession(profile.cwd || undefined);
-          moveRuntime(null, createdSessionId);
+          moveProviderRuntime(kind, null, createdSessionId);
           sessionId = createdSessionId;
-          if (activeSessionRef.current === null) {
-            setActiveSessionId(createdSessionId);
-            activeSessionRef.current = createdSessionId;
-          }
-          sessionRuntime = readSessionRuntime(runtimesRef.current, createdSessionId);
+          updateProviderView(kind, (view) => ({
+            ...view,
+            activeSessionId: view.activeSessionId === null
+              ? createdSessionId
+              : view.activeSessionId,
+          }));
+          sessionRuntime = readSessionRuntime(readProviderView(kind).runtimes, createdSessionId);
         } catch (reason) {
-          setError(String(reason));
+          setProviderError(kind, String(reason));
           return;
         }
       }
-      updateRuntime(sessionId, (runtime) => ({
+      updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         draft: "",
         items: appendUserMessage(runtime.items, trimmed),
@@ -1028,18 +1179,22 @@ export const MobileApp = () => {
           await client.startTurn(sessionId, trimmed, profile.cwd || undefined);
         }
       } catch (reason) {
-        updateRuntime(sessionId, (runtime) => ({ ...runtime, running: false, waiting: false }));
-        setError(String(reason));
+        updateProviderRuntime(kind, sessionId, (runtime) => ({
+          ...runtime,
+          running: false,
+          waiting: false,
+        }));
+        setProviderError(kind, String(reason));
       }
       return;
     }
 
-    let channelId = providerChannels.current.get(providerChannelKey("claude", sessionId));
-    if (!channelId) {
+    let channelId = providerChannels.current.get(providerChannelKey(kind, sessionId));
+    if (!channelId && kind === providerRef.current) {
       channelId = await openProvider(profile, "claude", sessionId ?? undefined) ?? undefined;
     }
     if (!channelId) return;
-    updateRuntime(sessionId, (runtime) => ({
+    updateProviderRuntime(kind, sessionId, (runtime) => ({
       ...runtime,
       draft: "",
       items: appendUserMessage(runtime.items, trimmed),
@@ -1050,12 +1205,16 @@ export const MobileApp = () => {
     try {
       await writeAgentLine(channelId, claudeInput(trimmed));
     } catch (reason) {
-      updateRuntime(sessionId, (runtime) => ({ ...runtime, running: false, waiting: false }));
-      setError(String(reason));
+      updateProviderRuntime(kind, sessionId, (runtime) => ({
+        ...runtime,
+        running: false,
+        waiting: false,
+      }));
+      setProviderError(kind, String(reason));
     }
   };
-  submitRef.current = (sessionId, text, fromQueue) =>
-    submitText(text, fromQueue, sessionId);
+  submitRef.current = (kind, sessionId, text, fromQueue) =>
+    submitText(text, fromQueue, sessionId, kind);
 
   const stopTurn = async (): Promise<void> => {
     const sessionId = activeSessionRef.current;
@@ -1076,6 +1235,7 @@ export const MobileApp = () => {
     updateRuntime(sessionId, (runtime) => ({
       ...runtime,
       activeTurnId: null,
+      connectionState: providerRef.current === "claude" ? "idle" : runtime.connectionState,
       running: false,
       waiting: false,
     }));
@@ -1083,24 +1243,32 @@ export const MobileApp = () => {
 
   const selectSession = async (session: MobileSession): Promise<void> => {
     setSessionSheetOpen(false);
+    const selectedRuntime = readSessionRuntime(runtimesRef.current, session.id);
+    const shouldReconnect = selectedRuntime.connectionState === "disconnected";
     setActiveSessionId(session.id);
     activeSessionRef.current = session.id;
-    const shouldLoadHistory = readSessionRuntime(runtimesRef.current, session.id).historyState === "idle";
+    const shouldLoadHistory = selectedRuntime.historyState === "idle";
     if (shouldLoadHistory) {
       updateRuntime(session.id, (runtime) => beginSessionHistory(runtime, session.id));
     }
-    if (providerRef.current === "codex") {
-      try {
-        if (shouldLoadHistory) await codexClient.current?.resumeSession(session.id);
-      } catch (reason) {
-        updateRuntime(session.id, failSessionHistory);
-        setError(String(reason));
-      }
-      return;
-    }
     const profile = currentProfileRef.current;
-    if (profile) {
+    if (!profile) return;
+    try {
+      if (
+        shouldReconnect
+        || (providerRef.current === "codex" && !codexClient.current)
+      ) {
+        await openProvider(profile, providerRef.current, session.id, true, session.cwd);
+        return;
+      }
+      if (providerRef.current === "codex") {
+        if (shouldLoadHistory) await codexClient.current?.resumeSession(session.id);
+        return;
+      }
       if (shouldLoadHistory) await requestClaudeData(session.id);
+    } catch (reason) {
+      updateRuntime(session.id, failSessionHistory);
+      setError(String(reason));
     }
   };
 
@@ -1135,7 +1303,18 @@ export const MobileApp = () => {
     if (!profile) return;
     if (nextProvider === "claude") {
       await prepareProvider(nextProvider);
-      await requestClaudeData(activeSessionRef.current ?? undefined);
+      const sessionId = activeSessionRef.current ?? undefined;
+      const claudeView = readProviderView("claude");
+      const claudeRuntime = readSessionRuntime(claudeView.runtimes, sessionId);
+      if (sessionId && claudeRuntime.connectionState === "disconnected") {
+        const sessionCwd = claudeView.sessions.find((session) => session.id === sessionId)?.cwd;
+        await openProvider(profile, "claude", sessionId, true, sessionCwd);
+        return;
+      }
+      const shouldRequestClaudeData = sessionId
+        ? claudeRuntime.historyState === "idle"
+        : claudeView.sessions.length === 0;
+      if (shouldRequestClaudeData) await requestClaudeData(sessionId);
       return;
     }
     await openProvider(profile, nextProvider);

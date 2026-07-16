@@ -35,6 +35,7 @@ test("workbench snapshot restores content without stale transport state", () => 
             items: [{ id: "message-a", kind: "assistant", text: "saved output" }],
             approvals: [{ requestId: 4, title: "Old request", detail: "expired" }],
             activeTurnId: "old-turn",
+            connectionState: "connected",
             running: true,
             waiting: true,
             queue: ["next instruction"],
@@ -65,6 +66,7 @@ test("workbench snapshot restores content without stale transport state", () => 
   assert.equal(runtime?.running, false);
   assert.equal(runtime?.waiting, false);
   assert.equal(runtime?.activeTurnId, null);
+  assert.equal(runtime?.connectionState, "disconnected");
   assert.deepEqual(runtime?.approvals, []);
   assert.equal(runtime?.historyState, "idle");
   assert.deepEqual(runtime?.historyBaseItems, []);

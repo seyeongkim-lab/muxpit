@@ -10,7 +10,20 @@ import {
   readSessionRuntime,
   shouldProcessAgentChannelPayload,
   updateSessionRuntime,
+  sessionRuntimeLabel,
 } from "../src/mobile/agentSessionRuntime.ts";
+
+test("session runtime reports disconnected provider channels", () => {
+  assert.equal(createSessionRuntime().connectionState, "idle");
+  assert.equal(sessionRuntimeLabel({
+    ...createSessionRuntime(),
+    connectionState: "connected",
+  }), "Ready");
+  assert.equal(sessionRuntimeLabel({
+    ...createSessionRuntime(),
+    connectionState: "disconnected",
+  }), "Disconnected");
+});
 
 test("session runtime keeps background turns isolated", () => {
   let runtimes = {};

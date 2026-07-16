@@ -58,6 +58,16 @@ test("foreground resume verifies native provider channels", () => {
   assert.doesNotMatch(resumeConnection, /if \(activeChannel\.current\) return;/);
 });
 
+test("foreground resume keeps an idle provider separate from live background channels", () => {
+  const resumeConnection = app.slice(
+    app.indexOf("const resumeConnection = async"),
+    app.indexOf("resumeConnectionRef.current = resumeConnection"),
+  );
+
+  assert.match(resumeConnection, /if \(!activeHealth\) \{\s*activeChannel\.current = null;\s*return;/);
+  assert.match(resumeConnection, /if \(activeHealth\.alive\) \{\s*activeChannel\.current = activeHealth\.channelId;/);
+});
+
 test("failed Codex history resume restores the session input", () => {
   const selectSession = app.slice(
     app.indexOf("const selectSession"),
@@ -65,6 +75,16 @@ test("failed Codex history resume restores the session input", () => {
   );
 
   assert.match(selectSession, /catch \(reason\) \{\s*updateRuntime\(session\.id, failSessionHistory\);/);
+});
+
+test("opening a disconnected mobile session resumes its provider", () => {
+  const selectSession = app.slice(
+    app.indexOf("const selectSession"),
+    app.indexOf("const newSession"),
+  );
+
+  assert.match(selectSession, /selectedRuntime\.connectionState === "disconnected"/);
+  assert.match(selectSession, /await openProvider\(profile, providerRef\.current, session\.id, true, session\.cwd\)/);
 });
 
 test("mobile workbench persists the selected session without credentials", () => {
@@ -78,7 +98,8 @@ test("mobile workbench persists the selected session without credentials", () =>
 
 test("mobile workbench scopes cached views by host and provider", () => {
   assert.match(app, /mobileWorkbenchViewStorageKey/);
-  assert.match(app, /saveAgentWorkbenchSnapshot\(mobileWorkbenchViewStorageKey\(profileId, currentProvider\)/);
+  assert.match(app, /views: providerViews\.current/);
+  assert.match(app, /saveAgentWorkbenchSnapshot\(mobileWorkbenchViewStorageKey\(profileId, kind\)/);
   assert.match(app, /loadCachedWorkbenchView/);
   assert.match(app, /persistWorkbenchRef\.current\(\);[\s\S]*loadCachedWorkbenchView\(profileId, nextProvider\)/);
 });

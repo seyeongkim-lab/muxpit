@@ -167,6 +167,7 @@ const stoppedRuntimes = (runtimes: AgentSessionRuntimes): AgentSessionRuntimes =
   Object.fromEntries(Object.entries(runtimes).map(([key, runtime]) => [key, {
     ...runtime,
     activeTurnId: null,
+    connectionState: "disconnected",
     running: false,
     waiting: false,
   }]));
@@ -469,7 +470,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   const openProvider = useCallback((kind: AiKind, sessionId?: string): Promise<string | undefined> => {
     const key = providerChannelKey(kind, sessionId);
     const currentChannel = providerChannels.current.get(key);
-    if (currentChannel) return Promise.resolve(currentChannel);
+    if (currentChannel) {
+      updateRuntime(kind, sessionId ?? viewsRef.current[kind].activeSessionId, (runtime) => ({
+        ...runtime,
+        connectionState: "connected",
+      }));
+      return Promise.resolve(currentChannel);
+    }
     const existing = openingProviders.current.get(key);
     if (existing) return existing;
     const generation = runtimeGeneration.current;
@@ -539,9 +546,25 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           }
           updateView(kind, (current) => ({ ...current, status: "ready" }));
         }
+        updateRuntime(kind, sessionId ?? viewsRef.current[kind].activeSessionId, (runtime) => ({
+          ...runtime,
+          connectionState: "connected",
+        }));
         return channelId;
       } catch (reason) {
-        updateView(kind, (current) => ({ ...current, status: "idle", error: String(reason) }));
+        updateView(kind, (current) => ({
+          ...current,
+          runtimes: updateSessionRuntime(
+            current.runtimes,
+            sessionId ?? current.activeSessionId,
+            (runtime) => ({
+              ...failSessionHistory(runtime),
+              connectionState: "disconnected",
+            }),
+          ),
+          status: "idle",
+          error: String(reason),
+        }));
         providerChannels.current.delete(key);
         codexClients.current.get(kind)?.close();
         acpClients.current.get(kind)?.close();
@@ -557,7 +580,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     })();
     openingProviders.current.set(key, opening);
     return opening;
-  }, [applyEvent, closeChannel, nextChannelId, openClaudeAux, target, updateView]);
+  }, [applyEvent, closeChannel, nextChannelId, openClaudeAux, target, updateRuntime, updateView]);
 
   useEffect(() => {
     let disposed = false;
@@ -591,6 +614,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
               ? updateSessionRuntime(current.runtimes, meta.sessionId, (runtime) => ({
                   ...runtime,
                   activeTurnId: null,
+                  connectionState: "disconnected",
                   running: false,
                   waiting: false,
                 }))
@@ -635,6 +659,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           updateRuntime("claude", meta.sessionId, (runtime) => ({
             ...runtime,
             activeTurnId: null,
+            connectionState: "disconnected",
             running: false,
             waiting: false,
           }));
@@ -643,6 +668,10 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           acpClients.current.get(meta.provider)?.close();
           codexClients.current.delete(meta.provider);
           acpClients.current.delete(meta.provider);
+          updateView(meta.provider, (current) => ({
+            ...current,
+            runtimes: stoppedRuntimes(current.runtimes),
+          }));
         }
         return;
       }
@@ -816,8 +845,16 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   useEffect(() => {
     if (!open || probedTarget !== targetKey || !installed.has(provider)) return;
     if (provider === "claude") {
+      const activeSessionId = viewsRef.current.claude.activeSessionId ?? undefined;
+      const activeRuntime = readSessionRuntime(
+        viewsRef.current.claude.runtimes,
+        activeSessionId,
+      );
+      if (activeRuntime.connectionState === "disconnected") {
+        void openProvider("claude", activeSessionId);
+        return;
+      }
       if (viewsRef.current.claude.status === "idle") {
-        const activeSessionId = viewsRef.current.claude.activeSessionId ?? undefined;
         void openClaudeAux(activeSessionId ? "claude-history" : "claude-list", activeSessionId);
       }
       return;
@@ -839,6 +876,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
 
   const selectSession = async (session: MobileSession): Promise<void> => {
     const selectedRuntime = readSessionRuntime(viewsRef.current[provider].runtimes, session.id);
+    const shouldReconnect = selectedRuntime.connectionState === "disconnected";
     const shouldLoadHistory = selectedRuntime.historyState === "idle";
     updateView(provider, (current) => ({
       ...current,
@@ -851,6 +889,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       error: null,
     }));
     try {
+      const providerClientMissing = provider === "codex"
+        ? !codexClients.current.has(provider)
+        : provider !== "claude" && !acpClients.current.has(provider);
+      if (shouldReconnect || providerClientMissing) {
+        await openProvider(provider, provider === "claude" ? session.id : undefined);
+        return;
+      }
       if (provider === "codex") {
         if (shouldLoadHistory) await codexClients.current.get(provider)?.resumeSession(session.id);
       } else if (provider === "claude") {
@@ -996,6 +1041,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         running: false,
         waiting: false,
         activeTurnId: null,
+        connectionState: provider === "claude" ? "idle" : runtime.connectionState,
       }));
     } catch (reason) {
       updateView(provider, (state) => ({ ...state, error: String(reason) }));

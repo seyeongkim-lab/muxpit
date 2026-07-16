@@ -14,6 +14,7 @@ export interface AgentSessionRuntime {
   items: MobileTimelineItem[];
   approvals: AgentApprovalRequest[];
   activeTurnId: string | null;
+  connectionState: "idle" | "connected" | "disconnected";
   running: boolean;
   waiting: boolean;
   queue: string[];
@@ -34,6 +35,7 @@ export const createSessionRuntime = (): AgentSessionRuntime => ({
   items: [],
   approvals: [],
   activeTurnId: null,
+  connectionState: "idle",
   running: false,
   waiting: false,
   queue: [],
@@ -50,8 +52,16 @@ export const shouldProcessAgentChannelPayload = (
   handledPayload: boolean,
 ): boolean => purpose === "provider" || !handledPayload;
 
-export const sessionRuntimeLabel = (runtime: AgentSessionRuntime): "Ready" | "Running" | "Waiting" =>
-  runtime.waiting ? "Waiting" : runtime.running ? "Running" : "Ready";
+export const sessionRuntimeLabel = (
+  runtime: AgentSessionRuntime,
+): "Ready" | "Running" | "Waiting" | "Disconnected" =>
+  runtime.connectionState === "disconnected"
+    ? "Disconnected"
+    : runtime.waiting
+      ? "Waiting"
+      : runtime.running
+        ? "Running"
+        : "Ready";
 
 export const readSessionRuntime = (
   runtimes: AgentSessionRuntimes,

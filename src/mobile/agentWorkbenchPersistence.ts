@@ -29,6 +29,7 @@ interface StoredAgentSessionRuntime {
   queue: string[];
   draft: string;
   queueMode: boolean;
+  connectionState: "idle" | "connected" | "disconnected";
   historyState: "idle" | "loaded";
 }
 
@@ -90,6 +91,7 @@ const restoredRuntime = (value: unknown): AgentSessionRuntime | undefined => {
     queue,
     draft: typeof runtime.draft === "string" ? runtime.draft : "",
     queueMode: runtime.queueMode === true,
+    connectionState: runtime.connectionState === "idle" ? "idle" : "disconnected",
     historyState: runtime.historyState === "loaded" ? "loaded" : "idle",
   };
 };
@@ -128,6 +130,7 @@ const storedRuntime = (runtime: AgentSessionRuntime): StoredAgentSessionRuntime 
   queue: runtime.queue,
   draft: runtime.draft,
   queueMode: runtime.queueMode,
+  connectionState: runtime.connectionState,
   historyState: runtime.historyState === "loaded" ? "loaded" : "idle",
 });
 
