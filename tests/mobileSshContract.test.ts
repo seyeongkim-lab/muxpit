@@ -10,7 +10,7 @@ const rustSource = readFileSync(
 test("mobile SSH auth fields use the frontend camelCase wire format", () => {
   assert.match(
     rustSource,
-    /#\[serde\(\s*tag = "type",\s*rename_all = "camelCase",\s*rename_all_fields = "camelCase"\s*\)\]\s*enum SshAuth/,
+    /#\[serde\(\s*tag = "type",\s*rename_all = "camelCase",\s*rename_all_fields = "camelCase"\s*\)\]\s*(?:pub )?enum SshAuth/,
   );
 });
 

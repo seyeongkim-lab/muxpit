@@ -5,7 +5,7 @@ use russh::keys::{decode_secret_key, ssh_key, PrivateKeyWithHashAlg};
 use russh::{ChannelMsg, ChannelWriteHalf, Disconnect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LINE_BYTES: usize = 1024 * 1024;
+const SSH_CREDENTIAL_SERVICE: &str = "com.wmux.terminal.ssh";
 
 const CLAUDE_SESSION_SCRIPT: &str = include_str!("../scripts/claude_sessions.py");
 
@@ -58,13 +59,13 @@ pub struct SshConnectRequest {
     auth: SshAuth,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-enum SshAuth {
+pub enum SshAuth {
     Password {
         password: String,
     },
@@ -72,6 +73,70 @@ enum SshAuth {
         private_key: String,
         passphrase: Option<String>,
     },
+}
+
+fn valid_credential_profile_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
+#[cfg(target_os = "android")]
+static CREDENTIAL_STORE: OnceLock<Result<(), String>> = OnceLock::new();
+
+#[cfg(target_os = "android")]
+fn credential_entry(profile_id: &str) -> Result<keyring_core::Entry, String> {
+    if !valid_credential_profile_id(profile_id) {
+        return Err("Invalid credential profile id".into());
+    }
+    CREDENTIAL_STORE
+        .get_or_init(|| {
+            let configuration = HashMap::from([("name", "wmux-ssh")]);
+            let store = android_native_keyring_store::Store::new_with_configuration(&configuration)
+                .map_err(|error| format!("Could not open secure credential storage: {error}"))?;
+            keyring_core::set_default_store(store);
+            Ok(())
+        })
+        .clone()?;
+    keyring_core::Entry::new(SSH_CREDENTIAL_SERVICE, profile_id)
+        .map_err(|error| format!("Could not open SSH credential: {error}"))
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn mobile_credential_save(profile_id: String, auth: SshAuth) -> Result<(), String> {
+    let secret = serde_json::to_vec(&auth)
+        .map_err(|error| format!("Could not encode SSH credential: {error}"))?;
+    credential_entry(&profile_id)?
+        .set_secret(&secret)
+        .map_err(|error| format!("Could not save SSH credential: {error}"))
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn mobile_credential_load(profile_id: String) -> Result<Option<SshAuth>, String> {
+    let secret = match credential_entry(&profile_id)?.get_secret() {
+        Ok(secret) => secret,
+        Err(keyring_core::Error::NoEntry) => return Ok(None),
+        Err(error) => return Err(format!("Could not load SSH credential: {error}")),
+    };
+    serde_json::from_slice(&secret)
+        .map(Some)
+        .map_err(|error| format!("Could not decode SSH credential: {error}"))
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn mobile_credential_save(_profile_id: String, _auth: SshAuth) -> Result<(), String> {
+    Err("Secure credential storage is only available on Android".into())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn mobile_credential_load(_profile_id: String) -> Result<Option<SshAuth>, String> {
+    Err("Secure credential storage is only available on Android".into())
 }
 
 #[derive(Serialize)]
@@ -494,6 +559,8 @@ pub fn run() {
             mobile_ssh_connect,
             mobile_ssh_disconnect,
             mobile_ssh_probe,
+            mobile_credential_save,
+            mobile_credential_load,
             mobile_agent_open,
             mobile_agent_probe,
             mobile_agent_write,

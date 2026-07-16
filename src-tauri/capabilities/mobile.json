@@ -12,6 +12,8 @@
     "allow-mobile-ssh-connect",
     "allow-mobile-ssh-disconnect",
     "allow-mobile-ssh-probe",
+    "allow-mobile-credential-save",
+    "allow-mobile-credential-load",
     "allow-mobile-agent-open",
     "allow-mobile-agent-probe",
     "allow-mobile-agent-write",

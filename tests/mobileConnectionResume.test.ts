@@ -7,6 +7,8 @@ const bridge = readFileSync(new URL("../src/mobile/mobileBridge.ts", import.meta
 const rust = readFileSync(new URL("../src-tauri/src/mobile_agent.rs", import.meta.url), "utf8");
 const build = readFileSync(new URL("../src-tauri/build.rs", import.meta.url), "utf8");
 const capability = readFileSync(new URL("../src-tauri/capabilities/mobile.json", import.meta.url), "utf8");
+const cargo = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
+const hostProfiles = readFileSync(new URL("../src/mobile/hostProfiles.ts", import.meta.url), "utf8");
 
 test("mobile app checks and restores SSH when returning to the foreground", () => {
   assert.match(app, /document\.addEventListener\("visibilitychange"/);
@@ -140,4 +142,47 @@ test("cold Claude reconnect refreshes cached history", () => {
 
   assert.match(openProvider, /const shouldRequestClaudeData = nextProvider === "claude"[\s\S]*preserveView/);
   assert.match(openProvider, /preserveView[\s\S]*beginSessionHistory/);
+});
+
+test("authenticated SSH credentials use the Android secure store", () => {
+  const connectProfile = app.slice(
+    app.indexOf("const connectProfile"),
+    app.indexOf("const resumeConnection = async"),
+  );
+  const connectIndex = connectProfile.indexOf("await connectSsh(");
+  const trustIndex = connectProfile.indexOf("if (result.trustRequired)");
+  const saveIndex = connectProfile.indexOf("await saveSshCredential(profile.id, auth)");
+
+  assert.notEqual(connectIndex, -1);
+  assert.notEqual(trustIndex, -1);
+  assert.notEqual(saveIndex, -1);
+  assert.ok(connectIndex < trustIndex && trustIndex < saveIndex);
+  assert.match(bridge, /export const saveSshCredential[\s\S]*invoke\("mobile_credential_save"/);
+  assert.match(bridge, /export const loadSshCredential[\s\S]*invoke<SshAuth \| null>\("mobile_credential_load"/);
+  assert.match(rust, /android_native_keyring_store::Store/);
+  assert.match(rust, /keyring_core::Entry/);
+  assert.match(rust, /pub fn mobile_credential_save/);
+  assert.match(rust, /pub fn mobile_credential_load/);
+  assert.match(cargo, /target_os = "android"[\s\S]*android-native-keyring-store/);
+  assert.match(build, /"mobile_credential_save"/);
+  assert.match(build, /"mobile_credential_load"/);
+  assert.match(capability, /"allow-mobile-credential-save"/);
+  assert.match(capability, /"allow-mobile-credential-load"/);
+  assert.doesNotMatch(hostProfiles, /password|privateKey|passphrase|SshAuth/);
+});
+
+test("saved SSH credentials restore cold starts and host switches", () => {
+  const connectFromForm = app.slice(
+    app.indexOf("const connectFromForm"),
+    app.indexOf("const trustAndConnect"),
+  );
+  const switchHost = app.slice(
+    app.indexOf("const switchHost"),
+    app.indexOf("const applyNormalizedEvent"),
+  );
+
+  assert.match(app, /const credentialForProfile = async[\s\S]*await loadSshCredential\(profileId\)/);
+  assert.match(app, /const restoreInitialProfile = async[\s\S]*await credentialForProfile\(initialProfile.id\)[\s\S]*await connectProfile\(/);
+  assert.match(connectFromForm, /authFromForm\(form\) \?\? await credentialForProfile\(profile.id\)/);
+  assert.match(switchHost, /await credentialForProfile\(profile.id\)/);
 });

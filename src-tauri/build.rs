@@ -9,6 +9,8 @@ fn main() {
             "mobile_ssh_connect",
             "mobile_ssh_disconnect",
             "mobile_ssh_probe",
+            "mobile_credential_save",
+            "mobile_credential_load",
             "mobile_agent_open",
             "mobile_agent_probe",
             "mobile_agent_write",

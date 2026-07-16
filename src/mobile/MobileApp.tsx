@@ -35,10 +35,12 @@ import {
   disconnectSsh,
   listClaudeSessions,
   loadClaudeSession,
+  loadSshCredential,
   onAgentTransport,
   openAgent,
   probeAgent,
   probeSsh,
+  saveSshCredential,
   writeAgentLine,
   type MobileAgentTransportEvent,
   type SshAuth,
@@ -267,6 +269,7 @@ export const MobileApp = () => {
   const transportHandlerRef = useRef<(event: MobileAgentTransportEvent) => void>(() => {});
   const resumeConnectionRef = useRef<() => Promise<void>>(async () => {});
   const resumeInFlightRef = useRef(false);
+  const initialRestoreStarted = useRef(false);
   const runtimeGeneration = useRef(0);
   const channelSequence = useRef(0);
   const submitRef = useRef<(
@@ -281,6 +284,15 @@ export const MobileApp = () => {
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   useEffect(() => { currentProfileRef.current = currentProfile; }, [currentProfile]);
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
+
+  const credentialForProfile = async (profileId: string): Promise<SshAuth | undefined> => {
+    const cached = credentialCache.current.get(profileId);
+    if (cached) return cached;
+    const stored = await loadSshCredential(profileId);
+    if (!stored) return undefined;
+    credentialCache.current.set(profileId, stored);
+    return stored;
+  };
 
   const activeProviderView = (): AgentWorkbenchViewSnapshot => ({
     sessions: sessionsRef.current,
@@ -708,19 +720,55 @@ export const MobileApp = () => {
       connectionStatusRef.current = "connected";
       restoredProfileId.current = trustedProfile.id;
       if (preservingView) resetAgentState(true);
-      await openProvider(
+      let credentialSaveError: string | null = null;
+      try {
+        await saveSshCredential(profile.id, auth);
+      } catch (reason) {
+        credentialSaveError = `SSH connected, but the credential could not be saved: ${String(reason)}`;
+      }
+      const channelId = await openProvider(
         trustedProfile,
         restore?.provider ?? providerRef.current,
         restore?.sessionId,
         preservingView,
         restore?.cwd,
       );
+      if (credentialSaveError && channelId !== undefined) setError(credentialSaveError);
     } catch (reason) {
       setConnectionStatus("disconnected");
       connectionStatusRef.current = "disconnected";
       setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
+
+  useEffect(() => {
+    if (MOBILE_DEMO || !initialProfile || initialRestoreStarted.current) return;
+    initialRestoreStarted.current = true;
+    let disposed = false;
+    const restoreInitialProfile = async (): Promise<void> => {
+      try {
+        const auth = await credentialForProfile(initialProfile.id);
+        if (disposed || !auth) return;
+        const sessionId = activeSessionRef.current ?? undefined;
+        const sessionCwd = sessionsRef.current.find((session) => session.id === sessionId)?.cwd;
+        await connectProfile(
+          initialProfile,
+          auth,
+          initialProfile.trustedFingerprint,
+          initialView
+            ? { provider: initialProvider, sessionId, cwd: sessionCwd }
+            : undefined,
+        );
+      } catch (reason) {
+        if (!disposed) setError(`Could not load the saved SSH credential: ${String(reason)}`);
+      }
+    };
+    void restoreInitialProfile();
+    return () => {
+      disposed = true;
+      initialRestoreStarted.current = false;
+    };
+  }, []);
 
   const resumeConnection = async (): Promise<void> => {
     if (connectionStatusRef.current !== "connected" || resumeInFlightRef.current) return;
@@ -798,9 +846,15 @@ export const MobileApp = () => {
 
   const connectFromForm = async (): Promise<void> => {
     const profile = profileFromForm(form);
-    const auth = authFromForm(form);
     if (!profile.host || !profile.user || !Number.isInteger(profile.port) || profile.port <= 0) {
       setError("Host, user, and port are required.");
+      return;
+    }
+    let auth: SshAuth | undefined;
+    try {
+      auth = authFromForm(form) ?? await credentialForProfile(profile.id);
+    } catch (reason) {
+      setError(`Could not load the saved SSH credential: ${String(reason)}`);
       return;
     }
     if (!auth) {
@@ -844,7 +898,12 @@ export const MobileApp = () => {
   const switchHost = async (profile: HostProfile): Promise<void> => {
     setHostSheetOpen(false);
     persistWorkbenchRef.current();
-    const auth = credentialCache.current.get(profile.id);
+    let auth: SshAuth | undefined;
+    try {
+      auth = await credentialForProfile(profile.id);
+    } catch (reason) {
+      setError(`Could not load the saved SSH credential: ${String(reason)}`);
+    }
     const cachedView = loadCachedWorkbenchView(profile.id, providerRef.current);
     if (!auth) {
       await disconnectSsh().catch(() => {});
@@ -1677,7 +1736,7 @@ const ConnectionView = ({
         ) : null}
 
         <section className="connect-form">
-          <div className="section-heading"><span>SSH connection</span><small>Secrets stay in memory</small></div>
+          <div className="section-heading"><span>SSH connection</span><small>Secrets use Android Keystore</small></div>
           <label>Profile name<input value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Build server" /></label>
           <div className="field-pair host-port">
             <label>Host<input value={form.host} onChange={(event) => update("host", event.target.value)} placeholder="192.168.0.9" inputMode="url" autoCapitalize="none" /></label>

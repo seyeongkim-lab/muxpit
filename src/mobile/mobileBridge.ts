@@ -33,6 +33,12 @@ export const disconnectSsh = (): Promise<void> => invoke("mobile_ssh_disconnect"
 
 export const probeSsh = (): Promise<boolean> => invoke("mobile_ssh_probe");
 
+export const saveSshCredential = (profileId: string, auth: SshAuth): Promise<void> =>
+  invoke("mobile_credential_save", { profileId, auth });
+
+export const loadSshCredential = (profileId: string): Promise<SshAuth | null> =>
+  invoke<SshAuth | null>("mobile_credential_load", { profileId });
+
 export const openAgent = (
   channelId: string,
   provider: "codex" | "claude",
