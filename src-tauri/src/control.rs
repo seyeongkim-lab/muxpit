@@ -69,7 +69,7 @@ pub fn dispatch(app: &AppHandle, action: &str, params: Value) -> Result<Value, S
         action,
         params,
     };
-    if let Err(error) = app.emit("wmux-control-request", payload) {
+    if let Err(error) = app.emit("muxpit-control-request", payload) {
         broker.expire(&request_id);
         return Err(format!("Failed to dispatch control request: {error}"));
     }

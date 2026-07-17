@@ -21,16 +21,16 @@ test("hostTripleFromPlatform maps desktop platforms to Rust target triples", () 
 });
 
 test("sidecarNameForTarget follows Tauri externalBin naming rules", () => {
-  assert.equal(sidecarNameForTarget("x86_64-unknown-linux-gnu"), "wmux-cli-x86_64-unknown-linux-gnu");
-  assert.equal(sidecarNameForTarget("x86_64-pc-windows-msvc"), "wmux-cli-x86_64-pc-windows-msvc.exe");
-  assert.equal(sidecarNameForTarget("aarch64-apple-darwin"), "wmux-cli-aarch64-apple-darwin");
-  assert.equal(sidecarNameForTarget("universal-apple-darwin"), "wmux-cli-universal-apple-darwin");
+  assert.equal(sidecarNameForTarget("x86_64-unknown-linux-gnu"), "muxpit-cli-x86_64-unknown-linux-gnu");
+  assert.equal(sidecarNameForTarget("x86_64-pc-windows-msvc"), "muxpit-cli-x86_64-pc-windows-msvc.exe");
+  assert.equal(sidecarNameForTarget("aarch64-apple-darwin"), "muxpit-cli-aarch64-apple-darwin");
+  assert.equal(sidecarNameForTarget("universal-apple-darwin"), "muxpit-cli-universal-apple-darwin");
 });
 
 test("cliExecutableNameForTarget adds exe extension only for Windows", () => {
-  assert.equal(cliExecutableNameForTarget("x86_64-pc-windows-msvc"), "wmux-cli.exe");
-  assert.equal(cliExecutableNameForTarget("x86_64-unknown-linux-gnu"), "wmux-cli");
-  assert.equal(cliExecutableNameForTarget("aarch64-apple-darwin"), "wmux-cli");
+  assert.equal(cliExecutableNameForTarget("x86_64-pc-windows-msvc"), "muxpit-cli.exe");
+  assert.equal(cliExecutableNameForTarget("x86_64-unknown-linux-gnu"), "muxpit-cli");
+  assert.equal(cliExecutableNameForTarget("aarch64-apple-darwin"), "muxpit-cli");
 });
 
 test("targetsFromArgs accepts target flags and comma-separated targets", () => {
@@ -47,7 +47,7 @@ test("resolveCliTargets prefers explicit env over host platform", () => {
   assert.deepEqual(
     resolveCliTargets({
       argv: [],
-      env: { WMUX_CLI_TARGETS: "x86_64-pc-windows-msvc aarch64-apple-darwin" },
+      env: { MUXPIT_CLI_TARGETS: "x86_64-pc-windows-msvc aarch64-apple-darwin" },
       platform: "linux",
       arch: "x64",
     }),
@@ -55,10 +55,10 @@ test("resolveCliTargets prefers explicit env over host platform", () => {
   );
 });
 
-test("packaging paths are rooted in target sidecars and wmux-cli target output", () => {
+test("packaging paths are rooted in target sidecars and muxpit-cli target output", () => {
   assert.equal(
     sidecarOutputPathForTarget({ root: "/repo", target: "x86_64-pc-windows-msvc" }),
-    join("/repo", "target", "sidecars", "wmux-cli-x86_64-pc-windows-msvc.exe"),
+    join("/repo", "target", "sidecars", "muxpit-cli-x86_64-pc-windows-msvc.exe"),
   );
   assert.equal(
     cliOutputPathForTarget({
@@ -66,7 +66,7 @@ test("packaging paths are rooted in target sidecars and wmux-cli target output",
       target: "x86_64-pc-windows-msvc",
       hostTriple: "x86_64-unknown-linux-gnu",
     }),
-    join("/repo", "wmux-cli", "target", "x86_64-pc-windows-msvc", "release", "wmux-cli.exe"),
+    join("/repo", "muxpit-cli", "target", "x86_64-pc-windows-msvc", "release", "muxpit-cli.exe"),
   );
   assert.equal(
     cliOutputPathForTarget({
@@ -74,6 +74,6 @@ test("packaging paths are rooted in target sidecars and wmux-cli target output",
       target: "x86_64-unknown-linux-gnu",
       hostTriple: "x86_64-unknown-linux-gnu",
     }),
-    join("/repo", "wmux-cli", "target", "release", "wmux-cli"),
+    join("/repo", "muxpit-cli", "target", "release", "muxpit-cli"),
   );
 });

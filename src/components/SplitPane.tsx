@@ -167,7 +167,7 @@ const SplitContainer = ({
       {/* Divider */}
       <div
         onMouseDown={handleMouseDown}
-        className="wmux-split-divider"
+        className="muxpit-split-divider"
         style={{
           width: isHorizontal ? 4 : "100%",
           height: isHorizontal ? "100%" : 4,

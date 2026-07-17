@@ -118,7 +118,7 @@ test("workspace session stores and restores local cwd only when experimental fea
 
   useWorkspaceStore.getState().saveSession();
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.children[0].lastCwd, "/home/me/project");
   assert.equal(saved.workspaces[0].layout.children[1].lastCwd, undefined);
 
@@ -135,11 +135,11 @@ test("workspace session omits and ignores cwd when experimental feature is disab
   useWorkspaceStore.setState({ workspaces: [workspaceWithCwd()], activeId: "ws" });
 
   useWorkspaceStore.getState().saveSession();
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.children[0].lastCwd, undefined);
 
   saved.workspaces[0].layout.children[0].lastCwd = "/home/me/project";
-  storage.setItem("wmux-session", JSON.stringify(saved));
+  storage.setItem("muxpit-session", JSON.stringify(saved));
   useWorkspaceStore.setState({ workspaces: [], activeId: null });
 
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
@@ -165,7 +165,7 @@ test("workspace session preserves explicit launch cwd without enabling cwd resto
   useWorkspaceStore.setState({ workspaces: [workspace], activeId: "ws" });
 
   useWorkspaceStore.getState().saveSession();
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.launchCwd, "/home/me/project");
 
   useWorkspaceStore.setState({ workspaces: [], activeId: null });
@@ -219,7 +219,7 @@ test("clearSavedCwd removes cwd from live workspaces and stored sessions immedia
       },
     ],
   };
-  storage.setItem("wmux-session:unknown", JSON.stringify(platformSession));
+  storage.setItem("muxpit-session:unknown", JSON.stringify(platformSession));
 
   useSettingsStore.setState({ enableExperimentalCwdRestore: false });
   useWorkspaceStore.getState().clearSavedCwd();
@@ -228,10 +228,10 @@ test("clearSavedCwd removes cwd from live workspaces and stored sessions immedia
   assert.equal(findLeaf(live.layout, "local")?.lastCwd, undefined);
   assert.equal(findLeaf(live.layout, "ssh")?.lastCwd, undefined);
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.children[0].lastCwd, undefined);
 
-  const savedPlatform = JSON.parse(storage.getItem("wmux-session:unknown") ?? "{}");
+  const savedPlatform = JSON.parse(storage.getItem("muxpit-session:unknown") ?? "{}");
   assert.equal(savedPlatform.workspaces[0].layout.lastCwd, undefined);
 });
 
@@ -242,7 +242,7 @@ test("workspace session stores and restores Codex agent sessions when experiment
 
   useWorkspaceStore.getState().saveSession();
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.agentSession.sessionId, "11111111-2222-3333-4444-555555555555");
 
   useWorkspaceStore.setState({ workspaces: [], activeId: null });
@@ -277,11 +277,11 @@ test("workspace session omits and ignores agent sessions when experimental featu
   useWorkspaceStore.setState({ workspaces: [workspaceWithAgentSession()], activeId: "ws" });
 
   useWorkspaceStore.getState().saveSession();
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.agentSession, undefined);
 
   saved.workspaces[0].layout.agentSession = (workspaceWithAgentSession().layout as LeafNode).agentSession;
-  storage.setItem("wmux-session", JSON.stringify(saved));
+  storage.setItem("muxpit-session", JSON.stringify(saved));
   useWorkspaceStore.setState({ workspaces: [], activeId: null });
 
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
@@ -522,7 +522,7 @@ test("workspace session stores base command instead of generated resume command"
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
 
   useWorkspaceStore.getState().saveSession();
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.command, "codex");
   assert.equal(saved.workspaces[0].layout.agentSession.sessionId, "11111111-2222-3333-4444-555555555555");
   assert.equal(saved.workspaces[0].layout.agentSession.baseCommand, "codex");
@@ -545,7 +545,7 @@ test("workspace session restores shell-origin agent sessions without changing fa
   });
   useWorkspaceStore.getState().saveSession();
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   const savedShell = saved.workspaces[0].layout.children[1];
   assert.equal(savedShell.command, undefined);
   assert.equal(savedShell.agentSession.sessionId, "22222222-3333-4444-5555-666666666666");
@@ -560,7 +560,7 @@ test("workspace session restores shell-origin agent sessions without changing fa
   assert.equal(restoredShell?.agentSession?.baseCommand, undefined);
 
   useWorkspaceStore.getState().saveSession();
-  const savedAgain = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const savedAgain = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   const savedAgainShell = savedAgain.workspaces[0].layout.children[1];
   assert.equal(savedAgainShell.command, undefined);
   assert.equal(savedAgainShell.agentSession.sessionId, "22222222-3333-4444-5555-666666666666");
@@ -594,7 +594,7 @@ test("workspace session preserves direct agent base command flags and paths", ()
   });
   useWorkspaceStore.getState().saveSession();
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.agentSession.baseCommand, "/opt/bin/codex --profile work");
 
   useWorkspaceStore.setState({ workspaces: [], activeId: null });
@@ -633,7 +633,7 @@ test("workspace session strips dangerous flags from stored direct agent base com
   });
   useWorkspaceStore.getState().saveSession();
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.command, "codex --profile work");
   assert.equal(saved.workspaces[0].layout.agentSession.baseCommand, "codex --profile work");
   assert.deepEqual(saved.workspaces[0].layout.agentSession.baseCommandArgv, [
@@ -678,7 +678,7 @@ test("workspace session does not persist agent sessions for non-restorable comma
 
   useWorkspaceStore.getState().saveSession();
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.command, "env CODEX_HOME=/tmp/codex codex");
   assert.equal(saved.workspaces[0].layout.agentSession, undefined);
 });
@@ -691,7 +691,7 @@ test("clearSavedAgentSessions removes agent sessions from live workspaces and st
   });
   useWorkspaceStore.setState({ workspaces: [workspaceWithAgentSession()], activeId: "ws" });
   useWorkspaceStore.getState().saveSession();
-  storage.setItem("wmux-session:unknown", storage.getItem("wmux-session") ?? "{}");
+  storage.setItem("muxpit-session:unknown", storage.getItem("muxpit-session") ?? "{}");
   useWorkspaceStore.setState({ workspaces: [], activeId: null });
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
   useWorkspaceStore.getState().saveSession();
@@ -705,12 +705,12 @@ test("clearSavedAgentSessions removes agent sessions from live workspaces and st
   assert.equal(liveLeaf?.command, "codex");
   assert.equal(liveLeaf?.aiKind, undefined);
 
-  const saved = JSON.parse(storage.getItem("wmux-session") ?? "{}");
+  const saved = JSON.parse(storage.getItem("muxpit-session") ?? "{}");
   assert.equal(saved.workspaces[0].layout.agentSession, undefined);
   assert.equal(saved.workspaces[0].layout.command, "codex");
   assert.equal(saved.workspaces[0].layout.aiKind, undefined);
 
-  const savedPlatform = JSON.parse(storage.getItem("wmux-session:unknown") ?? "{}");
+  const savedPlatform = JSON.parse(storage.getItem("muxpit-session:unknown") ?? "{}");
   assert.equal(savedPlatform.workspaces[0].layout.agentSession, undefined);
   assert.equal(savedPlatform.workspaces[0].layout.command, "codex");
 });
@@ -760,7 +760,7 @@ test("workspace restore sanitizes generated resume commands when agent restore i
       },
     ],
   };
-  storage.setItem("wmux-session", JSON.stringify(saved));
+  storage.setItem("muxpit-session", JSON.stringify(saved));
 
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
   const leaf = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");
@@ -788,7 +788,7 @@ test("workspace restore preserves command-only generated resume commands", () =>
       },
     ],
   };
-  storage.setItem("wmux-session", JSON.stringify(saved));
+  storage.setItem("muxpit-session", JSON.stringify(saved));
 
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
   const leaf = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");
@@ -819,7 +819,7 @@ test("workspace restore preserves explicit command-only resume forms without ses
       },
     ],
   };
-  storage.setItem("wmux-session", JSON.stringify(saved));
+  storage.setItem("muxpit-session", JSON.stringify(saved));
 
   assert.equal(useWorkspaceStore.getState().restoreSession(), true);
   const leaf = findLeaf(useWorkspaceStore.getState().workspaces[0].layout, "agent");

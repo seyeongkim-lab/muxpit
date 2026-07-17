@@ -1,9 +1,9 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub const SOCKET_FILE_NAME: &str = "wmux.sock";
-pub const DEFAULT_WINDOWS_PIPE_PREFIX: &str = r"\\.\pipe\wmux";
-pub const IPC_NAMESPACE_ENV: &str = "WMUX_IPC_NAMESPACE";
+pub const SOCKET_FILE_NAME: &str = "muxpit.sock";
+pub const DEFAULT_WINDOWS_PIPE_PREFIX: &str = r"\\.\pipe\muxpit";
+pub const IPC_NAMESPACE_ENV: &str = "MUXPIT_IPC_NAMESPACE";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnixSocketEndpoint {
@@ -25,7 +25,7 @@ pub fn unix_socket_endpoint_from_env(
     }
     let namespace = sanitized_namespace(namespace);
     if let Some(dir) = runtime_dir.filter(|value| !value.is_empty()) {
-        let mut path = PathBuf::from(dir).join("wmux");
+        let mut path = PathBuf::from(dir).join("muxpit");
         if let Some(namespace) = namespace.as_deref() {
             path = path.join(namespace);
         }
@@ -41,8 +41,8 @@ pub fn unix_socket_endpoint_from_env(
         .map(sanitize_socket_user)
         .unwrap_or_else(|| "user".to_string());
     let parent = match namespace {
-        Some(namespace) => format!("wmux-{user}-{namespace}"),
-        None => format!("wmux-{user}"),
+        Some(namespace) => format!("muxpit-{user}-{namespace}"),
+        None => format!("muxpit-{user}"),
     };
     UnixSocketEndpoint {
         path: PathBuf::from("/tmp").join(parent).join(SOCKET_FILE_NAME),
@@ -62,7 +62,7 @@ pub fn unix_socket_path_from_env(
 #[cfg(unix)]
 pub fn unix_socket_endpoint() -> UnixSocketEndpoint {
     unix_socket_endpoint_from_env(
-        std::env::var_os("WMUX_SOCKET_PATH"),
+        std::env::var_os("MUXPIT_SOCKET_PATH"),
         std::env::var_os(IPC_NAMESPACE_ENV),
         std::env::var_os("XDG_RUNTIME_DIR"),
         std::env::var_os("USER"),
@@ -72,7 +72,7 @@ pub fn unix_socket_endpoint() -> UnixSocketEndpoint {
 #[cfg(unix)]
 pub fn unix_socket_path() -> PathBuf {
     unix_socket_endpoint_from_env(
-        std::env::var_os("WMUX_SOCKET_PATH"),
+        std::env::var_os("MUXPIT_SOCKET_PATH"),
         std::env::var_os(IPC_NAMESPACE_ENV),
         std::env::var_os("XDG_RUNTIME_DIR"),
         std::env::var_os("USER"),
@@ -125,7 +125,7 @@ pub fn windows_pipe_name_from_env(
 #[cfg(windows)]
 pub fn windows_pipe_name() -> String {
     windows_pipe_name_from_env(
-        std::env::var_os("WMUX_PIPE_NAME"),
+        std::env::var_os("MUXPIT_PIPE_NAME"),
         std::env::var_os(IPC_NAMESPACE_ENV),
         std::env::var_os("USERNAME"),
     )
@@ -155,12 +155,12 @@ mod tests {
     #[test]
     fn socket_path_prefers_override() {
         let endpoint = unix_socket_endpoint_from_env(
-            Some("/custom/wmux.sock".into()),
+            Some("/custom/muxpit.sock".into()),
             Some("dev-test".into()),
             Some("/run/user/1000".into()),
             Some("me".into()),
         );
-        assert_eq!(endpoint.path, std::path::PathBuf::from("/custom/wmux.sock"));
+        assert_eq!(endpoint.path, std::path::PathBuf::from("/custom/muxpit.sock"));
         assert!(!endpoint.secure_parent);
     }
 
@@ -174,7 +174,7 @@ mod tests {
         );
         assert_eq!(
             endpoint.path,
-            std::path::PathBuf::from("/run/user/1000/wmux/wmux.sock")
+            std::path::PathBuf::from("/run/user/1000/muxpit/muxpit.sock")
         );
         assert!(endpoint.secure_parent);
     }
@@ -189,7 +189,7 @@ mod tests {
         );
         assert_eq!(
             endpoint.path,
-            std::path::PathBuf::from("/run/user/1000/wmux/dev_1/wmux.sock")
+            std::path::PathBuf::from("/run/user/1000/muxpit/dev_1/muxpit.sock")
         );
         assert!(endpoint.secure_parent);
     }
@@ -200,7 +200,7 @@ mod tests {
             unix_socket_endpoint_from_env(None, None, None, Some("name with space".into()));
         assert_eq!(
             endpoint.path,
-            std::path::PathBuf::from("/tmp/wmux-name_with_space/wmux.sock")
+            std::path::PathBuf::from("/tmp/muxpit-name_with_space/muxpit.sock")
         );
         assert!(endpoint.secure_parent);
         assert_eq!(
@@ -213,7 +213,7 @@ mod tests {
     fn windows_pipe_name_is_user_scoped_and_overridable() {
         assert_eq!(
             windows_pipe_name_from_env(None, None, Some("Jane Doe".into())),
-            r"\\.\pipe\wmux-Jane_Doe"
+            r"\\.\pipe\muxpit-Jane_Doe"
         );
         assert_eq!(
             windows_pipe_name_from_env(
@@ -229,15 +229,15 @@ mod tests {
     fn windows_pipe_name_uses_namespace_when_present() {
         assert_eq!(
             windows_pipe_name_from_env(None, Some("dev 1".into()), Some("Jane Doe".into())),
-            r"\\.\pipe\wmux-Jane_Doe-dev_1"
+            r"\\.\pipe\muxpit-Jane_Doe-dev_1"
         );
     }
 
     #[test]
     fn windows_mutex_name_is_derived_from_pipe_name() {
         assert_eq!(
-            windows_mutex_name_from_pipe(r"\\.\pipe\wmux-Jane"),
-            r"Local\____pipe_wmux-Jane-single-instance"
+            windows_mutex_name_from_pipe(r"\\.\pipe\muxpit-Jane"),
+            r"Local\____pipe_muxpit-Jane-single-instance"
         );
     }
 }

@@ -41,7 +41,7 @@ fn build_ssh(ssh: &SshCommand) -> Command {
         "StrictHostKeyChecking=accept-new",
     ]);
     apply_no_window(&mut cmd);
-    // Silence SSH-side stderr (banner, ssh warnings) to keep wmux logs clean.
+    // Silence SSH-side stderr (banner, ssh warnings) to keep muxpit logs clean.
     // Remote tmux failures still surface via exit code.
     cmd.stderr(Stdio::null());
     cmd
@@ -126,9 +126,9 @@ pub fn list_sessions(ssh: &SshCommand) -> Result<Vec<TmuxSession>, String> {
     Ok(sessions)
 }
 
-/// Switch the wmux-attached client(s) to `target_session`.
+/// Switch the muxpit-attached client(s) to `target_session`.
 ///
-/// `wrapper_session` is the session where this wmux client is currently attached.
+/// `wrapper_session` is the session where this muxpit client is currently attached.
 /// The frontend updates it after every successful switch so subsequent switches
 /// can still discover the client's tty after it has left the original wrapper.
 pub fn switch_client(
@@ -189,12 +189,12 @@ pub fn new_session(ssh: &SshCommand, name: Option<&str>) -> Result<String, Strin
 pub fn kill_session(ssh: &SshCommand, session: &str) -> Result<(), String> {
     let s = safe_session_token(session).ok_or_else(|| "invalid session".to_string())?;
     let mut cmd = build_ssh(ssh);
-    // wmux sets `detach-on-destroy off` globally on attach (see pty.rs), so tmux
+    // muxpit sets `detach-on-destroy off` globally on attach (see pty.rs), so tmux
     // normally switches the client to another session when this one is destroyed.
     // Pre-migrate any client attached to this session to a live session anyway, as
     // a safety net for servers where that option isn't in effect (e.g. a session
     // we didn't start), so killing the attached session never drops the SSH
-    // connection and tears down the wmux pane.
+    // connection and tears down the muxpit pane.
     let remote = format!(
         "alt=$(tmux list-sessions -F '#{{session_id}}' 2>/dev/null \
                 | grep -F -v -x '{s}' | head -n1); \
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn safe_token_accepts() {
         assert!(safe_session_token("$3").is_some());
-        assert!(safe_session_token("wmux-host").is_some());
+        assert!(safe_session_token("muxpit-host").is_some());
         assert!(safe_session_token("foo_bar").is_some());
     }
 

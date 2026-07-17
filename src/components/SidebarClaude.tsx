@@ -89,7 +89,7 @@ export const SidebarClaude = ({ sessions, sshTarget: _sshTarget, onViewSession, 
   if (sessions.length === 0) return null;
 
   return (
-    <div className="wmux-card" style={{ ...styles.container, height: collapsed ? undefined : height }}>
+    <div className="muxpit-card" style={{ ...styles.container, height: collapsed ? undefined : height }}>
       <div style={styles.resizeHandle} onMouseDown={onResizeStart} title="Drag to resize" />
       <div style={styles.header} onClick={() => setCollapsed((c) => !c)}>
         <span style={styles.headerText}>Claude Sessions</span>
@@ -158,18 +158,18 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "5px 10px",
-    background: "var(--wmux-bg-elev)",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    background: "var(--muxpit-bg-elev)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
     cursor: "pointer",
     userSelect: "none",
   },
   headerText: {
-    color: "var(--wmux-accent-2)",
+    color: "var(--muxpit-accent-2)",
     fontWeight: 600,
     fontSize: 12,
   },
   toggle: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 10,
   },
   body: {
@@ -188,7 +188,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
   },
   projectName: {
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 12,
     fontWeight: 600,
     overflow: "hidden",
@@ -210,7 +210,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   sessionId: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 11,
     flex: 1,
     overflow: "hidden",
@@ -218,7 +218,7 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   sessionTime: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 10,
     flexShrink: 0,
   },

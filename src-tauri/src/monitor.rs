@@ -340,7 +340,7 @@ fn run_persistent_monitor(
                     queue.pop_front()
                 };
                 let Some(req) = req else { break };
-                let fetch_marker = format!("===WMUX_FETCH_END_{}===", req.request_id);
+                let fetch_marker = format!("===MUXPIT_FETCH_END_{}===", req.request_id);
                 let cat_cmd = match build_claude_fetch_command(
                     &req.project,
                     &req.session_id,

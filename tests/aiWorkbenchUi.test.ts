@@ -297,7 +297,7 @@ test("AI workbench entry points remain visible without unread notifications", ()
 test("onboarding documents hooks and keeps dangerous resume separate", () => {
   const onboarding = readSource("../src/components/OnboardingPanel.tsx");
 
-  assert.match(onboarding, /wmux-cli hooks setup --yes/);
+  assert.match(onboarding, /muxpit-cli hooks setup --yes/);
   assert.match(onboarding, /updateCwdRestore/);
   assert.match(onboarding, /updateAgentSessionRestore/);
   assert.match(onboarding, /Approval bypass remains off/);

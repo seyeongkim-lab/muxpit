@@ -32,7 +32,7 @@ const runtime = (overrides: Partial<ControlRuntime> = {}): ControlRuntime => ({
   ...overrides,
 });
 
-test("identify resolves the requested wmux surface", async () => {
+test("identify resolves the requested muxpit surface", async () => {
   const result = await executeControlRequest({
     requestId: "request-1",
     action: "identify",

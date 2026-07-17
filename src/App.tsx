@@ -163,7 +163,7 @@ export const App = () => {
   useEffect(() => {
     const webview = tryGetCurrentWebview();
     if (!webview) return;
-    webview.setZoom(uiFontSize / 14).catch((err) => console.error("[wmux] setZoom failed:", err));
+    webview.setZoom(uiFontSize / 14).catch((err) => console.error("[muxpit] setZoom failed:", err));
   }, [uiFontSize]);
 
   // Poll workspace metadata (git, ports) every 5 seconds
@@ -345,7 +345,7 @@ export const App = () => {
     }, 500);
   }, [workspaces, activeId]);
 
-  // Mirror the workspace list to the backend so the CLI (`wmux ls`) can read it
+  // Mirror the workspace list to the backend so the CLI (`muxpit ls`) can read it
   // over the IPC pipe. The backend keeps no workspace state of its own.
   useEffect(() => {
     const summaries = workspaces.map((ws) => ({
@@ -434,7 +434,7 @@ export const App = () => {
       source?: string;
       event?: string;
     }>(
-      "wmux-notify",
+      "muxpit-notify",
       (event) => {
         const { title, body } = event.payload;
         if (!shouldShowNotificationForTarget(event.payload.workspace_id, event.payload.surface_id)) {
@@ -481,7 +481,7 @@ export const App = () => {
   }, [activeId]);
 
   useEffect(() => {
-    const unlisten = listen<ControlRequestEvent>("wmux-control-request", (event) => {
+    const unlisten = listen<ControlRequestEvent>("muxpit-control-request", (event) => {
       void (async () => {
         let data: unknown = null;
         let error: string | null = null;
@@ -502,7 +502,7 @@ export const App = () => {
     };
   }, []);
 
-  // Listen for agent hook session bindings from wmux-cli.
+  // Listen for agent hook session bindings from muxpit-cli.
   useEffect(() => {
     const unlisten = listen<{
       source?: string;
@@ -513,7 +513,7 @@ export const App = () => {
       cwd?: string;
       status?: string;
     }>(
-      "wmux-agent-session",
+      "muxpit-agent-session",
       (event) => {
         const { source, workspace_id, surface_id, session_id } = event.payload;
         if (!isRestorableAgentKind(source) || !workspace_id || !surface_id || !session_id) {
@@ -850,7 +850,7 @@ export const App = () => {
         useTmux = false;
       }
     }
-    const tmuxSession = useTmux ? sanitizeTmuxSessionName(`wmux-${host.host}`) : undefined;
+    const tmuxSession = useTmux ? sanitizeTmuxSessionName(`muxpit-${host.host}`) : undefined;
 
     const wsId = addWorkspace(host.name, cmd, tmuxSession, sshConnection);
     if (tmuxSession) {
@@ -889,16 +889,16 @@ export const App = () => {
   }, [sidebarMonitor]);
 
   const handleWindowMinimize = useCallback(() => {
-    tryGetCurrentWindow()?.minimize().catch((err) => console.error("[wmux] minimize failed:", err));
+    tryGetCurrentWindow()?.minimize().catch((err) => console.error("[muxpit] minimize failed:", err));
   }, []);
 
   const handleWindowMaximize = useCallback(() => {
-    tryGetCurrentWindow()?.toggleMaximize().catch((err) => console.error("[wmux] toggleMaximize failed:", err));
+    tryGetCurrentWindow()?.toggleMaximize().catch((err) => console.error("[muxpit] toggleMaximize failed:", err));
   }, []);
 
   const handleWindowClose = useCallback(() => {
     logInfo("window close requested");
-    tryGetCurrentWindow()?.close().catch((err) => console.error("[wmux] close failed:", err));
+    tryGetCurrentWindow()?.close().catch((err) => console.error("[muxpit] close failed:", err));
   }, []);
 
   const handleCloseConfirm = useCallback(async () => {
@@ -909,7 +909,7 @@ export const App = () => {
     try {
       await tryGetCurrentWindow()?.destroy();
     } catch (err) {
-      console.error("[wmux] destroy failed:", err);
+      console.error("[muxpit] destroy failed:", err);
       closingRef.current = false;
     }
   }, []);
@@ -919,7 +919,7 @@ export const App = () => {
       {dashboardLayout === "left" ? (
         <div data-tauri-drag-region style={styles.titlebar}>
           <div data-tauri-drag-region style={styles.titlebarBrand}>
-            <span data-tauri-drag-region style={styles.titlebarLogo}>wmux</span>
+            <span data-tauri-drag-region style={styles.titlebarLogo}>muxpit</span>
             <span data-tauri-drag-region style={styles.titlebarSubtitle}>
               {activeWs?.name ?? "Terminal Multiplexer"}
             </span>
@@ -991,7 +991,7 @@ export const App = () => {
             </>
           ) : (
             <div style={styles.welcome}>
-              <div style={styles.welcomeLogo}>wmux</div>
+              <div style={styles.welcomeLogo}>muxpit</div>
               <div style={styles.welcomeTagline}>Terminal Multiplexer</div>
               <div style={styles.welcomeHints}>
                 <span><b>Ctrl+Shift+T</b> New session</span>
@@ -1024,7 +1024,7 @@ export const App = () => {
         />
         <ConfirmDialog
           open={closeConfirmOpen}
-          message="wmux를 닫을까요?"
+          message="muxpit를 닫을까요?"
           confirmLabel="닫기"
           cancelLabel="취소"
           destructive
@@ -1043,7 +1043,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     height: "100%",
     overflow: "hidden",
-    backgroundColor: "var(--wmux-bg)",
+    backgroundColor: "var(--muxpit-bg)",
   },
   titlebar: {
     height: 36,
@@ -1051,8 +1051,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "var(--wmux-titlebar-bg)",
-    color: "var(--wmux-text)",
+    backgroundColor: "var(--muxpit-titlebar-bg)",
+    color: "var(--muxpit-text)",
     userSelect: "none" as const,
   },
   titlebarBrand: {
@@ -1065,8 +1065,8 @@ const styles: Record<string, React.CSSProperties> = {
     paddingLeft: 12,
   },
   titlebarLogo: {
-    color: "var(--wmux-accent)",
-    fontFamily: "var(--wmux-font-display)",
+    color: "var(--muxpit-accent)",
+    fontFamily: "var(--muxpit-font-display)",
     fontSize: 13,
     fontWeight: 800,
     lineHeight: 1,
@@ -1076,7 +1076,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     lineHeight: 1,
   },
@@ -1098,26 +1098,26 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     height: "100%",
     gap: 16,
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-display)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-display)",
     userSelect: "none" as const,
   },
   welcomeLogo: {
     fontSize: 48,
     fontWeight: 800,
-    color: "var(--wmux-accent)",
+    color: "var(--muxpit-accent)",
     letterSpacing: 0,
   },
   welcomeTagline: {
     fontSize: 14,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
   },
   welcomeHints: {
     display: "flex",
     flexDirection: "column" as const,
     gap: 6,
     fontSize: 12,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     opacity: 0.75,
     marginTop: 16,
   },

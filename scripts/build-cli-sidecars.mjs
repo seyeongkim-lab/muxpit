@@ -27,11 +27,11 @@ export const hostTripleFromPlatform = (
     return "x86_64-unknown-linux-gnu";
   }
 
-  throw new Error(`unsupported host platform for wmux-cli packaging: ${platform}/${arch}`);
+  throw new Error(`unsupported host platform for muxpit-cli packaging: ${platform}/${arch}`);
 };
 
 export const cliExecutableNameForTarget = (target) =>
-  target.includes("windows") ? "wmux-cli.exe" : "wmux-cli";
+  target.includes("windows") ? "muxpit-cli.exe" : "muxpit-cli";
 
 export const sidecarNameForTarget = (target) =>
   `${cliExecutableNameForTarget(target).replace(/\.exe$/, "")}-${target}${
@@ -44,7 +44,7 @@ export const cliOutputPathForTarget = ({
   hostTriple = hostTripleFromPlatform(),
 }) => {
   const fileName = cliExecutableNameForTarget(target);
-  const targetDir = target === hostTriple ? join(root, "wmux-cli", "target", "release") : join(root, "wmux-cli", "target", target, "release");
+  const targetDir = target === hostTriple ? join(root, "muxpit-cli", "target", "release") : join(root, "muxpit-cli", "target", target, "release");
   return join(targetDir, fileName);
 };
 
@@ -84,8 +84,8 @@ export const resolveCliTargets = ({
   if (fromArgs.length > 0) return fromArgs;
 
   for (const key of [
-    "WMUX_CLI_TARGETS",
-    "WMUX_CLI_TARGET",
+    "MUXPIT_CLI_TARGETS",
+    "MUXPIT_CLI_TARGET",
     "TAURI_ENV_TARGET_TRIPLE",
     "CARGO_BUILD_TARGET",
     "TARGET",
@@ -110,7 +110,7 @@ const run = (command, args) => {
 };
 
 const buildCargoTarget = (target, hostTriple) => {
-  const args = ["build", "--manifest-path", "wmux-cli/Cargo.toml", "--release"];
+  const args = ["build", "--manifest-path", "muxpit-cli/Cargo.toml", "--release"];
   if (target !== hostTriple) args.push("--target", target);
   run("cargo", args);
 };
@@ -126,7 +126,7 @@ const copySidecar = (target, hostTriple) => {
     chmodSync(dest, mode | 0o755);
   }
 
-  console.log(`[wmux] prepared CLI sidecar: ${dest}`);
+  console.log(`[muxpit] prepared CLI sidecar: ${dest}`);
 };
 
 const buildUniversalMacSidecar = (hostTriple) => {
@@ -142,7 +142,7 @@ const buildUniversalMacSidecar = (hostTriple) => {
     ...targets.map((target) => cliOutputPathForTarget({ target, hostTriple })),
   ]);
   chmodSync(output, statSync(output).mode | 0o755);
-  console.log(`[wmux] prepared CLI sidecar: ${output}`);
+  console.log(`[muxpit] prepared CLI sidecar: ${output}`);
 };
 
 export const buildCliSidecars = (targets = resolveCliTargets()) => {
@@ -166,7 +166,7 @@ if (isDirectRun) {
   try {
     buildCliSidecars();
   } catch (error) {
-    console.error(`[wmux] failed to build CLI sidecars: ${error instanceof Error ? error.message : error}`);
+    console.error(`[muxpit] failed to build CLI sidecars: ${error instanceof Error ? error.message : error}`);
     process.exitCode = 1;
   }
 }

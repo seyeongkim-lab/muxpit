@@ -204,7 +204,7 @@ test("Claude history payload becomes a loaded mobile session", () => {
 
   assert.deepEqual(
     normalizeClaudeHistoryMessage({
-      type: "wmux_claude_session",
+      type: "muxpit_claude_session",
       session,
       items,
     }),
@@ -214,7 +214,7 @@ test("Claude history payload becomes a loaded mobile session", () => {
 
 test("Claude history errors stay attached to the requested session", () => {
   assert.deepEqual(
-    normalizeClaudeHistoryMessage({ type: "wmux_error", message: "not found" }, "session-2"),
+    normalizeClaudeHistoryMessage({ type: "muxpit_error", message: "not found" }, "session-2"),
     [{ type: "error", message: "not found", sessionId: "session-2" }],
   );
 });

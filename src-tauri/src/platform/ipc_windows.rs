@@ -5,14 +5,14 @@ pub(super) fn server_loop(app: AppHandle) {
     let _single_instance = match SingleInstanceGuard::acquire(&pipe_name) {
         Ok(guard) => guard,
         Err(SingleInstanceError::AlreadyRunning) => {
-            log::error!("wmux IPC server already running for pipe {pipe_name}");
-            // Another wmux process owns the CLI/hook IPC pipe. Keep this GUI
+            log::error!("muxpit IPC server already running for pipe {pipe_name}");
+            // Another muxpit process owns the CLI/hook IPC pipe. Keep this GUI
             // instance alive; otherwise a stale hidden process can make every
             // new launch appear and immediately close.
             return;
         }
         Err(SingleInstanceError::Other(e)) => {
-            log::error!("Failed to acquire wmux IPC singleton: {e}");
+            log::error!("Failed to acquire muxpit IPC singleton: {e}");
             return;
         }
     };
@@ -47,7 +47,7 @@ impl SingleInstanceGuard {
         use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
         use windows_sys::Win32::System::Threading::CreateMutexW;
 
-        let mutex_name = wmux_platform::paths::windows_mutex_name_from_pipe(pipe_name);
+        let mutex_name = muxpit_platform::paths::windows_mutex_name_from_pipe(pipe_name);
         let mutex_name = wide_null(&mutex_name);
         let handle = unsafe { CreateMutexW(std::ptr::null(), 1, mutex_name.as_ptr()) };
         if handle.is_null() {

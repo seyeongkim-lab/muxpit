@@ -272,7 +272,7 @@ interface WorkspaceState {
 
 let counter = 0;
 const genId = () => `n-${Date.now()}-${counter++}`;
-const SESSION_STORAGE_KEY = "wmux-session";
+const SESSION_STORAGE_KEY = "muxpit-session";
 const SESSION_SCHEMA_VERSION = 2;
 const SESSION_PLATFORMS: RuntimePlatform[] = ["android", "linux", "windows", "macos", "unknown"];
 let saveToPlatformSpecificSessionKey = false;
@@ -830,7 +830,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         // reconnects independently. Strip any prior `-n-<ts>-<cnt>` marker (from a
         // previous split) so names stay bounded across repeated splits; the `n-`
         // sentinel disambiguates from host names that may legitimately end in
-        // `-<digits>-<digits>` (e.g. `wmux-host-10-20`).
+        // `-<digits>-<digits>` (e.g. `muxpit-host-10-20`).
         const parentBase = parent?.tmuxSession?.replace(/-n-\d+-\d+$/, "");
         const inheritedTmuxSession = parentBase
           ? `${parentBase}-${newLeafId}`

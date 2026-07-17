@@ -1,4 +1,4 @@
-/* Linear-style chrome polish for wmux. All colours come from CSS custom
+/* Linear-style chrome polish for muxpit. All colours come from CSS custom
  * properties that App.tsx (re)writes whenever the user picks a different
  * terminal theme — the chrome therefore tracks the selected palette
  * without any per-component plumbing. The terminal area itself is
@@ -8,45 +8,45 @@
 :root {
   /* Sensible defaults so the chrome still renders before the JS theme
    * sync runs (e.g. during the first paint of a session restore). */
-  --wmux-bg: #0e0e16;
-  --wmux-bg-soft: #14141d;
-  --wmux-bg-elev: rgba(255, 255, 255, 0.025);
-  --wmux-titlebar-bg: #2b2b2b;
+  --muxpit-bg: #0e0e16;
+  --muxpit-bg-soft: #14141d;
+  --muxpit-bg-elev: rgba(255, 255, 255, 0.025);
+  --muxpit-titlebar-bg: #2b2b2b;
 
-  --wmux-text: #cdd6f4;
-  --wmux-subtext: #6c7086;
+  --muxpit-text: #cdd6f4;
+  --muxpit-subtext: #6c7086;
 
-  --wmux-hairline: rgba(255, 255, 255, 0.06);
-  --wmux-hairline-strong: rgba(255, 255, 255, 0.10);
+  --muxpit-hairline: rgba(255, 255, 255, 0.06);
+  --muxpit-hairline-strong: rgba(255, 255, 255, 0.10);
 
-  --wmux-accent: #89b4fa;
-  --wmux-accent-2: #cba6f7;
-  --wmux-accent-soft: rgba(137, 180, 250, 0.07);
-  --wmux-accent-mid: rgba(137, 180, 250, 0.18);
-  --wmux-accent-strong: rgba(137, 180, 250, 0.55);
-  --wmux-accent-glow: rgba(137, 180, 250, 0.35);
-  --wmux-accent-2-soft: rgba(203, 166, 247, 0.08);
+  --muxpit-accent: #89b4fa;
+  --muxpit-accent-2: #cba6f7;
+  --muxpit-accent-soft: rgba(137, 180, 250, 0.07);
+  --muxpit-accent-mid: rgba(137, 180, 250, 0.18);
+  --muxpit-accent-strong: rgba(137, 180, 250, 0.55);
+  --muxpit-accent-glow: rgba(137, 180, 250, 0.35);
+  --muxpit-accent-2-soft: rgba(203, 166, 247, 0.08);
 
-  --wmux-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+  --muxpit-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
                       0 4px 14px rgba(0, 0, 0, 0.35);
 
-  --wmux-danger: #e5484d;
+  --muxpit-danger: #e5484d;
 
-  --wmux-font-display: 'Inter', 'Segoe UI Variable Text', 'Segoe UI',
+  --muxpit-font-display: 'Inter', 'Segoe UI Variable Text', 'Segoe UI',
                        -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --wmux-font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  --muxpit-font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
 }
 
 /* Chrome text uses the display font; monospace is reserved for data values
- * (paths, sizes, metrics) via --wmux-font-mono. The terminal itself is
+ * (paths, sizes, metrics) via --muxpit-font-mono. The terminal itself is
  * unaffected — xterm sets its own font from settings. */
 body {
-  font-family: var(--wmux-font-display);
+  font-family: var(--muxpit-font-display);
 }
 
 /* ---------- Logo ---------- */
 
-.wmux-titlebar-btn {
+.muxpit-titlebar-btn {
   width: 46px;
   height: 100%;
   display: grid;
@@ -59,22 +59,22 @@ body {
   transition: background-color 120ms ease, color 120ms ease;
 }
 
-.wmux-titlebar-btn:hover {
+.muxpit-titlebar-btn:hover {
   background-color: rgba(255, 255, 255, 0.08) !important;
   color: #ffffff !important;
 }
 
-.wmux-titlebar-close:hover {
-  background-color: var(--wmux-danger) !important;
+.muxpit-titlebar-close:hover {
+  background-color: var(--muxpit-danger) !important;
   color: #ffffff !important;
 }
 
-.wmux-titlebar-btn:focus-visible {
-  outline: 1px solid var(--wmux-accent);
+.muxpit-titlebar-btn:focus-visible {
+  outline: 1px solid var(--muxpit-accent);
   outline-offset: -2px;
 }
 
-.wmux-titlebar-btn svg {
+.muxpit-titlebar-btn svg {
   width: 14px;
   height: 14px;
   fill: none;
@@ -84,7 +84,7 @@ body {
   pointer-events: none;
 }
 
-.wmux-tab-close-icon {
+.muxpit-tab-close-icon {
   width: 10px;
   height: 10px;
   fill: none;
@@ -93,58 +93,58 @@ body {
   pointer-events: none;
 }
 
-.wmux-window-controls {
+.muxpit-window-controls {
   align-self: stretch;
   display: flex;
   flex-shrink: 0;
   margin-left: 3px;
 }
 
-.wmux-logo {
-  font-family: var(--wmux-font-display);
+.muxpit-logo {
+  font-family: var(--muxpit-font-display);
   font-size: 21px;
   font-weight: 800;
   letter-spacing: 0;
-  color: var(--wmux-accent);
+  color: var(--muxpit-accent);
   user-select: none;
 }
 
 /* ---------- Generic icon buttons ---------- */
 
-.wmux-btn {
+.muxpit-btn {
   transition: transform 120ms ease,
               border-color 120ms ease,
               color 120ms ease,
               background-color 120ms ease,
               box-shadow 120ms ease;
 }
-.wmux-btn:hover {
+.muxpit-btn:hover {
   transform: scale(1.04);
-  border-color: var(--wmux-hairline-strong) !important;
-  color: var(--wmux-text) !important;
+  border-color: var(--muxpit-hairline-strong) !important;
+  color: var(--muxpit-text) !important;
 }
-.wmux-btn:active {
+.muxpit-btn:active {
   transform: scale(0.96);
 }
 
-.wmux-top-tab,
-.wmux-top-tab:hover,
-.wmux-top-tab:active {
+.muxpit-top-tab,
+.muxpit-top-tab:hover,
+.muxpit-top-tab:active {
   transform: none !important;
   transition: none !important;
 }
 
-.wmux-split-divider {
-  background-color: var(--wmux-hairline-strong);
+.muxpit-split-divider {
+  background-color: var(--muxpit-hairline-strong);
 }
 
-.wmux-split-divider:hover {
-  background-color: var(--wmux-accent);
+.muxpit-split-divider:hover {
+  background-color: var(--muxpit-accent);
 }
 
 /* Files rail resize grabber: invisible until hovered, then a thin accent line
  * centred over the rail's right border. */
-.wmux-rail-resize::after {
+.muxpit-rail-resize::after {
   content: "";
   position: absolute;
   top: 0;
@@ -156,46 +156,46 @@ body {
   transition: background-color 120ms ease;
 }
 
-.wmux-rail-resize:hover::after {
-  background-color: var(--wmux-accent);
+.muxpit-rail-resize:hover::after {
+  background-color: var(--muxpit-accent);
 }
 
 /* ---------- Sidebar list rows ---------- */
 
-.wmux-host-row {
+.muxpit-host-row {
   position: relative;
   transition: background 160ms ease;
 }
-.wmux-host-row:hover {
-  background-color: var(--wmux-accent-soft) !important;
+.muxpit-host-row:hover {
+  background-color: var(--muxpit-accent-soft) !important;
 }
 
-.wmux-ws-item {
+.muxpit-ws-item {
   position: relative;
   transition: background-color 120ms ease;
 }
-.wmux-ws-item:not(.wmux-ws-active):hover {
+.muxpit-ws-item:not(.muxpit-ws-active):hover {
   background-color: rgba(255, 255, 255, 0.025) !important;
 }
 
-.wmux-active-bar {
+.muxpit-active-bar {
   position: absolute;
   left: 0;
   top: 4px;
   bottom: 4px;
   width: 3px;
-  background: var(--wmux-accent);
+  background: var(--muxpit-accent);
   border-radius: 0 2px 2px 0;
   pointer-events: none;
 }
 
-.wmux-host-dot {
+.muxpit-host-dot {
   position: relative;
   box-shadow: 0 0 0 1px currentColor inset;
   filter: saturate(1.2);
   transition: box-shadow 160ms ease, transform 120ms ease;
 }
-.wmux-host-dot::after {
+.muxpit-host-dot::after {
   /* Outer glow ring — slightly larger than the dot, low-opacity stroke
    * pulled from the dot's `color` so each host's badge ring matches its
    * own colour. */
@@ -207,59 +207,59 @@ body {
   opacity: 0.35;
   pointer-events: none;
 }
-.wmux-host-row:hover .wmux-host-dot {
+.muxpit-host-row:hover .muxpit-host-dot {
   transform: scale(1.1);
   box-shadow: 0 0 0 1px currentColor inset;
 }
 
 /* ---------- Cards (Monitor, Claude Sessions) ---------- */
 
-.wmux-card {
-  background: var(--wmux-bg-elev);
-  border: 1px solid var(--wmux-hairline);
+.muxpit-card {
+  background: var(--muxpit-bg-elev);
+  border: 1px solid var(--muxpit-hairline);
   border-radius: 8px;
-  box-shadow: var(--wmux-shadow-card);
+  box-shadow: var(--muxpit-shadow-card);
   margin: 6px 8px;
   overflow: hidden;
 }
 
 /* ---------- Sidebar header / section labels ---------- */
 
-.wmux-sidebar-header {
-  border-bottom: 1px solid var(--wmux-hairline);
-  background: var(--wmux-bg);
+.muxpit-sidebar-header {
+  border-bottom: 1px solid var(--muxpit-hairline);
+  background: var(--muxpit-bg);
 }
 
-.wmux-section-label {
-  font-family: var(--wmux-font-display);
+.muxpit-section-label {
+  font-family: var(--muxpit-font-display);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-size: 10px;
   font-weight: 700;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
 }
 
 /* ---------- AI pane toolbar ---------- */
 
 /* Fixed 34px row so the AI bar lines up with the top bar and the files rail
  * header — one horizontal baseline across the whole app. */
-.wmux-ai-bar {
+.muxpit-ai-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   height: 34px;
   padding: 0 12px;
   flex-shrink: 0;
-  background: var(--wmux-bg-soft);
-  border-bottom: 1px solid var(--wmux-hairline);
+  background: var(--muxpit-bg-soft);
+  border-bottom: 1px solid var(--muxpit-hairline);
 }
 
-.wmux-ai-bar-label {
+.muxpit-ai-bar-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--wmux-subtext);
-  font-family: var(--wmux-font-display);
+  color: var(--muxpit-subtext);
+  font-family: var(--muxpit-font-display);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -267,20 +267,20 @@ body {
   user-select: none;
 }
 
-.wmux-ai-bar-label svg {
+.muxpit-ai-bar-label svg {
   width: 11px;
   height: 11px;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
 }
 
-.wmux-ai-btn {
+.muxpit-ai-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   background: transparent;
-  border: 1px solid var(--wmux-hairline);
-  color: var(--wmux-text);
-  font-family: var(--wmux-font-display);
+  border: 1px solid var(--muxpit-hairline);
+  color: var(--muxpit-text);
+  font-family: var(--muxpit-font-display);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
@@ -294,7 +294,7 @@ body {
               box-shadow 160ms ease,
               transform 120ms ease;
 }
-.wmux-ai-btn::before {
+.muxpit-ai-btn::before {
   /* Tiny "+" prefix so the button reads as an additive action. */
   content: "+";
   font-weight: 600;
@@ -302,16 +302,16 @@ body {
   margin-right: 1px;
   transition: opacity 160ms ease;
 }
-.wmux-ai-btn:hover {
-  background: var(--wmux-accent);
+.muxpit-ai-btn:hover {
+  background: var(--muxpit-accent);
   border-color: transparent;
-  color: var(--wmux-bg);
+  color: var(--muxpit-bg);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15) inset;
   transform: translateY(-1px);
 }
-.wmux-ai-btn:hover::before {
+.muxpit-ai-btn:hover::before {
   opacity: 1;
 }
-.wmux-ai-btn:active {
+.muxpit-ai-btn:active {
   transform: translateY(0);
 }

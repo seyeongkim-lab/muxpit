@@ -304,14 +304,14 @@ export const normalizeClaudeHistoryMessage = (
 ): MobileAgentEvent[] => {
   const message = objectValue(value);
   if (!message) return [];
-  if (message.type === "wmux_error") {
+  if (message.type === "muxpit_error") {
     return [{
       type: "error",
       message: stringValue(message.message) ?? "Claude history could not be loaded",
       ...(sessionId ? { sessionId } : {}),
     }];
   }
-  if (message.type !== "wmux_claude_session") return [];
+  if (message.type !== "muxpit_claude_session") return [];
 
   const sessionValue = objectValue(message.session);
   const loadedSessionId = stringValue(sessionValue?.id);

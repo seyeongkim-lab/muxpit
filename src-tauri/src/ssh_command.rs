@@ -37,7 +37,7 @@ fn ssh_control_dir() -> &'static std::path::Path {
     use std::path::{Path, PathBuf};
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
-        let user = std::env::var("USER").unwrap_or_else(|_| "wmux".to_string());
+        let user = std::env::var("USER").unwrap_or_else(|_| "muxpit".to_string());
         let user: String = user
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
@@ -47,7 +47,7 @@ fn ssh_control_dir() -> &'static std::path::Path {
         } else {
             std::env::temp_dir()
         };
-        let dir = base.join(format!("wmux-ssh-{user}"));
+        let dir = base.join(format!("muxpit-ssh-{user}"));
         let _ = std::fs::create_dir_all(&dir);
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));

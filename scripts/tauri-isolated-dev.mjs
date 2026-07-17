@@ -18,9 +18,9 @@ const isolatedAppIdentity = (namespace) => {
   }
   const [, pid, hex] = match;
   return {
-    identifier: `com.wmux.terminal.isolated.i${hex.toLowerCase()}`,
-    productName: `wmux-dev-${pid}-${hex.toLowerCase()}`,
-    title: `wmux isolated ${hex.slice(0, 6).toLowerCase()}`,
+    identifier: `com.muxpit.terminal.isolated.i${hex.toLowerCase()}`,
+    productName: `muxpit-dev-${pid}-${hex.toLowerCase()}`,
+    title: `muxpit isolated ${hex.slice(0, 6).toLowerCase()}`,
   };
 };
 
@@ -76,17 +76,17 @@ const cliExample = (namespace) => {
   if (process.platform === "win32") {
     return (
       "powershell -NoProfile -Command " +
-      `"Remove-Item Env:WMUX_SOCKET_PATH,Env:WMUX_PIPE_NAME -ErrorAction SilentlyContinue; ` +
-      `$env:WMUX_IPC_NAMESPACE='${namespace}'; wmux-cli ping"`
+      `"Remove-Item Env:MUXPIT_SOCKET_PATH,Env:MUXPIT_PIPE_NAME -ErrorAction SilentlyContinue; ` +
+      `$env:MUXPIT_IPC_NAMESPACE='${namespace}'; muxpit-cli ping"`
     );
   }
-  return `env -u WMUX_SOCKET_PATH -u WMUX_PIPE_NAME WMUX_IPC_NAMESPACE=${namespace} wmux-cli ping`;
+  return `env -u MUXPIT_SOCKET_PATH -u MUXPIT_PIPE_NAME MUXPIT_IPC_NAMESPACE=${namespace} muxpit-cli ping`;
 };
 
 const main = async () => {
   const namespace = randomNamespace();
   const port = await findAvailablePort();
-  const tmpDir = await mkdtemp(join(tmpdir(), "wmux-tauri-"));
+  const tmpDir = await mkdtemp(join(tmpdir(), "muxpit-tauri-"));
   const isolatedConfigPath = join(tmpDir, "isolated.conf.json");
 
   try {
@@ -110,14 +110,14 @@ const main = async () => {
 
     await writeFile(isolatedConfigPath, `${JSON.stringify(config, null, 2)}\n`);
 
-    const env = { ...process.env, WMUX_IPC_NAMESPACE: namespace };
-    delete env.WMUX_SOCKET_PATH;
-    delete env.WMUX_PIPE_NAME;
+    const env = { ...process.env, MUXPIT_IPC_NAMESPACE: namespace };
+    delete env.MUXPIT_SOCKET_PATH;
+    delete env.MUXPIT_PIPE_NAME;
 
-    console.log(`[wmux] isolated IPC namespace: ${namespace}`);
-    console.log(`[wmux] isolated app identifier: ${identity.identifier}`);
-    console.log(`[wmux] isolated dev server: http://127.0.0.1:${port}`);
-    console.log("[wmux] external CLI example: " + cliExample(namespace));
+    console.log(`[muxpit] isolated IPC namespace: ${namespace}`);
+    console.log(`[muxpit] isolated app identifier: ${identity.identifier}`);
+    console.log(`[muxpit] isolated dev server: http://127.0.0.1:${port}`);
+    console.log("[muxpit] external CLI example: " + cliExample(namespace));
 
     const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
     const code = await run(
@@ -132,6 +132,6 @@ const main = async () => {
 };
 
 main().catch((error) => {
-  console.error(`[wmux] isolated dev failed: ${error instanceof Error ? error.message : error}`);
+  console.error(`[muxpit] isolated dev failed: ${error instanceof Error ? error.message : error}`);
   process.exitCode = 1;
 });

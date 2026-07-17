@@ -19,7 +19,7 @@ let counter = 0;
 
 const loadSaved = (): HistoryEntry[] => {
   try {
-    const raw = localStorage.getItem("wmux-history");
+    const raw = localStorage.getItem("muxpit-history") ?? localStorage.getItem("wmux-history");
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed.slice(-MAX_ENTRIES);
@@ -29,7 +29,7 @@ const loadSaved = (): HistoryEntry[] => {
 
 const save = (entries: HistoryEntry[]) => {
   try {
-    localStorage.setItem("wmux-history", JSON.stringify(entries));
+    localStorage.setItem("muxpit-history", JSON.stringify(entries));
   } catch {}
 };
 

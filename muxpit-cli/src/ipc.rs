@@ -18,7 +18,7 @@ pub(crate) fn connect() -> std::io::Result<Box<dyn ReadWrite>> {
 
 #[cfg(windows)]
 fn connect_windows_pipe() -> std::io::Result<File> {
-    let pipe_name = wmux_platform::paths::windows_pipe_name();
+    let pipe_name = muxpit_platform::paths::windows_pipe_name();
     let deadline = Instant::now() + PIPE_CONNECT_TIMEOUT;
 
     loop {
@@ -67,6 +67,6 @@ fn wide_null(value: &str) -> Vec<u16> {
 
 #[cfg(unix)]
 pub(crate) fn connect() -> std::io::Result<Box<dyn ReadWrite>> {
-    let stream = std::os::unix::net::UnixStream::connect(wmux_platform::paths::unix_socket_path())?;
+    let stream = std::os::unix::net::UnixStream::connect(muxpit_platform::paths::unix_socket_path())?;
     Ok(Box::new(stream))
 }

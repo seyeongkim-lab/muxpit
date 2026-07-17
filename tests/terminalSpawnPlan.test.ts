@@ -231,7 +231,7 @@ test("terminal spawn plan does not report or restore across SSH and tmux boundar
       commandArgv: null,
       sshConnection: null,
     },
-    tmuxSession: "wmux-host",
+    tmuxSession: "muxpit-host",
     settings: baseSettings,
   });
 

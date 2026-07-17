@@ -9,10 +9,10 @@ export const WindowControls = ({
   onMaximize,
   onClose,
 }: WindowControlsProps) => (
-  <div className="wmux-window-controls" onDoubleClick={(event) => event.stopPropagation()}>
+  <div className="muxpit-window-controls" onDoubleClick={(event) => event.stopPropagation()}>
     <button
       type="button"
-      className="wmux-titlebar-btn"
+      className="muxpit-titlebar-btn"
       onClick={onMinimize}
       title="Minimize"
       aria-label="Minimize"
@@ -23,7 +23,7 @@ export const WindowControls = ({
     </button>
     <button
       type="button"
-      className="wmux-titlebar-btn"
+      className="muxpit-titlebar-btn"
       onClick={onMaximize}
       title="Maximize"
       aria-label="Maximize"
@@ -34,7 +34,7 @@ export const WindowControls = ({
     </button>
     <button
       type="button"
-      className="wmux-titlebar-btn wmux-titlebar-close"
+      className="muxpit-titlebar-btn muxpit-titlebar-close"
       onClick={onClose}
       title="Close"
       aria-label="Close"

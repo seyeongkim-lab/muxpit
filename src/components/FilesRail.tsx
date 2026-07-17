@@ -193,9 +193,9 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
 
     return (
       <div key={path}>
-        <div className="wmux-file-row" style={{ ...styles.row, paddingLeft: 10 + depth * 12 }}>
+        <div className="muxpit-file-row" style={{ ...styles.row, paddingLeft: 10 + depth * 12 }}>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={() => entry.isDir && toggleDir(path)}
             style={{ ...styles.expandButton, visibility: entry.isDir ? "visible" : "hidden" }}
             title={entry.isDir ? (isExpanded ? "Collapse folder" : "Expand folder") : undefined}
@@ -223,11 +223,11 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
   return (
     <aside ref={asideRef} style={{ ...styles.rail, width: railWidth, minWidth: railWidth }}>
       <div style={styles.header}>
-        <span className="wmux-section-label">FILES</span>
+        <span className="muxpit-section-label">FILES</span>
         <span style={styles.path} title={rootPath ?? requestedRoot}>
           {rootPath ? compactPath(rootPath) : requestedRoot ? compactPath(requestedRoot) : "current directory"}
         </span>
-        <button className="wmux-btn" onClick={refresh} style={styles.refresh} title="Refresh files">
+        <button className="muxpit-btn" onClick={refresh} style={styles.refresh} title="Refresh files">
           r
         </button>
       </div>
@@ -240,7 +240,7 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
         {root?.entries.map((entry) => renderEntry(activeRootKey, entry, 0))}
       </div>
       <div
-        className="wmux-rail-resize"
+        className="muxpit-rail-resize"
         style={styles.resizeHandle}
         onMouseDown={startResize}
         title="Drag to resize"
@@ -256,8 +256,8 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     height: "100%",
     flexShrink: 0,
-    backgroundColor: "var(--wmux-bg)",
-    borderRight: "1px solid var(--wmux-hairline)",
+    backgroundColor: "var(--muxpit-bg)",
+    borderRight: "1px solid var(--muxpit-hairline)",
     display: "flex",
     flexDirection: "column",
     userSelect: "none",
@@ -280,12 +280,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 8,
     padding: "0 8px 0 12px",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
     flexShrink: 0,
   },
   path: {
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 11,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -297,7 +297,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid transparent",
     borderRadius: 4,
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     padding: 0,
     fontSize: 12,
@@ -315,7 +315,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 5,
     paddingRight: 8,
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 12,
     lineHeight: 1.3,
   },
@@ -324,20 +324,20 @@ const styles: Record<string, React.CSSProperties> = {
     height: 20,
     border: "none",
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     padding: 0,
     fontSize: 12,
   },
   dirMark: {
-    color: "var(--wmux-text)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-text)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 10,
     fontWeight: 700,
   },
   fileMark: {
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 10,
     fontWeight: 400,
   },
@@ -348,8 +348,8 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap",
   },
   fileSize: {
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 10,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -357,18 +357,18 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "right",
   },
   status: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     padding: "7px 12px",
   },
   error: {
-    color: "var(--wmux-danger)",
+    color: "var(--muxpit-danger)",
     fontSize: 12,
     padding: "7px 12px",
   },
   errorBlock: {
-    color: "var(--wmux-danger)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-danger)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 11,
     padding: "7px 12px",
     whiteSpace: "pre-wrap",

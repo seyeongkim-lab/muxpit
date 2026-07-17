@@ -26,13 +26,13 @@ def fail(message, code=2):
 
 def context():
     values = {
-        "origin_workspace_id": os.environ.get("WMUX_WORKSPACE_ID"),
-        "origin_surface_id": os.environ.get("WMUX_SURFACE_ID"),
-        "control_token": os.environ.get("WMUX_CONTROL_TOKEN"),
+        "origin_workspace_id": os.environ.get("MUXPIT_WORKSPACE_ID"),
+        "origin_surface_id": os.environ.get("MUXPIT_SURFACE_ID"),
+        "control_token": os.environ.get("MUXPIT_CONTROL_TOKEN"),
     }
     missing = [name for name, value in values.items() if not value]
     if missing:
-        fail("missing wmux control context")
+        fail("missing muxpit control context")
     return values
 
 
@@ -56,7 +56,7 @@ def payload_string(payload, keys, limit=4096):
 
 def hook_request(argv):
     if len(argv) != 3 or argv[1] not in AGENTS or argv[2] not in HOOK_EVENTS:
-        fail("usage: wmux-cli hooks <agent> <event>")
+        fail("usage: muxpit-cli hooks <agent> <event>")
     raw = sys.stdin.read(1_048_577)
     if len(raw) > 1_048_576:
         fail("hook payload is too large")
@@ -121,7 +121,7 @@ def request(argv):
         return hook_request(argv)
     if command == "browser":
         if len(argv) < 2 or argv[1] not in {"open", "navigate", "reload", "url", "snapshot", "console", "screenshot"}:
-            fail("usage: wmux-cli browser <open|navigate|reload|url|snapshot|console|screenshot>")
+            fail("usage: muxpit-cli browser <open|navigate|reload|url|snapshot|console|screenshot>")
         method = f"browser-{argv[1]}"
         argv = [command] + argv[2:]
     else:
@@ -168,7 +168,7 @@ def request(argv):
         params.setdefault("direction", "vertical")
     if method == "spawn-subagent":
         if positional != ["spawn"] or not params.get("command"):
-            fail("usage: wmux-cli subagent spawn --command <command>")
+            fail("usage: muxpit-cli subagent spawn --command <command>")
         params["parent_surface_id"] = params["origin_surface_id"]
         positional = []
     if method == "send-text":
@@ -184,7 +184,7 @@ def request(argv):
             fail("rows must be between 1 and 500")
     if method in {"browser-open", "browser-navigate"}:
         if len(positional) != 1:
-            fail("usage: wmux-cli browser <open|navigate> <url>")
+            fail("usage: muxpit-cli browser <open|navigate> <url>")
         params["url"] = positional[0]
         positional = []
     elif method.startswith("browser-") and positional:
@@ -193,9 +193,9 @@ def request(argv):
 
 
 def main():
-    port = os.environ.get("WMUX_CONTROL_PORT")
+    port = os.environ.get("MUXPIT_CONTROL_PORT")
     if not port:
-        fail("WMUX_CONTROL_PORT is missing")
+        fail("MUXPIT_CONTROL_PORT is missing")
     argv = sys.argv[1:]
     with socket.create_connection(("127.0.0.1", int(port)), timeout=6) as stream:
         stream.sendall((json.dumps(request(argv)) + "\n").encode())

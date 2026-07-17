@@ -9,7 +9,7 @@ const EVAL_TIMEOUT: Duration = Duration::from_secs(5);
 const BROWSER_INIT_SCRIPT: &str = r#"
 (() => {
   const logs = [];
-  Object.defineProperty(window, "__wmuxBrowserLogs", { value: logs, configurable: false });
+  Object.defineProperty(window, "__muxpitBrowserLogs", { value: logs, configurable: false });
   const record = (level, values) => {
     const message = values.map((value) => {
       if (typeof value === "string") return value;
@@ -60,7 +60,7 @@ pub fn parse_browser_url(value: &str) -> Result<Url, String> {
 }
 
 fn validate_label(label: &str) -> Result<(), String> {
-    if !label.starts_with("wmux-browser-")
+    if !label.starts_with("muxpit-browser-")
         || label.len() > 160
         || !label
             .chars()
@@ -136,7 +136,7 @@ pub async fn browser_create(
             }
             let _ = event_app.emit_to(
                 "main",
-                "wmux-browser-navigated",
+                "muxpit-browser-navigated",
                 BrowserNavigated {
                     label: event_label.clone(),
                     url: payload.url().to_string(),
@@ -259,7 +259,7 @@ pub async fn browser_console_logs(app: AppHandle, label: String) -> Result<Value
         &webview,
         r#"(() => ({
           url: location.href,
-          logs: Array.isArray(window.__wmuxBrowserLogs) ? window.__wmuxBrowserLogs.slice() : []
+          logs: Array.isArray(window.__muxpitBrowserLogs) ? window.__muxpitBrowserLogs.slice() : []
         }))()"#,
     )
     .await
@@ -285,7 +285,7 @@ fn browser_screenshot_impl(webview: &Webview) -> Result<BrowserScreenshot, Strin
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_millis();
-    let path = std::env::temp_dir().join(format!("wmux-browser-{timestamp}.png"));
+    let path = std::env::temp_dir().join(format!("muxpit-browser-{timestamp}.png"));
     let rectangle = format!("{x},{y},{},{}", size.width, size.height);
     let output = std::process::Command::new("/usr/sbin/screencapture")
         .arg("-x")
@@ -295,7 +295,7 @@ fn browser_screenshot_impl(webview: &Webview) -> Result<BrowserScreenshot, Strin
         .output()
         .map_err(|error| format!("Failed to start screen capture: {error}"))?;
     if !output.status.success() {
-        return Err("Screen capture failed; grant wmux Screen Recording permission".to_string());
+        return Err("Screen capture failed; grant muxpit Screen Recording permission".to_string());
     }
     Ok(BrowserScreenshot {
         url: webview
@@ -332,9 +332,9 @@ mod tests {
 
     #[test]
     fn browser_labels_are_namespaced() {
-        assert!(validate_label("wmux-browser-n-123").is_ok());
+        assert!(validate_label("muxpit-browser-n-123").is_ok());
         assert!(validate_label("main").is_err());
-        assert!(validate_label("wmux-browser-bad label").is_err());
+        assert!(validate_label("muxpit-browser-bad label").is_err());
     }
 
     #[test]

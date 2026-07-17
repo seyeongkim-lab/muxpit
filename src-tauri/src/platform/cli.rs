@@ -13,15 +13,15 @@ pub(crate) fn bundled_cli_path_for_exe(exe: &Path) -> Option<PathBuf> {
 
 fn cli_executable_name() -> &'static str {
     if cfg!(windows) {
-        "wmux-cli.exe"
+        "muxpit-cli.exe"
     } else {
-        "wmux-cli"
+        "muxpit-cli"
     }
 }
 
 pub fn install_cli_symlink() -> Result<PathBuf, String> {
     let cli_path = bundled_cli_path()
-        .ok_or_else(|| "Bundled wmux-cli was not found next to the app executable".to_string())?;
+        .ok_or_else(|| "Bundled muxpit-cli was not found next to the app executable".to_string())?;
     let link_path = default_cli_symlink_path()?;
     install_cli_symlink_to(&cli_path, &link_path)?;
     Ok(link_path)
@@ -36,7 +36,7 @@ pub(crate) fn default_cli_symlink_path() -> Result<PathBuf, String> {
 }
 
 pub(crate) fn default_cli_symlink_path_for_home(home: &Path) -> PathBuf {
-    home.join(".local").join("bin").join("wmux-cli")
+    home.join(".local").join("bin").join("muxpit-cli")
 }
 
 #[cfg(unix)]
@@ -46,7 +46,7 @@ pub(crate) fn install_cli_symlink_to(cli_path: &Path, link_path: &Path) -> Resul
 
     if !cli_path.is_file() {
         return Err(format!(
-            "Bundled wmux-cli does not exist: {}",
+            "Bundled muxpit-cli does not exist: {}",
             cli_path.display()
         ));
     }
@@ -117,7 +117,7 @@ mod tests {
     fn bundled_cli_path_uses_executable_directory() {
         let dir = unique_test_dir("bundled_cli_path");
         fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join(if cfg!(windows) { "wmux.exe" } else { "wmux" });
+        let exe = dir.join(if cfg!(windows) { "muxpit.exe" } else { "muxpit" });
         let cli = dir.join(cli_executable_name());
         fs::write(&exe, "").unwrap();
         fs::write(&cli, "").unwrap();
@@ -131,7 +131,7 @@ mod tests {
     fn default_cli_symlink_path_uses_local_bin() {
         assert_eq!(
             default_cli_symlink_path_for_home(Path::new("/Users/alice")),
-            PathBuf::from("/Users/alice/.local/bin/wmux-cli")
+            PathBuf::from("/Users/alice/.local/bin/muxpit-cli")
         );
     }
 
@@ -146,9 +146,9 @@ mod tests {
         fs::create_dir_all(&new_dir).unwrap();
         fs::create_dir_all(&bin_dir).unwrap();
 
-        let old_cli = old_dir.join("wmux-cli");
-        let new_cli = new_dir.join("wmux-cli");
-        let link = bin_dir.join("wmux-cli");
+        let old_cli = old_dir.join("muxpit-cli");
+        let new_cli = new_dir.join("muxpit-cli");
+        let link = bin_dir.join("muxpit-cli");
         fs::write(&old_cli, "old").unwrap();
         fs::write(&new_cli, "new").unwrap();
 
@@ -166,7 +166,7 @@ mod tests {
     fn install_cli_symlink_refuses_regular_file() {
         let dir = unique_test_dir("install_cli_regular_file");
         fs::create_dir_all(&dir).unwrap();
-        let cli = dir.join("wmux-cli");
+        let cli = dir.join("muxpit-cli");
         let link = dir.join("link");
         fs::write(&cli, "cli").unwrap();
         fs::write(&link, "existing").unwrap();
@@ -182,6 +182,6 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("wmux-{name}-{nonce}"))
+        std::env::temp_dir().join(format!("muxpit-{name}-{nonce}"))
     }
 }

@@ -1,5 +1,5 @@
-export const DESKTOP_WORKBENCH_SELECTION_KEY = "wmux-desktop-agent-selection-v1";
-const LEGACY_WORKBENCH_PREFIX = "wmux-desktop-agent-workbench-v1:";
+export const DESKTOP_WORKBENCH_SELECTION_KEY = "muxpit-desktop-agent-selection-v1";
+const LEGACY_WORKBENCH_PREFIX = "muxpit-desktop-agent-workbench-v1:";
 
 export interface DesktopStorage {
   readonly length: number;

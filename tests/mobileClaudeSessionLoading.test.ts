@@ -9,7 +9,7 @@ const script = readFileSync(new URL("../src-tauri/scripts/claude_sessions.py", i
 
 test("Claude session selection loads history without rescanning the full list", () => {
   assert.match(script, /for updated_at, path in session_files\(root\)\[:100\]:/);
-  assert.match(script, /"type": "wmux_claude_session"/);
+  assert.match(script, /"type": "muxpit_claude_session"/);
   assert.match(bridge, /export const loadClaudeSession/);
   assert.match(app, /loadClaudeSession\(profile\.id, channelId, sessionId\)/);
   assert.match(app, /if \(shouldLoadHistory\) await requestClaudeData\(session\.id\)/);

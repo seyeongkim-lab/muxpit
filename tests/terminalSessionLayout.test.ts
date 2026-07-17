@@ -141,7 +141,7 @@ test("terminal session layout selectors only target terminal leaves", () => {
             ptyId: 11,
             cloneFromPtyId: 7,
             command: "ssh user@example.com codex",
-            tmuxSession: "wmux-example",
+            tmuxSession: "muxpit-example",
             aiKind: "codex",
           },
         ],
@@ -153,7 +153,7 @@ test("terminal session layout selectors only target terminal leaves", () => {
   assert.equal(terminalLeafExists(workspaces, "ws", "browser-a"), false);
   assert.equal(terminalLeafExists(workspaces, "ws", "leaf-a"), true);
   assert.equal(findTerminalCloneFromPtyId(workspaces, "ws", "leaf-a"), 7);
-  assert.equal(findTerminalTmuxSession(workspaces, "ws", "leaf-a"), "wmux-example");
+  assert.equal(findTerminalTmuxSession(workspaces, "ws", "leaf-a"), "muxpit-example");
   assert.equal(findTerminalAiKind(workspaces, "ws", "leaf-a"), "codex");
   assert.deepEqual(findTerminalSpawnSpec(workspaces, "ws", "missing"), {});
 });

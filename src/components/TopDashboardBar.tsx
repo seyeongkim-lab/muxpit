@@ -226,7 +226,7 @@ export const TopDashboardBar = ({
             ))}
           </div>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={() => addWorkspace()}
             style={styles.newSessionButton}
             title="New workspace"
@@ -259,13 +259,13 @@ export const TopDashboardBar = ({
                 {visibleTab === "hosts" && (
                   <div style={styles.popoverList}>
                     <div style={styles.popoverHeader}>
-                      <span className="wmux-section-label">HOSTS</span>
-                      <button className="wmux-btn" onClick={onOpenSshPanel} style={styles.smallButton}>
+                      <span className="muxpit-section-label">HOSTS</span>
+                      <button className="muxpit-btn" onClick={onOpenSshPanel} style={styles.smallButton}>
                         +
                       </button>
                     </div>
                     {sshHosts.length === 0 && (
-                      <button className="wmux-btn" onClick={onOpenSshPanel} style={styles.emptyButton}>
+                      <button className="muxpit-btn" onClick={onOpenSshPanel} style={styles.emptyButton}>
                         Add host
                       </button>
                     )}
@@ -273,11 +273,11 @@ export const TopDashboardBar = ({
                       const target = `${host.user}@${host.host}${host.port !== 22 ? `:${host.port}` : ""}`;
                       return (
                         <div key={host.id} style={styles.hostRow} onClick={() => onConnectHost?.(host)}>
-                          <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "var(--wmux-accent)" }} />
+                          <span style={{ ...styles.hostDot, backgroundColor: host.color ?? "var(--muxpit-accent)" }} />
                           <span style={styles.hostName}>{host.name}</span>
                           <span style={styles.hostTarget}>{target}</span>
                           <button
-                            className="wmux-btn"
+                            className="muxpit-btn"
                             onClick={(event) => {
                               event.stopPropagation();
                               onEditHost?.(host.id);
@@ -299,7 +299,7 @@ export const TopDashboardBar = ({
             )}
           </div>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={onToggleFilesRail}
             style={{ ...styles.commandButton, ...(filesRailVisible ? styles.commandButtonActive : {}) }}
             title={filesRailVisible ? "Hide files rail" : "Show files rail"}
@@ -307,7 +307,7 @@ export const TopDashboardBar = ({
             Files
           </button>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={onToggleGridView}
             style={{ ...styles.commandButton, ...(gridView ? styles.commandButtonActive : {}) }}
             title="Grid overview"
@@ -315,7 +315,7 @@ export const TopDashboardBar = ({
             Grid
           </button>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={toggleProfiles}
             style={styles.commandButton}
             title="Launch profiles"
@@ -323,7 +323,7 @@ export const TopDashboardBar = ({
             Profiles
           </button>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={onOpenAgentLauncher}
             style={styles.commandButton}
             title="Open AI pane"
@@ -331,7 +331,7 @@ export const TopDashboardBar = ({
             AI
           </button>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={toggleInbox}
             style={styles.commandButton}
             title="Agent inbox (Ctrl+Shift+I)"
@@ -339,7 +339,7 @@ export const TopDashboardBar = ({
             Inbox{totalUnread > 0 ? ` ${totalUnread}` : ""}
           </button>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={onOpenSettings}
             style={styles.commandButton}
             title="Settings"
@@ -396,7 +396,7 @@ const WorkspaceTab = ({
 
   return (
     <button
-      className={`wmux-btn wmux-top-tab${isActive ? " wmux-ws-active" : ""}`}
+      className={`muxpit-btn muxpit-top-tab${isActive ? " muxpit-ws-active" : ""}`}
       onClick={onActivate}
       draggable
       onDragStart={onDragStart}
@@ -437,7 +437,7 @@ const WorkspaceTab = ({
         style={styles.sessionClose}
         title="Close workspace"
       >
-        <svg className="wmux-tab-close-icon" viewBox="0 0 14 14" aria-hidden="true">
+        <svg className="muxpit-tab-close-icon" viewBox="0 0 14 14" aria-hidden="true">
           <path d="m3 3 8 8M11 3l-8 8" />
         </svg>
       </span>
@@ -541,8 +541,8 @@ const MonitorTabButton = ({
   const value = showGraph ? (
     <Sparkline
       series={[
-        { data: monitorSeries!.map((s) => s.memPercent), color: "var(--wmux-subtext)", fill: "none" },
-        { data: monitorSeries!.map((s) => s.cpuPercent), color: "var(--wmux-accent)", fill: "none" },
+        { data: monitorSeries!.map((s) => s.memPercent), color: "var(--muxpit-subtext)", fill: "none" },
+        { data: monitorSeries!.map((s) => s.cpuPercent), color: "var(--muxpit-accent)", fill: "none" },
       ]}
       width={56}
       height={16}
@@ -586,11 +586,11 @@ const MonitorPopover = ({
         <>
           <div style={styles.monitorTop}>
             <div>
-              <span className="wmux-section-label">MONITOR</span>
+              <span className="muxpit-section-label">MONITOR</span>
               <div style={styles.monitorTarget}>{monitor.sshTarget}</div>
             </div>
             {onCloseMonitor && (
-              <button className="wmux-btn" onClick={onCloseMonitor} style={styles.smallButton}>
+              <button className="muxpit-btn" onClick={onCloseMonitor} style={styles.smallButton}>
                 x
               </button>
             )}
@@ -626,7 +626,7 @@ const TopTabButton = ({
   onClick: () => void;
 }) => (
   <button
-    className="wmux-btn wmux-top-tab"
+    className="muxpit-btn muxpit-top-tab"
     onMouseEnter={onMouseEnter}
     onClick={onClick}
     title={title}
@@ -648,7 +648,7 @@ const styles: Record<string, React.CSSProperties> = {
   wrapper: {
     position: "relative",
     zIndex: 20,
-    backgroundColor: "var(--wmux-titlebar-bg)",
+    backgroundColor: "var(--muxpit-titlebar-bg)",
   },
   bar: {
     height: 36,
@@ -656,7 +656,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 8,
     padding: 0,
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     userSelect: "none",
   },
   // Outer row: caps total width and keeps the "+" button outside the
@@ -701,25 +701,25 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     borderRadius: "6px 6px 0 0",
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     padding: "0 10px",
   },
   sessionTabActive: {
-    background: "var(--wmux-bg-soft)",
-    color: "var(--wmux-text)",
+    background: "var(--muxpit-bg-soft)",
+    color: "var(--muxpit-text)",
   },
   sessionTabDragging: {
     opacity: 0.4,
   },
   sessionTabDropTarget: {
-    background: "var(--wmux-accent-soft)",
-    borderColor: "var(--wmux-accent-strong)",
-    borderBottomColor: "var(--wmux-accent-strong)",
+    background: "var(--muxpit-accent-soft)",
+    borderColor: "var(--muxpit-accent-strong)",
+    borderBottomColor: "var(--muxpit-accent-strong)",
   },
   sessionIndex: {
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 10,
     flexShrink: 0,
   },
@@ -734,8 +734,8 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 0 0 1px rgba(63, 185, 80, 0.32)",
   },
   sessionStatusActive: {
-    backgroundColor: "var(--wmux-accent)",
-    boxShadow: "0 0 0 1px var(--wmux-accent-mid)",
+    backgroundColor: "var(--muxpit-accent)",
+    boxShadow: "0 0 0 1px var(--muxpit-accent-mid)",
   },
   sessionTabName: {
     flex: 1,
@@ -747,8 +747,8 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "left",
   },
   sessionPaneCount: {
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 10,
     lineHeight: 1,
     flexShrink: 0,
@@ -801,7 +801,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid transparent",
     borderRadius: 4,
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     padding: "0 8px",
   },
@@ -809,22 +809,22 @@ const styles: Record<string, React.CSSProperties> = {
   // React drops the property entirely when a merged style mixes shorthand and
   // longhand — the button then falls back to the UA's light button face.
   tabButtonActive: {
-    borderColor: "var(--wmux-hairline-strong)",
-    background: "var(--wmux-bg-elev)",
-    color: "var(--wmux-text)",
+    borderColor: "var(--muxpit-hairline-strong)",
+    background: "var(--muxpit-bg-elev)",
+    color: "var(--muxpit-text)",
   },
   // The button name carries the emphasis; the value/graph is auxiliary status.
   tabLabel: {
     fontSize: 12,
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
   },
   tabValue: {
     maxWidth: 92,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 11,
   },
   commandButton: {
@@ -832,15 +832,15 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid transparent",
     borderRadius: 4,
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     padding: "0 8px",
     fontSize: 12,
   },
   commandButtonActive: {
-    borderColor: "var(--wmux-hairline-strong)",
-    background: "var(--wmux-bg-elev)",
-    color: "var(--wmux-text)",
+    borderColor: "var(--muxpit-hairline-strong)",
+    background: "var(--muxpit-bg-elev)",
+    color: "var(--muxpit-text)",
   },
   popover: {
     position: "absolute",
@@ -849,8 +849,8 @@ const styles: Record<string, React.CSSProperties> = {
     width: 360,
     maxHeight: "min(440px, 70vh)",
     overflow: "auto",
-    backgroundColor: "var(--wmux-bg)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    backgroundColor: "var(--muxpit-bg)",
+    border: "1px solid var(--muxpit-hairline-strong)",
     borderRadius: 6,
     boxShadow: "0 12px 32px rgba(0, 0, 0, 0.34)",
   },
@@ -868,7 +868,7 @@ const styles: Record<string, React.CSSProperties> = {
   closeBtn: {
     border: "none",
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     padding: 0,
     width: 22,
@@ -890,15 +890,15 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "50%",
   },
   hostName: {
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 13,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
   hostTarget: {
-    color: "var(--wmux-subtext)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-subtext)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 11,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -910,17 +910,17 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid transparent",
     borderRadius: 4,
     background: "transparent",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     padding: 0,
   },
   emptyButton: {
     margin: "6px 10px",
     height: 30,
-    border: "1px solid var(--wmux-hairline)",
+    border: "1px solid var(--muxpit-hairline)",
     borderRadius: 4,
-    background: "var(--wmux-bg-elev)",
-    color: "var(--wmux-subtext)",
+    background: "var(--muxpit-bg-elev)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
   },
   monitorPanel: {
@@ -934,7 +934,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 10,
   },
   monitorTarget: {
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 13,
     marginTop: 4,
     overflow: "hidden",
@@ -951,7 +951,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   metricLabel: {
     display: "block",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 10,
     fontWeight: 700,
     textTransform: "uppercase",
@@ -959,13 +959,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   metricValue: {
     display: "block",
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 14,
-    fontFamily: "var(--wmux-font-mono)",
+    fontFamily: "var(--muxpit-font-mono)",
     marginTop: 3,
   },
   statusText: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     padding: 6,
   },

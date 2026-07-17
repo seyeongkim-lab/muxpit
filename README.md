@@ -5,7 +5,7 @@ A Windows-first terminal multiplexer built for working with AI coding agents ove
 muxpit is a desktop app (Tauri + React + xterm.js) that gives you tmux-style
 workspaces, split panes, and prefix-key navigation on Windows — plus first-class
 support for driving remote sessions through `tmux -CC` (control mode) and for
-auto-launching AI CLIs (Claude Code, Codex, Gemini, Copilot, OpenCode) when you connect to
+auto-launching AI CLIs (Claude, Codex, Gemini, Copilot, OpenCode) when you connect to
 a host.
 
 ## Features
@@ -23,15 +23,15 @@ a host.
 - **Remote tmux control mode** — when a remote host has tmux 3.2+, sessions are
   wrapped in `tmux -CC` so windows/sessions are mirrored into the sidebar and
   survive disconnects (`persistMode`).
-- **AI CLI auto-split** — on SSH connect, wmux probes the remote for Claude Code, Codex, Gemini, Copilot, and OpenCode. It can start Claude automatically, and the per-pane toolbar can launch any detected CLI from the source pane's current directory.
+- **AI CLI auto-split** — on SSH connect, muxpit probes the remote for Claude, Codex, Gemini, Copilot, and OpenCode. It can start Claude automatically, and the per-pane toolbar can launch any detected CLI from the source pane's current directory.
 - **Remote session monitor** — a sidebar panel shows remote system stats (CPU,
-  memory, network throughput via uPlot charts) and lists/resumes Claude Code
+  memory, network throughput via uPlot charts) and lists/resumes Claude
   sessions on the connected host.
-- **Agent inbox** — hooks for Claude Code, Codex, Gemini, Copilot, and OpenCode report working, waiting, done, and error states. Selecting an item returns to its workspace and pane.
+- **Agent inbox** — hooks for Claude, Codex, Gemini, Copilot, and OpenCode report working, waiting, done, and error states. Selecting an item returns to its workspace and pane.
 - **Local AI launcher** — open Claude, Codex, Gemini, Copilot, or OpenCode beside the focused local terminal and inherit its current directory.
 - **Pane control CLI** — local and SSH processes can identify, list, split, focus, send text to, and read visible text from terminal panes. SSH panes use an authenticated loopback reverse-forward relay.
 - **Session resume and launch profiles** — detected sessions can be resumed in place, while user-local profiles save and recreate terminal and browser layouts with their commands, URLs, and working directories.
-- **Native subagent panes** — `wmux-cli subagent spawn` opens a child process next to its parent pane and tracks it in the inbox.
+- **Native subagent panes** — `muxpit-cli subagent spawn` opens a child process next to its parent pane and tracks it in the inbox.
 - **Scriptable browser panes** — native child webviews support navigation, current URL, read-only page snapshots, console/error capture, and macOS screenshots through the control CLI. Arbitrary JavaScript execution is not exposed.
 - **Quality-of-life** — clipboard-image paste into SSH panes, scrollback/history, session auto-save and restore, customizable themes, and Korean/Hangul font fallback.
 
@@ -83,14 +83,14 @@ a host.
 │       ├── monitor.rs             # remote system monitoring over SSH
 │       ├── sysinfo.rs             # local workspace info (git, ports, shell ctx)
 │       └── ipc.rs                 # named-pipe / unix-socket server for the CLI
-├── wmux-cli/                  # standalone CLI that talks to the app over IPC
+├── muxpit-cli/                  # standalone CLI that talks to the app over IPC
 │   └── src/main.rs            # notifications, hooks, workspace and pane control
 └── docs/                      # design plans
 ```
 
-The app and the `wmux-cli` companion CLI communicate over a local IPC channel (named pipe
-`\\.\pipe\wmux` on Windows, `/tmp/wmux.sock` on Unix). The CLI is stateless; the
-frontend mirrors the workspace list to the backend so `wmux-cli ls` can read it.
+The app and the `muxpit-cli` companion CLI communicate over a local IPC channel (named pipe
+`\\.\pipe\muxpit` on Windows, `/tmp/muxpit.sock` on Unix). The CLI is stateless; the
+frontend mirrors the workspace list to the backend so `muxpit-cli ls` can read it.
 
 ## Getting started
 
@@ -117,35 +117,35 @@ Build the companion CLI:
 
 ```bash
 pnpm build:cli
-WMUX_CLI_TARGET=x86_64-pc-windows-msvc pnpm build:cli
+MUXPIT_CLI_TARGET=x86_64-pc-windows-msvc pnpm build:cli
 # then, with the app running:
-wmux-cli ping
-wmux-cli notify "Build done" "All tests passed"
-wmux-cli ls
-wmux-cli identify
-wmux-cli split --direction horizontal --command codex
-wmux-cli subagent spawn --command "codex exec 'run tests'" --label tests
-wmux-cli hooks setup --yes
-wmux-cli browser open https://example.com
-wmux-cli browser navigate https://example.com
-wmux-cli browser snapshot
-wmux-cli send-text --enter "npm test"
-wmux-cli read-screen --rows 40
+muxpit-cli ping
+muxpit-cli notify "Build done" "All tests passed"
+muxpit-cli ls
+muxpit-cli identify
+muxpit-cli split --direction horizontal --command codex
+muxpit-cli subagent spawn --command "codex exec 'run tests'" --label tests
+muxpit-cli hooks setup --yes
+muxpit-cli browser open https://example.com
+muxpit-cli browser navigate https://example.com
+muxpit-cli browser snapshot
+muxpit-cli send-text --enter "npm test"
+muxpit-cli read-screen --rows 40
 ```
 
-Pane control commands require the `WMUX_CONTROL_TOKEN` injected into muxpit terminal processes. SSH panes receive a remote helper and connect to the same allowlisted control API through a per-pane loopback reverse forward. The relay does not bind to a public interface.
+Pane control commands require the `MUXPIT_CONTROL_TOKEN` injected into muxpit terminal processes. SSH panes receive a remote helper and connect to the same allowlisted control API through a per-pane loopback reverse forward. The relay does not bind to a public interface.
 
-`wmux-cli hooks setup --yes` installs muxpit-owned hook entries for supported CLIs without replacing unrelated user hooks. Installed hooks do nothing outside a muxpit pane. Run the setup command on a remote host too when its agent lifecycle events should use the SSH relay and appear in the inbox.
+`muxpit-cli hooks setup --yes` installs muxpit-owned hook entries for supported CLIs without replacing unrelated user hooks. Installed hooks do nothing outside a muxpit pane. Run the setup command on a remote host too when its agent lifecycle events should use the SSH relay and appear in the inbox.
 
 Release bundles include the companion CLI:
 
-- Linux `.deb`/`.rpm`: `/usr/bin/wmux-cli`
-- Linux AppImage: bundled inside the AppImage under `usr/bin/wmux-cli`
-- Windows installer: `wmux-cli.exe` next to `muxpit.exe` in the install directory
-- macOS `.app`: `Contents/MacOS/wmux-cli`; Settings can install
-  `~/.local/bin/wmux-cli` as a symlink for terminal use
+- Linux `.deb`/`.rpm`: `/usr/bin/muxpit-cli`
+- Linux AppImage: bundled inside the AppImage under `usr/bin/muxpit-cli`
+- Windows installer: `muxpit-cli.exe` next to `muxpit.exe` in the install directory
+- macOS `.app`: `Contents/MacOS/muxpit-cli`; Settings can install
+  `~/.local/bin/muxpit-cli` as a symlink for terminal use
 
-For cross-target packaging, set `WMUX_CLI_TARGET` to the Tauri/Rust target triple
+For cross-target packaging, set `MUXPIT_CLI_TARGET` to the Tauri/Rust target triple
 before `pnpm tauri build` so the sidecar CLI is prepared for the same target.
 
 ## Keyboard shortcuts

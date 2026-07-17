@@ -12,15 +12,15 @@
   width: 28px;
   height: 28px;
   flex: 0 0 auto;
-  border: 1px solid var(--wmux-hairline-strong, var(--line, #363e49));
-  background: var(--wmux-bg, #0e1116);
+  border: 1px solid var(--muxpit-hairline-strong, var(--line, #363e49));
+  background: var(--muxpit-bg, #0e1116);
 }
 
 .agent-image-picker {
   display: grid;
   place-items: center;
   padding: 0;
-  color: var(--wmux-subtext, var(--muted, #9199a8));
+  color: var(--muxpit-subtext, var(--muted, #9199a8));
   cursor: pointer;
 }
 

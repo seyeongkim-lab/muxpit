@@ -16,9 +16,9 @@ pub(crate) struct ControlRequest {
 impl ControlContext {
     pub(crate) fn from_env() -> Self {
         Self {
-            origin_workspace_id: non_empty_env("WMUX_WORKSPACE_ID"),
-            origin_surface_id: non_empty_env("WMUX_SURFACE_ID"),
-            control_token: non_empty_env("WMUX_CONTROL_TOKEN"),
+            origin_workspace_id: non_empty_env("MUXPIT_WORKSPACE_ID"),
+            origin_surface_id: non_empty_env("MUXPIT_SURFACE_ID"),
+            control_token: non_empty_env("MUXPIT_CONTROL_TOKEN"),
         }
     }
 }
@@ -43,9 +43,9 @@ pub(crate) fn parse_control_request(
     args: &[String],
     context: ControlContext,
 ) -> Result<ControlRequest, String> {
-    let origin_workspace_id = required_context(context.origin_workspace_id, "WMUX_WORKSPACE_ID")?;
-    let origin_surface_id = required_context(context.origin_surface_id, "WMUX_SURFACE_ID")?;
-    let control_token = required_context(context.control_token, "WMUX_CONTROL_TOKEN")?;
+    let origin_workspace_id = required_context(context.origin_workspace_id, "MUXPIT_WORKSPACE_ID")?;
+    let origin_surface_id = required_context(context.origin_surface_id, "MUXPIT_SURFACE_ID")?;
+    let control_token = required_context(context.control_token, "MUXPIT_CONTROL_TOKEN")?;
     let (method, args) = match command {
         "list-panes" => ("list-surfaces", args),
         "subagent" => ("spawn-subagent", args),
@@ -61,7 +61,7 @@ pub(crate) fn parse_control_request(
                     "console" => "browser-console",
                     "screenshot" => "browser-screenshot",
                     _ => return Err(
-                        "Usage: wmux-cli browser <open|navigate|reload|url|snapshot|console|screenshot>"
+                        "Usage: muxpit-cli browser <open|navigate|reload|url|snapshot|console|screenshot>"
                             .to_string(),
                     ),
                 };
@@ -154,7 +154,7 @@ pub(crate) fn parse_control_request(
         }
         "spawn-subagent" => {
             if positional.as_slice() != ["spawn"] {
-                return Err("Usage: wmux-cli subagent spawn --command <command>".to_string());
+                return Err("Usage: muxpit-cli subagent spawn --command <command>".to_string());
             }
             let command = split_command
                 .filter(|value| !value.is_empty())
@@ -185,7 +185,7 @@ pub(crate) fn parse_control_request(
         }
         "browser-open" | "browser-navigate" => {
             if positional.len() != 1 {
-                return Err("Usage: wmux-cli browser <open|navigate> <url>".to_string());
+                return Err("Usage: muxpit-cli browser <open|navigate> <url>".to_string());
             }
             params.insert("url".to_string(), Value::String(positional.remove(0)));
         }
@@ -209,7 +209,7 @@ fn non_empty_env(name: &str) -> Option<String> {
 }
 
 fn required_context(value: Option<String>, name: &str) -> Result<String, String> {
-    value.ok_or_else(|| format!("{name} is missing; run this command inside a wmux terminal"))
+    value.ok_or_else(|| format!("{name} is missing; run this command inside a muxpit terminal"))
 }
 
 #[cfg(test)]

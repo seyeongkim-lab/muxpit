@@ -162,8 +162,8 @@ mod tests {
     #[test]
     fn prepare_socket_parent_does_not_chmod_override_parent() {
         let parent =
-            std::env::temp_dir().join(format!("wmux-override-parent-test-{}", std::process::id()));
-        let socket = parent.join("wmux.sock");
+            std::env::temp_dir().join(format!("muxpit-override-parent-test-{}", std::process::id()));
+        let socket = parent.join("muxpit.sock");
         std::fs::create_dir_all(&parent).unwrap();
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -177,8 +177,8 @@ mod tests {
     #[test]
     fn prepare_socket_parent_secures_managed_parent() {
         let parent =
-            std::env::temp_dir().join(format!("wmux-managed-parent-test-{}", std::process::id()));
-        let socket = parent.join("wmux.sock");
+            std::env::temp_dir().join(format!("muxpit-managed-parent-test-{}", std::process::id()));
+        let socket = parent.join("muxpit.sock");
 
         prepare_socket_parent(&socket, true).unwrap();
 

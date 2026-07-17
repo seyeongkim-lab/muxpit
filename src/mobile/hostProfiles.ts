@@ -8,7 +8,7 @@ export interface HostProfile {
   trustedFingerprint?: string;
 }
 
-const STORAGE_KEY = "wmux-mobile-hosts-v1";
+const STORAGE_KEY = "muxpit-mobile-hosts-v1";
 
 const isHostProfile = (value: unknown): value is HostProfile => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;

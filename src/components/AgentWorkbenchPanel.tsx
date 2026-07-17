@@ -143,8 +143,8 @@ interface DesktopTargetRuntimeProps {
 const MIN_WORKBENCH_WIDTH = 420;
 const MIN_TERMINAL_WIDTH = 280;
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
-const DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v2:";
-const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v1:";
+const DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v2:";
+const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v1:";
 const WORKBENCH_PERSIST_DELAY_MS = 200;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
@@ -923,7 +923,7 @@ const DesktopTargetRuntime = ({
         }
         try {
           const message = JSON.parse(line) as Record<string, unknown>;
-          if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
+          if (message.type === "muxpit_sessions" && Array.isArray(message.sessions)) {
             meta.handledPayload = true;
             const timeout = helperTimeouts.current.get(event.channelId);
             if (timeout) clearTimeout(timeout);

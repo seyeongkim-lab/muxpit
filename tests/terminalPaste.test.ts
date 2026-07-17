@@ -110,7 +110,7 @@ test("terminal paste uploads clipboard images for spawned SSH panes", async () =
       pushImageToRemote: async ({ sshCommand, imageBase64 }) => {
         assert.equal(sshCommand, "ssh host");
         assert.equal(imageBase64, "aW1hZ2U=");
-        return "/tmp/wmux-image.png";
+        return "/tmp/muxpit-image.png";
       },
     },
     surface,
@@ -118,7 +118,7 @@ test("terminal paste uploads clipboard images for spawned SSH panes", async () =
     spawnSshConnection: null,
   });
 
-  assert.deepEqual(pasted, ["/tmp/wmux-image.png "]);
+  assert.deepEqual(pasted, ["/tmp/muxpit-image.png "]);
 });
 
 test("terminal image paste quotes Windows local paths", async () => {
@@ -127,7 +127,7 @@ test("terminal image paste quotes Windows local paths", async () => {
   await pasteTerminalImage({
     image: createPngBlob("local-image"),
     imageStore: {
-      saveImageLocally: async () => String.raw`C:\Users\Jane Doe\.wmux\screenshots\local.png`,
+      saveImageLocally: async () => String.raw`C:\Users\Jane Doe\.muxpit\screenshots\local.png`,
       pushImageToRemote: async () => {
         throw new Error("unexpected upload");
       },
@@ -138,7 +138,7 @@ test("terminal image paste quotes Windows local paths", async () => {
     platform: "windows",
   });
 
-  assert.deepEqual(pasted, [String.raw`"C:\Users\Jane Doe\.wmux\screenshots\local.png" `]);
+  assert.deepEqual(pasted, [String.raw`"C:\Users\Jane Doe\.muxpit\screenshots\local.png" `]);
 });
 
 test("terminal paste saves clipboard images for local panes", async () => {
@@ -157,7 +157,7 @@ test("terminal paste saves clipboard images for local panes", async () => {
     imageStore: {
       saveImageLocally: async ({ imageBase64 }) => {
         assert.equal(imageBase64, "bG9jYWwtaW1hZ2U=");
-        return "/home/me/.wmux/screenshots/local.png";
+        return "/home/me/.muxpit/screenshots/local.png";
       },
       pushImageToRemote: async () => {
         throw new Error("unexpected upload");
@@ -169,7 +169,7 @@ test("terminal paste saves clipboard images for local panes", async () => {
     platform: "linux",
   });
 
-  assert.deepEqual(pasted, ["/home/me/.wmux/screenshots/local.png "]);
+  assert.deepEqual(pasted, ["/home/me/.muxpit/screenshots/local.png "]);
 });
 
 test("terminal paste uploads an image supplied by a native paste event", async () => {
@@ -327,7 +327,7 @@ test("terminal paste event saves native clipboard images for local panes", async
     imageStore: {
       saveImageLocally: async ({ imageBase64 }) => {
         assert.equal(imageBase64, "aW1hZ2U=");
-        return "/home/me/.wmux/screenshots/event.png";
+        return "/home/me/.muxpit/screenshots/event.png";
       },
       pushImageToRemote: async () => {
         throw new Error("unexpected upload");
@@ -341,7 +341,7 @@ test("terminal paste event saves native clipboard images for local panes", async
 
   assert.equal(handled, true);
   assert.deepEqual(calls, ["preventDefault", "stopPropagation"]);
-  assert.deepEqual(pasted, ["/home/me/.wmux/screenshots/event.png "]);
+  assert.deepEqual(pasted, ["/home/me/.muxpit/screenshots/event.png "]);
 });
 
 test("terminal paste event falls back to text for local panes without images", async () => {
@@ -514,19 +514,19 @@ test("terminal paste target resolves local and remote image destinations", () =>
 
 test("terminal paste formats image paths for the target shell", () => {
   assert.equal(
-    formatPastedImagePath(String.raw`C:\Users\Jane Doe\.wmux\screenshots\img.png`, { kind: "local" }, "windows"),
-    String.raw`"C:\Users\Jane Doe\.wmux\screenshots\img.png"`,
+    formatPastedImagePath(String.raw`C:\Users\Jane Doe\.muxpit\screenshots\img.png`, { kind: "local" }, "windows"),
+    String.raw`"C:\Users\Jane Doe\.muxpit\screenshots\img.png"`,
   );
   assert.equal(
-    formatPastedImagePath("/Users/Jane Doe/.wmux/screenshots/img.png", { kind: "local" }, "macos"),
-    "'/Users/Jane Doe/.wmux/screenshots/img.png'",
+    formatPastedImagePath("/Users/Jane Doe/.muxpit/screenshots/img.png", { kind: "local" }, "macos"),
+    "'/Users/Jane Doe/.muxpit/screenshots/img.png'",
   );
   assert.equal(
-    formatPastedImagePath("/home/Jane Doe/.wmux/screenshots/img.png", {
+    formatPastedImagePath("/home/Jane Doe/.muxpit/screenshots/img.png", {
       kind: "remote",
       sshCommand: "ssh host",
       sshConnection: null,
     }),
-    "'/home/Jane Doe/.wmux/screenshots/img.png'",
+    "'/home/Jane Doe/.muxpit/screenshots/img.png'",
   );
 });

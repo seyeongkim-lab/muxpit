@@ -23,7 +23,7 @@ export interface SshHost {
   color?: string;
   /**
    * Persist-mode policy for new sessions:
-   * - `"on"`: always wrap the remote shell in `tmux -CC new -A -s wmux-<host>`
+   * - `"on"`: always wrap the remote shell in `tmux -CC new -A -s muxpit-<host>`
    * - `"off"`: never wrap; plain SSH
    * - `"auto"` (default): probe the host for tmux 3.2+ at connect time and wrap when found
    *
@@ -56,7 +56,7 @@ interface SshHostsState {
   reorderHosts: (ids: string[]) => void;
 }
 
-const STORAGE_KEY = "wmux-ssh-hosts";
+const STORAGE_KEY = "muxpit-ssh-hosts";
 
 // Strip an accidental leading dot from id_rsa/ed25519/ecdsa/dsa filenames in saved keyPaths
 // (e.g. `~/.ssh/.id_ed25519` → `~/.ssh/id_ed25519`). OpenSSH prints "Identity file ... not

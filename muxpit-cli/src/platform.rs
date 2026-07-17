@@ -151,13 +151,13 @@ fn unix_hook_command(
     let current_exe = current_exe
         .map(|path| shell_single_quote(path.to_string_lossy().as_ref()))
         .unwrap_or_else(|| "\"\"".to_string());
-    let marker = shell_single_quote(&format!("wmux-cli hooks {agent_name} {event_name}"));
+    let marker = shell_single_quote(&format!("muxpit-cli hooks {agent_name} {event_name}"));
 
     format!(
-        ": {marker}; wmux_cli=\"${{WMUX_BUNDLED_CLI_PATH:-}}\"; \
-         if [ -z \"$wmux_cli\" ] || [ ! -x \"$wmux_cli\" ]; then wmux_cli={current_exe}; fi; \
-         if [ -n \"${{WMUX_SURFACE_ID:-}}\" ] && [ \"${{{disabled_env}:-}}\" != \"1\" ] && [ -n \"$wmux_cli\" ] && [ -x \"$wmux_cli\" ]; then \
-         \"$wmux_cli\" hooks {agent_name} {event_name} || echo '{{}}'; else echo '{{}}'; fi",
+        ": {marker}; muxpit_cli=\"${{MUXPIT_BUNDLED_CLI_PATH:-}}\"; \
+         if [ -z \"$muxpit_cli\" ] || [ ! -x \"$muxpit_cli\" ]; then muxpit_cli={current_exe}; fi; \
+         if [ -n \"${{MUXPIT_SURFACE_ID:-}}\" ] && [ \"${{{disabled_env}:-}}\" != \"1\" ] && [ -n \"$muxpit_cli\" ] && [ -x \"$muxpit_cli\" ]; then \
+         \"$muxpit_cli\" hooks {agent_name} {event_name} || echo '{{}}'; else echo '{{}}'; fi",
     )
 }
 
@@ -172,10 +172,10 @@ fn windows_hook_command(
         .map(|path| powershell_single_quote(path.to_string_lossy().as_ref()))
         .unwrap_or_else(|| "''".to_string());
     let script = format!(
-        "$wmuxCli=$env:WMUX_BUNDLED_CLI_PATH; \
-         if ([string]::IsNullOrWhiteSpace($wmuxCli) -or -not (Test-Path -LiteralPath $wmuxCli -PathType Leaf)) {{ $wmuxCli={current_exe}; }}; \
-         if (-not [string]::IsNullOrWhiteSpace($env:WMUX_SURFACE_ID) -and $env:{disabled_env} -ne '1' -and -not [string]::IsNullOrWhiteSpace($wmuxCli) -and (Test-Path -LiteralPath $wmuxCli -PathType Leaf)) {{ \
-         & $wmuxCli hooks {agent_name} {event_name}; if ($LASTEXITCODE -ne 0) {{ Write-Output '{{}}' }} \
+        "$muxpitCli=$env:MUXPIT_BUNDLED_CLI_PATH; \
+         if ([string]::IsNullOrWhiteSpace($muxpitCli) -or -not (Test-Path -LiteralPath $muxpitCli -PathType Leaf)) {{ $muxpitCli={current_exe}; }}; \
+         if (-not [string]::IsNullOrWhiteSpace($env:MUXPIT_SURFACE_ID) -and $env:{disabled_env} -ne '1' -and -not [string]::IsNullOrWhiteSpace($muxpitCli) -and (Test-Path -LiteralPath $muxpitCli -PathType Leaf)) {{ \
+         & $muxpitCli hooks {agent_name} {event_name}; if ($LASTEXITCODE -ne 0) {{ Write-Output '{{}}' }} \
          }} else {{ Write-Output '{{}}' }}"
     );
 
@@ -214,30 +214,30 @@ mod tests {
     fn unix_hook_command_contains_posix_guards() {
         let command = unix_hook_command(
             "codex",
-            "WMUX_CODEX_HOOKS_DISABLED",
+            "MUXPIT_CODEX_HOOKS_DISABLED",
             "PermissionRequest",
-            Some(Path::new("/tmp/wmux cli's/bin/wmux-cli")),
+            Some(Path::new("/tmp/muxpit cli's/bin/muxpit-cli")),
         );
 
-        assert!(command.contains("WMUX_BUNDLED_CLI_PATH"));
-        assert!(command.contains("WMUX_SURFACE_ID"));
-        assert!(command.contains("${WMUX_CODEX_HOOKS_DISABLED:-}"));
+        assert!(command.contains("MUXPIT_BUNDLED_CLI_PATH"));
+        assert!(command.contains("MUXPIT_SURFACE_ID"));
+        assert!(command.contains("${MUXPIT_CODEX_HOOKS_DISABLED:-}"));
         assert!(command.contains("hooks codex PermissionRequest"));
-        assert!(command.contains("'/tmp/wmux cli'\\''s/bin/wmux-cli'"));
+        assert!(command.contains("'/tmp/muxpit cli'\\''s/bin/muxpit-cli'"));
     }
 
     #[test]
     fn windows_hook_command_uses_powershell_template() {
         let command = windows_hook_command(
             "claude",
-            "WMUX_CLAUDE_HOOKS_DISABLED",
+            "MUXPIT_CLAUDE_HOOKS_DISABLED",
             "Notification",
-            Some(Path::new(r"C:\Program Files\wmux\wmux-cli.exe")),
+            Some(Path::new(r"C:\Program Files\muxpit\muxpit-cli.exe")),
         );
 
         assert!(command.starts_with("powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "));
-        assert!(command.contains("$env:WMUX_CLAUDE_HOOKS_DISABLED -ne '1'"));
+        assert!(command.contains("$env:MUXPIT_CLAUDE_HOOKS_DISABLED -ne '1'"));
         assert!(command.contains("hooks claude Notification"));
-        assert!(command.contains(r"C:\Program Files\wmux\wmux-cli.exe"));
+        assert!(command.contains(r"C:\Program Files\muxpit\muxpit-cli.exe"));
     }
 }

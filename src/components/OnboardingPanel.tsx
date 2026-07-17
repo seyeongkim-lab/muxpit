@@ -22,9 +22,9 @@ export const OnboardingPanel = () => {
         <div style={styles.header}>
           <div>
             <div style={styles.eyebrow}>AI WORKBENCH SETUP</div>
-            <div style={styles.title}>Set up wmux for AI CLI work</div>
+            <div style={styles.title}>Set up muxpit for AI CLI work</div>
           </div>
-          <button className="wmux-btn" onClick={() => setCompleted(true)} style={styles.laterButton}>
+          <button className="muxpit-btn" onClick={() => setCompleted(true)} style={styles.laterButton}>
             Do this later
           </button>
         </div>
@@ -32,18 +32,18 @@ export const OnboardingPanel = () => {
           <section style={styles.step}>
             <div style={styles.stepNumber}>1</div>
             <div style={styles.stepBody}>
-              <div style={styles.stepTitle}>Install the wmux control CLI</div>
-              <div style={styles.description}>AI tools use wmux-cli to split panes, send text, read terminal output, and open the browser pane.</div>
+              <div style={styles.stepTitle}>Install the muxpit control CLI</div>
+              <div style={styles.description}>AI tools use muxpit-cli to split panes, send text, read terminal output, and open the browser pane.</div>
               {isMacOsPlatform() && (
                 <div style={styles.actionRow}>
-                  <button className="wmux-btn" onClick={install} disabled={installing} style={styles.primaryButton}>
-                    {installing ? "Installing..." : "Install wmux-cli"}
+                  <button className="muxpit-btn" onClick={install} disabled={installing} style={styles.primaryButton}>
+                    {installing ? "Installing..." : "Install muxpit-cli"}
                   </button>
                   {status && <span style={styles.status}>{status}</span>}
                 </div>
               )}
               {!isMacOsPlatform() && (
-                <div style={{ ...styles.description, marginTop: 6 }}>Linux and Windows packages include wmux-cli in the install directory.</div>
+                <div style={{ ...styles.description, marginTop: 6 }}>Linux and Windows packages include muxpit-cli in the install directory.</div>
               )}
             </div>
           </section>
@@ -51,8 +51,8 @@ export const OnboardingPanel = () => {
             <div style={styles.stepNumber}>2</div>
             <div style={styles.stepBody}>
               <div style={styles.stepTitle}>Connect agent hooks</div>
-              <div style={styles.description}>Run this once in a wmux terminal. Agent status then appears in Inbox.</div>
-              <code style={styles.command}>wmux-cli hooks setup --yes</code>
+              <div style={styles.description}>Run this once in a muxpit terminal. Agent status then appears in Inbox.</div>
+              <code style={styles.command}>muxpit-cli hooks setup --yes</code>
             </div>
           </section>
           <section style={styles.step}>
@@ -85,7 +85,7 @@ export const OnboardingPanel = () => {
           </section>
         </div>
         <div style={styles.footer}>
-          <button className="wmux-btn" onClick={() => setCompleted(true)} style={styles.finishButton}>
+          <button className="muxpit-btn" onClick={() => setCompleted(true)} style={styles.finishButton}>
             Finish setup
           </button>
         </div>
@@ -109,8 +109,8 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "calc(100vw - 40px)",
     maxHeight: "calc(100vh - 40px)",
     overflow: "auto",
-    background: "var(--wmux-bg-elev)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    background: "var(--muxpit-bg-elev)",
+    border: "1px solid var(--muxpit-hairline-strong)",
     boxShadow: "0 18px 56px rgba(0, 0, 0, 0.42)",
   },
   header: {
@@ -118,13 +118,13 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "18px 20px",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
   },
-  eyebrow: { color: "var(--wmux-accent)", fontSize: 10, fontWeight: 700, letterSpacing: "0.08em" },
-  title: { marginTop: 5, color: "var(--wmux-text)", fontSize: 19, fontWeight: 650 },
-  laterButton: { color: "var(--wmux-subtext)", background: "transparent", border: "none", fontSize: 12 },
+  eyebrow: { color: "var(--muxpit-accent)", fontSize: 10, fontWeight: 700, letterSpacing: "0.08em" },
+  title: { marginTop: 5, color: "var(--muxpit-text)", fontSize: 19, fontWeight: 650 },
+  laterButton: { color: "var(--muxpit-subtext)", background: "transparent", border: "none", fontSize: 12 },
   content: { padding: "4px 20px" },
-  step: { display: "flex", gap: 12, padding: "15px 0", borderBottom: "1px solid var(--wmux-hairline)" },
+  step: { display: "flex", gap: 12, padding: "15px 0", borderBottom: "1px solid var(--muxpit-hairline)" },
   stepNumber: {
     width: 24,
     height: 24,
@@ -132,40 +132,40 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "var(--wmux-text)",
-    background: "var(--wmux-bg)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    color: "var(--muxpit-text)",
+    background: "var(--muxpit-bg)",
+    border: "1px solid var(--muxpit-hairline-strong)",
     fontSize: 11,
   },
   stepBody: { flex: 1, minWidth: 0 },
-  stepTitle: { color: "var(--wmux-text)", fontSize: 13, fontWeight: 600, marginBottom: 5 },
-  description: { color: "var(--wmux-subtext)", fontSize: 12, lineHeight: 1.5 },
+  stepTitle: { color: "var(--muxpit-text)", fontSize: 13, fontWeight: 600, marginBottom: 5 },
+  description: { color: "var(--muxpit-subtext)", fontSize: 12, lineHeight: 1.5 },
   actionRow: { display: "flex", alignItems: "center", gap: 9, marginTop: 9 },
   primaryButton: {
     padding: "7px 10px",
-    color: "var(--wmux-bg)",
-    background: "var(--wmux-accent)",
-    border: "1px solid var(--wmux-accent)",
+    color: "var(--muxpit-bg)",
+    background: "var(--muxpit-accent)",
+    border: "1px solid var(--muxpit-accent)",
   },
-  status: { color: "var(--wmux-subtext)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" },
+  status: { color: "var(--muxpit-subtext)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" },
   command: {
     display: "block",
     marginTop: 8,
     padding: "9px 10px",
-    color: "var(--wmux-text)",
-    background: "var(--wmux-bg)",
-    border: "1px solid var(--wmux-hairline)",
-    fontFamily: "var(--wmux-font-mono)",
+    color: "var(--muxpit-text)",
+    background: "var(--muxpit-bg)",
+    border: "1px solid var(--muxpit-hairline)",
+    fontFamily: "var(--muxpit-font-mono)",
     fontSize: 12,
   },
-  checkLabel: { display: "flex", alignItems: "center", gap: 7, marginTop: 8, color: "var(--wmux-text)", fontSize: 12 },
-  shortcutRow: { display: "flex", flexDirection: "column", gap: 6, padding: "14px 0", color: "var(--wmux-subtext)", fontSize: 11 },
+  checkLabel: { display: "flex", alignItems: "center", gap: 7, marginTop: 8, color: "var(--muxpit-text)", fontSize: 12 },
+  shortcutRow: { display: "flex", flexDirection: "column", gap: 6, padding: "14px 0", color: "var(--muxpit-subtext)", fontSize: 11 },
   footer: { display: "flex", justifyContent: "flex-end", padding: "12px 20px 18px" },
   finishButton: {
     padding: "8px 16px",
-    color: "var(--wmux-bg)",
-    background: "var(--wmux-accent)",
-    border: "1px solid var(--wmux-accent)",
+    color: "var(--muxpit-bg)",
+    background: "var(--muxpit-accent)",
+    border: "1px solid var(--muxpit-accent)",
     fontWeight: 600,
   },
 };

@@ -3,7 +3,7 @@ use portable_pty::CommandBuilder;
 #[cfg(windows)]
 use super::command::silent_command;
 
-pub fn apply_wmux_env(
+pub fn apply_muxpit_env(
     cmd: &mut CommandBuilder,
     workspace_id: Option<&str>,
     surface_id: Option<&str>,
@@ -11,30 +11,30 @@ pub fn apply_wmux_env(
     control_token: Option<&str>,
 ) {
     if let Some(workspace_id) = workspace_id.filter(|value| !value.is_empty()) {
-        cmd.env("WMUX_WORKSPACE_ID", workspace_id);
+        cmd.env("MUXPIT_WORKSPACE_ID", workspace_id);
     }
     if let Some(surface_id) = surface_id.filter(|value| !value.is_empty()) {
-        cmd.env("WMUX_SURFACE_ID", surface_id);
+        cmd.env("MUXPIT_SURFACE_ID", surface_id);
     }
     if let Some(agent_session_token) = agent_session_token.filter(|value| !value.is_empty()) {
-        cmd.env("WMUX_AGENT_SESSION_TOKEN", agent_session_token);
+        cmd.env("MUXPIT_AGENT_SESSION_TOKEN", agent_session_token);
     }
     if let Some(control_token) = control_token.filter(|value| !value.is_empty()) {
-        cmd.env("WMUX_CONTROL_TOKEN", control_token);
+        cmd.env("MUXPIT_CONTROL_TOKEN", control_token);
     }
 
     #[cfg(unix)]
-    cmd.env("WMUX_SOCKET_PATH", super::paths::ipc_socket_path());
+    cmd.env("MUXPIT_SOCKET_PATH", super::paths::ipc_socket_path());
     #[cfg(windows)]
-    cmd.env("WMUX_PIPE_NAME", super::paths::ipc_pipe_name());
+    cmd.env("MUXPIT_PIPE_NAME", super::paths::ipc_pipe_name());
 
-    match std::env::var("WMUX_BUNDLED_CLI_PATH") {
+    match std::env::var("MUXPIT_BUNDLED_CLI_PATH") {
         Ok(cli_path) if !cli_path.is_empty() => {
-            cmd.env("WMUX_BUNDLED_CLI_PATH", cli_path);
+            cmd.env("MUXPIT_BUNDLED_CLI_PATH", cli_path);
         }
         _ => {
             if let Some(cli_path) = super::cli::bundled_cli_path() {
-                cmd.env("WMUX_BUNDLED_CLI_PATH", cli_path);
+                cmd.env("MUXPIT_BUNDLED_CLI_PATH", cli_path);
             }
         }
     }
@@ -109,9 +109,9 @@ fn apply_windows_cwd_reporting_hook(cmd: &mut CommandBuilder, kind: WindowsShell
 
 #[cfg(windows)]
 const POWERSHELL_CWD_REPORTING_HOOK: &str = r#"
-if (-not $global:__wmuxCwdHooked) {
-  $global:__wmuxCwdHooked = $true
-  $global:__wmuxOriginalPrompt = (Get-Command prompt -CommandType Function).ScriptBlock
+if (-not $global:__muxpitCwdHooked) {
+  $global:__muxpitCwdHooked = $true
+  $global:__muxpitOriginalPrompt = (Get-Command prompt -CommandType Function).ScriptBlock
   function global:prompt {
     try {
       $loc = Get-Location
@@ -120,7 +120,7 @@ if (-not $global:__wmuxCwdHooked) {
         [Console]::Write("$([char]27)]7;$uri$([char]7)")
       }
     } catch {}
-    & $global:__wmuxOriginalPrompt
+    & $global:__muxpitOriginalPrompt
   }
 }
 "#;

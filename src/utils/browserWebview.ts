@@ -1,5 +1,5 @@
 export const browserWebviewLabel = (surfaceId: string): string =>
-  `wmux-browser-${surfaceId.replace(/[^a-zA-Z0-9:_-]+/g, "-")}`;
+  `muxpit-browser-${surfaceId.replace(/[^a-zA-Z0-9:_-]+/g, "-")}`;
 
 export const normalizeBrowserUrl = (value: string): string => {
   const trimmed = value.trim();

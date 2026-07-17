@@ -14,8 +14,8 @@ export const buildAiRemoteCommand = (command: string, cwd?: string): string => {
   const inner = `${launch}; exec "\${SHELL:-/bin/sh}" -l`;
   const outer = [
     "shell=${SHELL:-/bin/sh}",
-    'case "$shell" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) wmux_shell="$shell" ;; *) wmux_shell=/bin/sh ;; esac',
-    `exec "$wmux_shell" -lc ${quotePosixShellArg(inner)}`,
+    'case "$shell" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) muxpit_shell="$shell" ;; *) muxpit_shell=/bin/sh ;; esac',
+    `exec "$muxpit_shell" -lc ${quotePosixShellArg(inner)}`,
   ].join("; ");
   return `/bin/sh -lc ${quotePosixShellArg(outer)}`;
 };

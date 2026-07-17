@@ -142,7 +142,7 @@ export const pasteTerminalImage = async ({
       : await imageStore.saveImageLocally({ imageBase64 });
     surface.paste(formatPastedImagePath(path, target, platform) + " ");
   } catch (err) {
-    logError("[wmux] image paste failed:", err);
+    logError("[muxpit] image paste failed:", err);
     surface.write(`\r\n\x1b[31m[image paste failed: ${err}]\x1b[0m\r\n`);
   }
 };

@@ -3172,6 +3172,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "muxpit"
+version = "0.2.17"
+dependencies = [
+ "android-native-keyring-store",
+ "base64 0.22.1",
+ "getrandom 0.2.17",
+ "jni",
+ "keyring-core",
+ "listeners",
+ "log",
+ "muxpit-platform",
+ "portable-pty",
+ "russh",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-log",
+ "tauri-plugin-notification",
+ "tauri-plugin-shell",
+ "tokio",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "muxpit-platform"
+version = "0.0.1"
+
+[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7572,37 +7603,6 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-wlr",
 ]
-
-[[package]]
-name = "wmux"
-version = "0.2.17"
-dependencies = [
- "android-native-keyring-store",
- "base64 0.22.1",
- "getrandom 0.2.17",
- "jni",
- "keyring-core",
- "listeners",
- "log",
- "portable-pty",
- "russh",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-log",
- "tauri-plugin-notification",
- "tauri-plugin-shell",
- "tokio",
- "windows-sys 0.59.0",
- "wmux-platform",
-]
-
-[[package]]
-name = "wmux-platform"
-version = "0.0.1"
 
 [[package]]
 name = "writeable"

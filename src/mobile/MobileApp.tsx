@@ -78,7 +78,7 @@ import "./mobile.css";
 type Provider = MobileProvider;
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
-const MOBILE_WORKBENCH_STORAGE_KEY = "wmux-mobile-agent-workbench-v1";
+const MOBILE_WORKBENCH_STORAGE_KEY = "muxpit-mobile-agent-workbench-v1";
 const MOBILE_PROVIDERS = ["claude", "codex", "gemini", "copilot", "opencode"] as const;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const WORKBENCH_PERSIST_DELAY_MS = 200;
@@ -537,7 +537,7 @@ export const MobileApp = () => {
       }
       try {
         const message = JSON.parse(line) as Record<string, unknown>;
-        if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
+        if (message.type === "muxpit_sessions" && Array.isArray(message.sessions)) {
           meta.handledPayload = true;
           updateDiscoveredSessions(meta.profileId, meta.provider, message.sessions as MobileSession[]);
         }
@@ -1553,7 +1553,7 @@ export const MobileApp = () => {
       }
       try {
         const message = JSON.parse(line) as Record<string, unknown>;
-        if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
+        if (message.type === "muxpit_sessions" && Array.isArray(message.sessions)) {
           meta.handledPayload = true;
           const timeout = helperTimeouts.current.get(event.channelId);
           if (timeout) clearTimeout(timeout);
@@ -2611,7 +2611,7 @@ const ConnectionView = ({
       <div className="connect-scroll">
         <header className="connect-brand">
           <span className="brand-mark">w</span>
-          <div><strong>wmux</strong><small>Remote agent workbench</small></div>
+          <div><strong>muxpit</strong><small>Remote agent workbench</small></div>
         </header>
 
         {profiles.length > 0 ? (

@@ -200,7 +200,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
                   <span style={styles.inlineStatus}>{cliInstallStatus}</span>
                 )}
               </div>
-              <div style={styles.hint}>Creates ~/.local/bin/wmux-cli for terminal use.</div>
+              <div style={styles.hint}>Creates ~/.local/bin/muxpit-cli for terminal use.</div>
             </div>
           )}
 
@@ -353,7 +353,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
               Restore Codex and Claude sessions
             </label>
             <div style={styles.hint}>
-              Stores wmux-launched Codex and Claude session IDs and directories in local app storage.
+              Stores muxpit-launched Codex and Claude session IDs and directories in local app storage.
             </div>
             <label style={{ ...styles.checkLabel, opacity: enableExperimentalAgentSessionRestore ? 1 : 0.5 }}>
               <input
@@ -525,7 +525,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
                   <span style={styles.orderNum}>{i + 1}</span>
                   <span style={{ ...styles.selectedName, fontFamily: `'${f}', monospace` }}>{f}</span>
                   <button
-                    className="wmux-btn"
+                    className="muxpit-btn"
                     style={styles.iconBtn}
                     disabled={i === 0}
                     onClick={() => moveFont(i, -1)}
@@ -534,7 +534,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
                     ↑
                   </button>
                   <button
-                    className="wmux-btn"
+                    className="muxpit-btn"
                     style={styles.iconBtn}
                     disabled={i === fontFamilies.length - 1}
                     onClick={() => moveFont(i, 1)}
@@ -543,7 +543,7 @@ export const SettingsPanel = ({ open, onClose }: SettingsPanelProps) => {
                     ↓
                   </button>
                   <button
-                    className="wmux-btn"
+                    className="muxpit-btn"
                     style={styles.iconBtn}
                     onClick={() => removeFont(f)}
                     title="Remove"

@@ -3,7 +3,7 @@ dist/
 target/
 src-tauri/target/
 src-tauri/gen/
-wmux-cli/target/
+muxpit-cli/target/
 crates/*/target/
 crates/*/Cargo.lock
 *.local

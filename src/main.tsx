@@ -21,7 +21,7 @@ class BootErrorBoundary extends Component<BootErrorBoundaryProps, BootErrorBound
   }
 
   componentDidCatch(error: unknown) {
-    console.error("[wmux] render failed:", error);
+    console.error("[muxpit] render failed:", error);
     logError("render failed", error);
   }
 
@@ -34,7 +34,7 @@ class BootErrorBoundary extends Component<BootErrorBoundaryProps, BootErrorBound
           font: "13px monospace",
           whiteSpace: "pre-wrap",
         }}>
-          {`[wmux render error] ${this.state.error instanceof Error ? this.state.error.message : String(this.state.error)}`}
+          {`[muxpit render error] ${this.state.error instanceof Error ? this.state.error.message : String(this.state.error)}`}
         </div>
       );
     }
@@ -76,8 +76,8 @@ void loadApp
     );
   })
   .catch((error) => {
-    console.error("[wmux] boot failed:", error);
+    console.error("[muxpit] boot failed:", error);
     logError("boot failed", error);
-    rootElement.textContent = `[wmux boot error] ${error instanceof Error ? error.message : String(error)}`;
+    rootElement.textContent = `[muxpit boot error] ${error instanceof Error ? error.message : String(error)}`;
     rootElement.style.cssText = "padding:16px;color:#f38ba8;font:13px monospace;white-space:pre-wrap;";
   });

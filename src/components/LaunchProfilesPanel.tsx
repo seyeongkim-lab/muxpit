@@ -45,7 +45,7 @@ export const LaunchProfilesPanel = ({ open, onClose }: LaunchProfilesPanelProps)
       <div style={styles.panel} onClick={(event) => event.stopPropagation()}>
         <div style={styles.header}>
           <span style={styles.title}>Launch profiles</span>
-          <button className="wmux-btn" onClick={onClose} style={styles.closeButton}>x</button>
+          <button className="muxpit-btn" onClick={onClose} style={styles.closeButton}>x</button>
         </div>
         <div style={styles.saveRow}>
           <input
@@ -54,7 +54,7 @@ export const LaunchProfilesPanel = ({ open, onClose }: LaunchProfilesPanelProps)
             placeholder="Profile name"
             style={styles.input}
           />
-          <button className="wmux-btn" onClick={saveCurrent} style={styles.primaryButton}>
+          <button className="muxpit-btn" onClick={saveCurrent} style={styles.primaryButton}>
             Save current
           </button>
         </div>
@@ -65,7 +65,7 @@ export const LaunchProfilesPanel = ({ open, onClose }: LaunchProfilesPanelProps)
           ) : profiles.map((profile) => (
             <div key={profile.id} style={styles.row}>
               <button
-                className="wmux-btn"
+                className="muxpit-btn"
                 onClick={() => { launch(profile.id); onClose(); }}
                 style={styles.launchButton}
               >
@@ -75,7 +75,7 @@ export const LaunchProfilesPanel = ({ open, onClose }: LaunchProfilesPanelProps)
                 </span>
               </button>
               <button
-                className="wmux-btn"
+                className="muxpit-btn"
                 onClick={() => remove(profile.id)}
                 style={styles.removeButton}
                 title="Remove profile"
@@ -105,8 +105,8 @@ const styles: Record<string, React.CSSProperties> = {
     maxHeight: "72vh",
     display: "flex",
     flexDirection: "column",
-    background: "var(--wmux-bg-elev)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    background: "var(--muxpit-bg-elev)",
+    border: "1px solid var(--muxpit-hairline-strong)",
     boxShadow: "0 16px 48px rgba(0, 0, 0, 0.35)",
   },
   header: {
@@ -114,28 +114,28 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "12px 14px",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
   },
-  title: { color: "var(--wmux-text)", fontSize: 14, fontWeight: 600 },
-  closeButton: { border: "none", background: "transparent", color: "var(--wmux-subtext)" },
+  title: { color: "var(--muxpit-text)", fontSize: 14, fontWeight: 600 },
+  closeButton: { border: "none", background: "transparent", color: "var(--muxpit-subtext)" },
   saveRow: { display: "flex", gap: 8, padding: 12 },
   input: {
     flex: 1,
     minWidth: 0,
     padding: "7px 9px",
-    color: "var(--wmux-text)",
-    background: "var(--wmux-bg)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    color: "var(--muxpit-text)",
+    background: "var(--muxpit-bg)",
+    border: "1px solid var(--muxpit-hairline-strong)",
   },
   primaryButton: {
     padding: "7px 10px",
-    color: "var(--wmux-text)",
-    background: "var(--wmux-accent)",
-    border: "1px solid var(--wmux-accent)",
+    color: "var(--muxpit-text)",
+    background: "var(--muxpit-accent)",
+    border: "1px solid var(--muxpit-accent)",
   },
   error: { padding: "0 12px 10px", color: "#f38ba8", fontSize: 12 },
   list: { overflowY: "auto", padding: "0 12px 12px" },
-  empty: { padding: 20, textAlign: "center", color: "var(--wmux-subtext)", fontSize: 12 },
+  empty: { padding: 20, textAlign: "center", color: "var(--muxpit-subtext)", fontSize: 12 },
   row: { display: "flex", gap: 6, marginTop: 6 },
   launchButton: {
     flex: 1,
@@ -143,17 +143,17 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "9px 10px",
-    color: "var(--wmux-text)",
-    background: "var(--wmux-bg)",
-    border: "1px solid var(--wmux-hairline)",
+    color: "var(--muxpit-text)",
+    background: "var(--muxpit-bg)",
+    border: "1px solid var(--muxpit-hairline)",
     textAlign: "left",
   },
   profileName: { fontSize: 13 },
-  profileTime: { fontSize: 10, color: "var(--wmux-subtext)" },
+  profileTime: { fontSize: 10, color: "var(--muxpit-subtext)" },
   removeButton: {
     width: 32,
-    color: "var(--wmux-subtext)",
-    background: "var(--wmux-bg)",
-    border: "1px solid var(--wmux-hairline)",
+    color: "var(--muxpit-subtext)",
+    background: "var(--muxpit-bg)",
+    border: "1px solid var(--muxpit-hairline)",
   },
 };

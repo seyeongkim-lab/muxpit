@@ -10,10 +10,10 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  color: var(--wmux-text);
-  background: var(--wmux-bg);
-  border-left: 1px solid var(--wmux-hairline-strong);
-  font-family: var(--wmux-font-sans, system-ui, sans-serif);
+  color: var(--muxpit-text);
+  background: var(--muxpit-bg);
+  border-left: 1px solid var(--muxpit-hairline-strong);
+  font-family: var(--muxpit-font-sans, system-ui, sans-serif);
   font-size: 13px;
 }
 
@@ -42,7 +42,7 @@
 }
 
 .agent-workbench-resizer:hover {
-  background: color-mix(in srgb, var(--wmux-accent) 42%, transparent);
+  background: color-mix(in srgb, var(--muxpit-accent) 42%, transparent);
 }
 
 .agent-workbench-empty {
@@ -62,7 +62,7 @@
 .agent-workbench-empty p {
   max-width: 310px;
   margin: 0;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -81,8 +81,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--wmux-bg-elev);
-  border-right: 1px solid var(--wmux-hairline);
+  background: var(--muxpit-bg-elev);
+  border-right: 1px solid var(--muxpit-hairline);
 }
 
 .agent-session-actions {
@@ -91,7 +91,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 9px 0 11px;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -99,8 +99,8 @@
 
 .agent-session-actions button {
   padding: 4px 7px;
-  border: 1px solid var(--wmux-hairline-strong);
-  background: var(--wmux-bg);
+  border: 1px solid var(--muxpit-hairline-strong);
+  background: var(--muxpit-bg);
   font-size: 11px;
   text-transform: none;
   cursor: pointer;
@@ -112,8 +112,8 @@
 }
 
 .agent-session-actions button.active {
-  border-color: var(--wmux-accent);
-  color: var(--wmux-accent);
+  border-color: var(--muxpit-accent);
+  color: var(--muxpit-accent);
 }
 
 .agent-session-actions .agent-workbench-close {
@@ -124,7 +124,7 @@
   padding: 0;
   border-color: transparent;
   background: transparent;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
 }
 
 .agent-session-actions .agent-workbench-close svg,
@@ -138,8 +138,8 @@
 }
 
 .agent-session-actions .agent-workbench-close:hover {
-  color: var(--wmux-text);
-  background: var(--wmux-hover);
+  color: var(--muxpit-text);
+  background: var(--muxpit-hover);
 }
 
 .agent-new-session {
@@ -157,7 +157,7 @@
 }
 
 .agent-new-session label > span {
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -167,19 +167,19 @@
 .agent-new-session > button {
   min-width: 0;
   height: 28px;
-  border: 1px solid var(--wmux-hairline-strong);
+  border: 1px solid var(--muxpit-hairline-strong);
   outline: 0;
-  background: var(--wmux-bg);
-  color: var(--wmux-text);
+  background: var(--muxpit-bg);
+  color: var(--muxpit-text);
   font-size: 11px;
 }
 
 .agent-new-session > button {
   align-self: end;
   padding: 0 7px;
-  border-color: var(--wmux-accent);
-  background: var(--wmux-accent);
-  color: var(--wmux-bg);
+  border-color: var(--muxpit-accent);
+  background: var(--muxpit-accent);
+  color: var(--muxpit-bg);
   cursor: pointer;
 }
 
@@ -187,15 +187,15 @@
   height: 30px;
   margin: 0 8px 8px;
   padding: 0 8px;
-  border: 1px solid var(--wmux-hairline);
+  border: 1px solid var(--muxpit-hairline);
   outline: 0;
-  background: var(--wmux-bg);
-  color: var(--wmux-text);
+  background: var(--muxpit-bg);
+  color: var(--muxpit-text);
   font-size: 12px;
 }
 
 .agent-session-column > input:focus {
-  border-color: var(--wmux-accent);
+  border-color: var(--muxpit-accent);
 }
 
 .agent-session-list {
@@ -208,7 +208,7 @@
   position: relative;
   width: 100%;
   min-height: 72px;
-  border-top: 1px solid var(--wmux-hairline);
+  border-top: 1px solid var(--muxpit-hairline);
 }
 
 .agent-session-main {
@@ -221,18 +221,18 @@
   padding: 7px 40px 7px 10px;
   border: 0;
   background: transparent;
-  color: var(--wmux-text);
+  color: var(--muxpit-text);
   text-align: left;
   cursor: pointer;
 }
 
 .agent-session-row:hover,
 .agent-session-row.active {
-  background: var(--wmux-hover);
+  background: var(--muxpit-hover);
 }
 
 .agent-session-row.active {
-  box-shadow: inset 0 0 0 1px var(--wmux-accent-mid);
+  box-shadow: inset 0 0 0 1px var(--muxpit-accent-mid);
 }
 
 .agent-session-main > strong,
@@ -255,14 +255,14 @@
   padding: 2px 4px;
   border: 0;
   background: transparent;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 9px;
   cursor: pointer;
 }
 
 .agent-session-control:hover,
 .agent-session-control.stop {
-  color: var(--wmux-accent);
+  color: var(--muxpit-accent);
 }
 
 .agent-session-control.close {
@@ -275,12 +275,12 @@
 }
 
 .agent-session-control.close:hover {
-  background: var(--wmux-bg-elev);
+  background: var(--muxpit-bg-elev);
 }
 
 .agent-session-cwd {
-  color: var(--wmux-subtext);
-  font-family: var(--wmux-font-mono);
+  color: var(--muxpit-subtext);
+  font-family: var(--muxpit-font-mono);
   font-size: 10px;
 }
 
@@ -291,7 +291,7 @@
   align-items: center;
   gap: 5px;
   overflow: hidden;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 10px;
   white-space: nowrap;
 }
@@ -308,9 +308,9 @@
   place-items: center;
   flex: 0 0 auto;
   padding: 1px;
-  border: 1px solid var(--wmux-hairline-strong);
-  color: var(--wmux-accent);
-  font-family: var(--wmux-font-mono);
+  border: 1px solid var(--muxpit-hairline-strong);
+  color: var(--muxpit-accent);
+  font-family: var(--muxpit-font-mono);
   font-size: 9px;
 }
 
@@ -324,18 +324,18 @@
   position: absolute;
   top: 9px;
   right: 7px;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 10px;
 }
 
 .agent-session-list small.running {
-  color: var(--wmux-accent);
+  color: var(--muxpit-accent);
   font-weight: 650;
 }
 
 .agent-session-list > p {
   padding: 18px 10px;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 12px;
   text-align: center;
 }
@@ -367,7 +367,7 @@
   display: grid;
   gap: 6px;
   padding: 7px 12px;
-  border-bottom: 1px solid var(--wmux-hairline);
+  border-bottom: 1px solid var(--muxpit-hairline);
 }
 
 .agent-conversation-header-main {
@@ -386,8 +386,8 @@
 }
 
 .agent-conversation-header-main > div:first-child > span {
-  color: var(--wmux-accent);
-  font-family: var(--wmux-font-mono);
+  color: var(--muxpit-accent);
+  font-family: var(--muxpit-font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -404,9 +404,9 @@
   max-width: min(310px, 45vw);
   overflow: hidden;
   padding: 3px 6px;
-  border: 1px solid var(--wmux-hairline);
+  border: 1px solid var(--muxpit-hairline);
   background: transparent;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -418,7 +418,7 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding-top: 6px;
-  border-top: 1px solid var(--wmux-hairline);
+  border-top: 1px solid var(--muxpit-hairline);
 }
 
 .agent-execution-settings label {
@@ -429,7 +429,7 @@
 }
 
 .agent-execution-settings label > span {
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -438,9 +438,9 @@
 .agent-execution-settings select {
   min-width: 0;
   height: 28px;
-  border: 1px solid var(--wmux-hairline-strong);
-  background: var(--wmux-bg);
-  color: var(--wmux-text);
+  border: 1px solid var(--muxpit-hairline-strong);
+  background: var(--muxpit-bg);
+  color: var(--muxpit-text);
   font-size: 11px;
 }
 
@@ -455,15 +455,15 @@
 .agent-run-state {
   flex: 0 0 auto;
   padding: 3px 6px;
-  border: 1px solid var(--wmux-hairline);
-  color: var(--wmux-subtext);
+  border: 1px solid var(--muxpit-hairline);
+  color: var(--muxpit-subtext);
   font-size: 10px;
   text-transform: uppercase;
 }
 
 .agent-run-state.running {
-  border-color: color-mix(in srgb, var(--wmux-accent) 55%, var(--wmux-hairline));
-  color: var(--wmux-accent);
+  border-color: color-mix(in srgb, var(--muxpit-accent) 55%, var(--muxpit-hairline));
+  color: var(--muxpit-accent);
 }
 
 .agent-timeline {
@@ -480,12 +480,12 @@
   align-content: center;
   justify-items: center;
   gap: 6px;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   text-align: center;
 }
 
 .agent-timeline-empty strong {
-  color: var(--wmux-text);
+  color: var(--muxpit-text);
   font-size: 15px;
 }
 
@@ -507,7 +507,7 @@
   align-items: center;
   gap: 5px;
   margin-bottom: 4px;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -517,12 +517,12 @@
   width: 5px;
   height: 5px;
   flex: 0 0 auto;
-  background: var(--wmux-subtext);
+  background: var(--muxpit-subtext);
   content: "";
 }
 
 .agent-timeline-row.user small::before {
-  background: var(--wmux-accent);
+  background: var(--muxpit-accent);
 }
 
 .agent-timeline-row.tool small::before {
@@ -531,7 +531,7 @@
 
 .agent-timeline-row p {
   margin: 0;
-  color: var(--wmux-text);
+  color: var(--muxpit-text);
   font-size: 14px;
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -544,10 +544,10 @@
   margin: 0;
   padding: 7px 8px;
   overflow: auto;
-  border: 1px solid var(--wmux-hairline);
-  background: var(--wmux-bg-elev);
-  color: var(--wmux-text);
-  font-family: var(--wmux-font-mono);
+  border: 1px solid var(--muxpit-hairline);
+  background: var(--muxpit-bg-elev);
+  color: var(--muxpit-text);
+  font-family: var(--muxpit-font-mono);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -561,8 +561,8 @@
   margin-bottom: 12px;
   padding: 8px;
   border-left: 2px solid #e06c75;
-  background: color-mix(in srgb, #e06c75 10%, var(--wmux-bg));
-  color: var(--wmux-text);
+  background: color-mix(in srgb, #e06c75 10%, var(--muxpit-bg));
+  color: var(--muxpit-text);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -571,7 +571,7 @@
   flex: 0 0 auto;
   border: 0;
   background: transparent;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 11px;
   cursor: pointer;
 }
@@ -579,8 +579,8 @@
 .agent-approval {
   margin: 0 0 14px;
   padding: 9px;
-  border: 1px solid color-mix(in srgb, #e06c75 55%, var(--wmux-hairline));
-  background: var(--wmux-bg-elev);
+  border: 1px solid color-mix(in srgb, #e06c75 55%, var(--muxpit-hairline));
+  background: var(--muxpit-bg-elev);
 }
 
 .agent-approval strong {
@@ -599,16 +599,16 @@
 
 .agent-approval button {
   padding: 5px 8px;
-  border: 1px solid var(--wmux-hairline-strong);
-  background: var(--wmux-bg);
+  border: 1px solid var(--muxpit-hairline-strong);
+  background: var(--muxpit-bg);
   font-size: 12px;
   cursor: pointer;
 }
 
 .agent-approval button.approve {
-  border-color: var(--wmux-accent);
-  background: var(--wmux-accent);
-  color: var(--wmux-bg);
+  border-color: var(--muxpit-accent);
+  background: var(--muxpit-accent);
+  color: var(--muxpit-bg);
 }
 
 .agent-working {
@@ -616,14 +616,14 @@
   align-items: center;
   gap: 4px;
   margin: 0 0 8px;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 12px;
 }
 
 .agent-working span {
   width: 4px;
   height: 4px;
-  background: var(--wmux-accent);
+  background: var(--muxpit-accent);
   animation: agent-pulse 1.1s infinite alternate;
 }
 
@@ -643,8 +643,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 9px;
-  border-top: 1px solid var(--wmux-hairline);
-  background: var(--wmux-bg-elev);
+  border-top: 1px solid var(--muxpit-hairline);
+  background: var(--muxpit-bg-elev);
   font-size: 11px;
 }
 
@@ -655,7 +655,7 @@
 .agent-queue-preview p {
   margin: 0;
   overflow: hidden;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -663,7 +663,7 @@
 .agent-queue-preview button {
   border: 0;
   background: transparent;
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   cursor: pointer;
 }
 
@@ -671,8 +671,8 @@
   grid-row: 4;
   flex: 0 0 auto;
   padding: 7px 8px;
-  border-top: 2px solid var(--wmux-hairline-strong);
-  background: var(--wmux-bg-elev);
+  border-top: 2px solid var(--muxpit-hairline-strong);
+  background: var(--muxpit-bg-elev);
 }
 
 .agent-composer.steering {
@@ -685,16 +685,16 @@
   box-sizing: border-box;
   resize: none;
   padding: 8px;
-  border: 1px solid var(--wmux-hairline-strong);
+  border: 1px solid var(--muxpit-hairline-strong);
   outline: 0;
-  background: var(--wmux-bg);
-  color: var(--wmux-text);
+  background: var(--muxpit-bg);
+  color: var(--muxpit-text);
   font-size: 14px;
   line-height: 1.45;
 }
 
 .agent-composer textarea:focus {
-  border-color: var(--wmux-accent);
+  border-color: var(--muxpit-accent);
 }
 
 .agent-composer-actions {
@@ -712,15 +712,15 @@
 }
 
 .agent-composer-actions span {
-  color: var(--wmux-subtext);
+  color: var(--muxpit-subtext);
   font-size: 10px;
 }
 
 .agent-composer-actions button {
   min-height: 28px;
   padding: 0 9px;
-  border: 1px solid var(--wmux-hairline-strong);
-  background: var(--wmux-bg);
+  border: 1px solid var(--muxpit-hairline-strong);
+  background: var(--muxpit-bg);
   font-size: 12px;
   cursor: pointer;
 }
@@ -731,15 +731,15 @@
 }
 
 .agent-composer-actions .agent-stop-button {
-  border-color: color-mix(in srgb, #e06c75 60%, var(--wmux-hairline));
+  border-color: color-mix(in srgb, #e06c75 60%, var(--muxpit-hairline));
   color: #e06c75;
 }
 
 .agent-composer-actions .agent-send-button {
   min-width: 54px;
-  border-color: var(--wmux-accent);
-  background: var(--wmux-accent);
-  color: var(--wmux-bg);
+  border-color: var(--muxpit-accent);
+  background: var(--muxpit-accent);
+  color: var(--muxpit-bg);
   font-weight: 650;
 }
 

@@ -76,8 +76,8 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget, ssh
   if (!available || candidates.length === 0) return null;
 
   return (
-    <div className="wmux-ai-bar">
-      <span className="wmux-ai-bar-label">
+    <div className="muxpit-ai-bar">
+      <span className="muxpit-ai-bar-label">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 2l1.6 5.4L19 9l-5.4 1.6L12 16l-1.6-5.4L5 9l5.4-1.6L12 2zm6 12l.8 2.7L21 17.5l-2.2.8L18 21l-.8-2.7L15 17.5l2.2-.8L18 14zM5 14l.6 2L7 16.5l-1.4.5L5 19l-.6-2L3 16.5l1.4-.5L5 14z" />
         </svg>
@@ -86,7 +86,7 @@ export const AiPaneToolbar = ({ workspaceId, leafId, currentKind, sshTarget, ssh
       {candidates.map((k) => (
         <button
           key={k}
-          className="wmux-ai-btn"
+          className="muxpit-ai-btn"
           onClick={() => void handleAdd(k)}
           title={`Open a ${AI_LABEL[k]} pane on ${sshTarget}`}
         >

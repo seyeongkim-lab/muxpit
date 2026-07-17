@@ -2,8 +2,8 @@ use crate::monitor::{ClaudeSession, DiskInfo, MonitorData, NetInfo, ProcessInfo}
 use crate::ssh_command::quote_posix_shell_arg;
 use std::collections::HashMap;
 
-pub const END_MARKER: &str = "===WMUX_END===";
-pub const CLAUDE_END_MARKER: &str = "===WMUX_CLAUDE_END===";
+pub const END_MARKER: &str = "===MUXPIT_END===";
+pub const CLAUDE_END_MARKER: &str = "===MUXPIT_CLAUDE_END===";
 
 #[derive(Default)]
 pub struct MonitorSnapshots {

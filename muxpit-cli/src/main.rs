@@ -27,7 +27,7 @@ fn main() {
             Ok(params) => send_request("notify", params),
             Err(e) => {
                 eprintln!("Error: {e}");
-                eprintln!("Run 'wmux-cli help' for usage.");
+                eprintln!("Run 'muxpit-cli help' for usage.");
                 std::process::exit(2);
             }
         },
@@ -50,7 +50,7 @@ fn main() {
         "help" | "--help" | "-h" => print_help(),
         other => {
             eprintln!("Unknown command: {other}");
-            eprintln!("Run 'wmux-cli help' for usage.");
+            eprintln!("Run 'muxpit-cli help' for usage.");
             std::process::exit(1);
         }
     }
@@ -78,7 +78,7 @@ pub(crate) fn send_request_value(
 ) -> Result<serde_json::Value, String> {
     let mut stream = match ipc::connect() {
         Ok(s) => s,
-        Err(e) => return Err(format!("wmux is not running or IPC is unavailable: {e}")),
+        Err(e) => return Err(format!("muxpit is not running or IPC is unavailable: {e}")),
     };
 
     let request = serde_json::json!({
@@ -172,7 +172,7 @@ fn parse_notify_args(args: &[String]) -> Result<serde_json::Value, String> {
 
     let title = title
         .or_else(|| positional.first().cloned())
-        .unwrap_or_else(|| "wmux".to_string());
+        .unwrap_or_else(|| "muxpit".to_string());
     let body = body
         .or_else(|| {
             if positional.len() > 1 {
@@ -196,14 +196,14 @@ fn parse_notify_args(args: &[String]) -> Result<serde_json::Value, String> {
 
 fn print_help() {
     println!(
-        r#"wmux-cli - terminal multiplexer CLI
+        r#"muxpit-cli - terminal multiplexer CLI
 
-Usage: wmux-cli <command> [args...]
+Usage: muxpit-cli <command> [args...]
 
 Commands:
-  ping                    Check if wmux is running
+  ping                    Check if muxpit is running
   notify [options] [title] [body]
-                          Send a notification to wmux
+                          Send a notification to muxpit
   hooks <setup|uninstall|agent>
                           Install or run agent notification hooks
   list-workspaces, ls     List active workspaces
@@ -237,20 +237,20 @@ Control options:
   --rows <count>           Visible rows to read, from 1 to 500
 
 Examples:
-  wmux-cli ping
-  wmux-cli notify "Build done" "All tests passed"
-  wmux-cli notify --workspace "$WMUX_WORKSPACE_ID" --surface "$WMUX_SURFACE_ID" --source codex --event stop --title Codex --body "Prompt completed"
-  wmux-cli hooks setup codex --yes
-  wmux-cli hooks setup claude --yes
-  wmux-cli ls
-  wmux-cli identify
-  wmux-cli split --direction horizontal --command codex
-  wmux-cli browser open https://example.com
-  wmux-cli browser navigate https://example.com
-  wmux-cli browser snapshot
-  wmux-cli browser console
-  wmux-cli browser screenshot
-  wmux-cli send-text --enter "npm test"
-  wmux-cli read-screen --rows 40"#
+  muxpit-cli ping
+  muxpit-cli notify "Build done" "All tests passed"
+  muxpit-cli notify --workspace "$MUXPIT_WORKSPACE_ID" --surface "$MUXPIT_SURFACE_ID" --source codex --event stop --title Codex --body "Prompt completed"
+  muxpit-cli hooks setup codex --yes
+  muxpit-cli hooks setup claude --yes
+  muxpit-cli ls
+  muxpit-cli identify
+  muxpit-cli split --direction horizontal --command codex
+  muxpit-cli browser open https://example.com
+  muxpit-cli browser navigate https://example.com
+  muxpit-cli browser snapshot
+  muxpit-cli browser console
+  muxpit-cli browser screenshot
+  muxpit-cli send-text --enter "npm test"
+  muxpit-cli read-screen --rows 40"#
     );
 }

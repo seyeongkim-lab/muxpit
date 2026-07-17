@@ -23,7 +23,7 @@ use platform::process::{
     collect_session_metadata, gather_workspace_info, get_listening_ports, get_shell_context,
     process_tree_contains_agent, SessionMetadata, ShellContext, WorkspaceInfo,
 };
-use pty::{PtyEvent, PtyEventChannel, PtyManager, WmuxPtyContext};
+use pty::{PtyEvent, PtyEventChannel, PtyManager, MuxpitPtyContext};
 use ssh_command::{quote_posix_shell_arg, resolve_ssh_command, SshCommand};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -53,7 +53,7 @@ fn spawn_pty(
         command_argv,
         cwd,
         enable_cwd_reporting,
-        WmuxPtyContext {
+        MuxpitPtyContext {
             workspace_id,
             surface_id,
             enable_agent_session_reporting,
@@ -80,7 +80,7 @@ fn spawn_pty_tmux_cc(
         ssh_command,
         ssh_connection,
         session_name,
-        WmuxPtyContext {
+        MuxpitPtyContext {
             workspace_id,
             surface_id,
             enable_agent_session_reporting: false,
@@ -376,8 +376,8 @@ fn check_remote_clis_sync(
 pub(crate) fn login_shell_remote_command(command: &str) -> String {
     let outer = format!(
         "shell=${{SHELL:-/bin/sh}}; \
-         case \"$shell\" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) wmux_shell=\"$shell\" ;; *) wmux_shell=/bin/sh ;; esac; \
-         exec \"$wmux_shell\" -lc {}",
+         case \"$shell\" in sh|bash|zsh|ksh|dash|*/sh|*/bash|*/zsh|*/ksh|*/dash) muxpit_shell=\"$shell\" ;; *) muxpit_shell=/bin/sh ;; esac; \
+         exec \"$muxpit_shell\" -lc {}",
         quote_posix_shell_arg(command)
     );
     format!("/bin/sh -lc {}", quote_posix_shell_arg(&outer))
@@ -394,7 +394,7 @@ mod remote_cli_tests {
         assert!(command.starts_with("/bin/sh -lc "));
         assert!(command.contains("${SHELL:-/bin/sh}"));
         assert!(command.contains("case \"$shell\" in"));
-        assert!(command.contains("*) wmux_shell=/bin/sh"));
+        assert!(command.contains("*) muxpit_shell=/bin/sh"));
         assert!(command.contains("command -v claude"));
         assert!(!command.contains("bash -lc"));
     }
@@ -495,7 +495,7 @@ async fn tmux_kill_session(
 }
 
 /// Lightweight snapshot of the frontend's workspaces, pushed from the UI so the
-/// CLI (`wmux-cli ls`) can list them over the IPC pipe. The backend owns no workspace
+/// CLI (`muxpit-cli ls`) can list them over the IPC pipe. The backend owns no workspace
 /// state otherwise; this is a read-through mirror updated on every UI change.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -596,7 +596,7 @@ pub fn run() {
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
                 .targets([Target::new(TargetKind::LogDir {
-                    file_name: Some("wmux".into()),
+                    file_name: Some("muxpit".into()),
                 })])
                 .rotation_strategy(RotationStrategy::KeepSome(8))
                 .timezone_strategy(TimezoneStrategy::UseLocal)
@@ -607,14 +607,15 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
+            migrate_legacy_app_dirs(app.handle());
             log::info!(
-                "wmux setup complete version={} debug={} pid={}",
+                "muxpit setup complete version={} debug={} pid={}",
                 app.package_info().version,
                 cfg!(debug_assertions),
                 std::process::id()
             );
             start_heartbeat();
-            // Start local IPC server for wmux-cli and shell hooks.
+            // Start local IPC server for muxpit-cli and shell hooks.
             platform::ipc::start_ipc_server(app.handle().clone());
             let relay = platform::ipc::start_control_relay(app.handle().clone());
             if let Some(port) = relay.port() {
@@ -627,14 +628,59 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+// One-time carry-over of data written under the pre-rename identifier
+// (com.wmux.terminal). Non-overwriting, so it never clobbers muxpit state.
+fn migrate_legacy_app_dirs(app: &AppHandle) {
+    const LEGACY_IDENTIFIER: &str = "com.wmux.terminal";
+    let resolver = app.path();
+    let dirs = [
+        resolver.app_data_dir(),
+        resolver.app_config_dir(),
+        resolver.app_local_data_dir(),
+    ];
+    let mut seen = std::collections::HashSet::new();
+    for dir in dirs.into_iter().flatten() {
+        if !seen.insert(dir.clone()) {
+            continue;
+        }
+        let Some(parent) = dir.parent() else { continue };
+        let legacy = parent.join(LEGACY_IDENTIFIER);
+        if !legacy.is_dir() {
+            continue;
+        }
+        match copy_missing(&legacy, &dir) {
+            Ok(()) => log::info!("migrated legacy app data from {}", legacy.display()),
+            Err(err) => log::warn!(
+                "legacy app data migration from {} failed: {err}",
+                legacy.display()
+            ),
+        }
+    }
+}
+
+fn copy_missing(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let target = dst.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            copy_missing(&entry.path(), &target)?;
+        } else if file_type.is_file() && !target.exists() {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 fn start_heartbeat() {
     let started = Instant::now();
     if let Err(err) = std::thread::Builder::new()
-        .name("wmux-heartbeat".into())
+        .name("muxpit-heartbeat".into())
         .spawn(move || loop {
             std::thread::sleep(Duration::from_secs(60));
             log::info!(
-                "wmux heartbeat pid={} uptime_secs={}",
+                "muxpit heartbeat pid={} uptime_secs={}",
                 std::process::id(),
                 started.elapsed().as_secs()
             );

@@ -84,7 +84,7 @@ struct PendingAccessToken {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct WmuxPtyContext {
+pub struct MuxpitPtyContext {
     pub workspace_id: Option<String>,
     pub surface_id: Option<String>,
     pub enable_agent_session_reporting: bool,
@@ -114,7 +114,7 @@ impl PtyManager {
         command_argv: Option<Vec<String>>,
         cwd: Option<String>,
         enable_cwd_reporting: bool,
-        wmux_context: WmuxPtyContext,
+        muxpit_context: MuxpitPtyContext,
     ) -> Result<u32, String> {
         self.spawn_internal(
             app,
@@ -125,7 +125,7 @@ impl PtyManager {
             cwd,
             enable_cwd_reporting,
             false,
-            wmux_context,
+            muxpit_context,
         )
     }
 
@@ -145,14 +145,14 @@ impl PtyManager {
         ssh_command: Option<String>,
         ssh_connection: Option<SshCommand>,
         session_name: String,
-        wmux_context: WmuxPtyContext,
+        muxpit_context: MuxpitPtyContext,
     ) -> Result<u32, String> {
         // Sanitise strictly to [a-zA-Z0-9_-]. tmux rejects `.` and `:`, and we *also* want the
         // result to be shell-safe so we don't have to quote it — any `'` in the inner string
         // would end up escaped as `'\''` by shell_single_quote, and spawn_internal's
         // shell_words_parse skips `\` handling on Windows (to preserve paths like `C:\Users\…`),
-        // leaving stray backslashes inside the session name. Past symptoms: `wmux-host\\`,
-        // `wmux-host `, each connect creating a brand new session.
+        // leaving stray backslashes inside the session name. Past symptoms: `muxpit-host\\`,
+        // `muxpit-host `, each connect creating a brand new session.
         let safe: String = session_name
             .chars()
             .map(|c| {
@@ -165,7 +165,7 @@ impl PtyManager {
             .collect();
         // Disable mouse on the target session so xterm's drag-to-select survives on the client:
         // when tmux has `mouse on` (common via users' ~/.tmux.conf), tmux captures mousedown and
-        // swallows the browser-level selection, making copy-by-drag impossible in the wmux pane.
+        // swallows the browser-level selection, making copy-by-drag impossible in the muxpit pane.
         //
         // Chaining via tmux's native `\; set -g mouse off` is NOT safe here — spawn_internal's
         // shell_words_parse skips `\` handling on Windows (commit a3b6f10 lesson) so the escape
@@ -185,7 +185,7 @@ impl PtyManager {
         // `set -g detach-on-destroy off`: when the user ends the session they
         // are currently in (typing `exit`, kill-session from inside, etc.),
         // tmux switches the client to another live session instead of
-        // detaching. Without this the SSH connection drops and wmux tears
+        // detaching. Without this the SSH connection drops and muxpit tears
         // down the pane (taking any AI split with it). Applied with -g so
         // it covers user-created sessions too, not just the wrapper.
         // `set -g set-clipboard on` + `set -ga terminal-features ',*:clipboard'`:
@@ -203,7 +203,7 @@ impl PtyManager {
             .ok_or_else(|| "Invalid SSH command".to_string())?;
         // Force tty allocation with `-tt`, not `-t`. A single `-t` only requests a
         // remote pty when the ssh client itself has a local tty; the Windows ConPTY
-        // that wmux runs ssh.exe under is not detected as one, so `-t` silently skips
+        // that muxpit runs ssh.exe under is not detected as one, so `-t` silently skips
         // allocation and the remote `tmux attach` dies with "open terminal failed: not
         // a terminal", spinning the reconnect loop. `-tt` forces it on every platform.
         let argv = ssh.argv_with_extra_options(&["-tt"], Some(&tmux_inner));
@@ -218,7 +218,7 @@ impl PtyManager {
             None,
             false,
             false,
-            wmux_context,
+            muxpit_context,
         )
     }
 
@@ -232,7 +232,7 @@ impl PtyManager {
         cwd: Option<String>,
         enable_cwd_reporting: bool,
         tmux_cc: bool,
-        wmux_context: WmuxPtyContext,
+        muxpit_context: MuxpitPtyContext,
     ) -> Result<u32, String> {
         let pty_system = native_pty_system();
 
@@ -245,11 +245,11 @@ impl PtyManager {
             })
             .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-        let control_token = if wmux_context
+        let control_token = if muxpit_context
             .workspace_id
             .as_deref()
             .is_some_and(|value| !value.is_empty())
-            && wmux_context
+            && muxpit_context
                 .surface_id
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
@@ -265,8 +265,8 @@ impl PtyManager {
             crate::remote_control::wrap_ssh_control_relay(
                 argv,
                 relay_port,
-                wmux_context.workspace_id.as_deref()?,
-                wmux_context.surface_id.as_deref()?,
+                muxpit_context.workspace_id.as_deref()?,
+                muxpit_context.surface_id.as_deref()?,
                 control_token.as_deref()?,
             )
         });
@@ -286,17 +286,17 @@ impl PtyManager {
         if let Some(cwd) = valid_spawn_cwd(cwd) {
             cmd.cwd(cwd.as_os_str());
         }
-        let agent_session_token = wmux_context
+        let agent_session_token = muxpit_context
             .enable_agent_session_reporting
             .then(|| control_token.clone())
             .flatten();
         let mut pending_access_token =
-            self.register_pending_access_token(&wmux_context, control_token.as_deref());
+            self.register_pending_access_token(&muxpit_context, control_token.as_deref());
         cmd.env("TERM", "xterm-256color");
-        platform_pty::apply_wmux_env(
+        platform_pty::apply_muxpit_env(
             &mut cmd,
-            wmux_context.workspace_id.as_deref(),
-            wmux_context.surface_id.as_deref(),
+            muxpit_context.workspace_id.as_deref(),
+            muxpit_context.surface_id.as_deref(),
             agent_session_token.as_deref(),
             control_token.as_deref(),
         );
@@ -330,7 +330,7 @@ impl PtyManager {
         let app_clone = app.clone();
         let pty_id = id;
         let reader_tmux_state = tmux_state.clone();
-        let reader_surface_id = wmux_context.surface_id.clone();
+        let reader_surface_id = muxpit_context.surface_id.clone();
 
         // Plain (non-tmux) output is coalesced on a short time window by a
         // dedicated emitter thread. This collapses the many small reads of a
@@ -393,7 +393,7 @@ impl PtyManager {
         // Child watcher thread: detect process exit
         let app_clone2 = app.clone();
         let pty_id2 = id;
-        let child_surface_id = wmux_context.surface_id.clone();
+        let child_surface_id = muxpit_context.surface_id.clone();
         std::thread::spawn(move || {
             let status = child.wait();
             let code = status.ok().map(|s| s.exit_code() as i32);
@@ -413,8 +413,8 @@ impl PtyManager {
             .take_writer()
             .map_err(|e| format!("Failed to take writer: {e}"))?;
 
-        let workspace_id_log = wmux_context.workspace_id.clone();
-        let surface_id_log = wmux_context.surface_id.clone();
+        let workspace_id_log = muxpit_context.workspace_id.clone();
+        let surface_id_log = muxpit_context.surface_id.clone();
         {
             let mut instances = self.instances.lock().unwrap();
             instances.insert(
@@ -424,8 +424,8 @@ impl PtyManager {
                     _master: pair.master,
                     child_pid,
                     tmux_state,
-                    workspace_id: wmux_context.workspace_id,
-                    surface_id: wmux_context.surface_id,
+                    workspace_id: muxpit_context.workspace_id,
+                    surface_id: muxpit_context.surface_id,
                     access_token: control_token,
                 },
             );
@@ -546,7 +546,7 @@ impl PtyManager {
 
     fn register_pending_access_token<'a>(
         &'a self,
-        context: &WmuxPtyContext,
+        context: &MuxpitPtyContext,
         token: Option<&str>,
     ) -> PendingAccessTokenGuard<'a> {
         let Some(token) = token.filter(|value| !value.is_empty()) else {
@@ -828,14 +828,14 @@ mod tests {
             Some(current)
         );
         assert!(valid_spawn_cwd(Some(String::new())).is_none());
-        assert!(valid_spawn_cwd(Some("__wmux_missing_directory__".to_string())).is_none());
+        assert!(valid_spawn_cwd(Some("__muxpit_missing_directory__".to_string())).is_none());
         assert!(valid_spawn_cwd(None).is_none());
     }
 
     #[test]
     fn pending_access_token_authorizes_before_instance_registration() {
         let manager = PtyManager::new();
-        let context = WmuxPtyContext {
+        let context = MuxpitPtyContext {
             workspace_id: Some("ws".to_string()),
             surface_id: Some("leaf".to_string()),
             enable_agent_session_reporting: true,

@@ -42,20 +42,20 @@ const makeInfo = (patch: Partial<WorkspaceInfo>): WorkspaceInfo => ({
 test("workspace tab title uses a useful OSC terminal title first", () => {
   const view = buildWorkspaceTabView(
     makeWorkspace(),
-    makeInfo({ cwd: "/home/me/wmux", terminalTitle: "nvim package.json" }),
+    makeInfo({ cwd: "/home/me/muxpit", terminalTitle: "nvim package.json" }),
   );
 
   assert.equal(view.title, "nvim package.json");
-  assert.equal(view.detail, "wmux");
+  assert.equal(view.detail, "muxpit");
 });
 
 test("workspace tab title shows AI agent and cwd", () => {
   const view = buildWorkspaceTabView(
     makeWorkspace({ aiKind: "codex" }),
-    makeInfo({ cwd: "/home/me/wmux", processName: "codex" }),
+    makeInfo({ cwd: "/home/me/muxpit", processName: "codex" }),
   );
 
-  assert.equal(view.title, "codex: wmux");
+  assert.equal(view.title, "codex: muxpit");
   assert.equal(view.detail, "codex");
 });
 
@@ -63,7 +63,7 @@ test("workspace tab title shows AI terminal status before cwd", () => {
   const view = buildWorkspaceTabView(
     makeWorkspace({ aiKind: "codex" }),
     makeInfo({
-      cwd: "/home/me/wmux",
+      cwd: "/home/me/muxpit",
       processName: "codex",
       aiStatusLabel: "permission: cargo check",
       aiStatusKind: "ready",
@@ -72,7 +72,7 @@ test("workspace tab title shows AI terminal status before cwd", () => {
   );
 
   assert.equal(view.title, "codex: permission: cargo check");
-  assert.equal(view.detail, "wmux");
+  assert.equal(view.detail, "muxpit");
   assert.equal(view.statusKind, "ready");
 });
 
@@ -80,7 +80,7 @@ test("workspace tab title detects manually launched AI processes", () => {
   const view = buildWorkspaceTabView(
     makeWorkspace(),
     makeInfo({
-      cwd: "/home/me/wmux",
+      cwd: "/home/me/muxpit",
       processName: "node",
       command: "/home/me/.npm/bin/codex.js",
       aiStatusLabel: "Implement tab status",
@@ -104,8 +104,8 @@ test("workspace tab title keeps SSH target ahead of stale local title and cwd", 
     makeWorkspace({ command: "ssh me@host" }),
     makeInfo({
       agent: "ssh",
-      cwd: "C:\\Users\\one\\Projects\\wmux",
-      terminalTitle: "C:\\Users\\one\\Projects\\wmux",
+      cwd: "C:\\Users\\one\\Projects\\muxpit",
+      terminalTitle: "C:\\Users\\one\\Projects\\muxpit",
     }),
   );
 
@@ -115,9 +115,9 @@ test("workspace tab title keeps SSH target ahead of stale local title and cwd", 
 
 test("workspace tab title shows active tmux session name", () => {
   const view = buildWorkspaceTabView(
-    makeWorkspace({ command: "ssh me@host", tmuxSession: "wmux-host" }),
+    makeWorkspace({ command: "ssh me@host", tmuxSession: "muxpit-host" }),
     undefined,
-    { sshCommand: "ssh me@host", wrapperSession: "wmux-host", activeSession: "$1" },
+    { sshCommand: "ssh me@host", wrapperSession: "muxpit-host", activeSession: "$1" },
     [{ id: "$1", name: "work", attached: true, windows: 1, activity: 0 }],
   );
 

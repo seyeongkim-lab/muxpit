@@ -1,7 +1,7 @@
 use crate::ssh_command::{quote_posix_shell_arg, ssh_target_index};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-const REMOTE_CLI: &str = include_str!("../assets/wmux-remote-cli.py");
+const REMOTE_CLI: &str = include_str!("../assets/muxpit-remote-cli.py");
 
 pub(crate) fn remote_relay_port(token: &str) -> u16 {
     let hash = token.bytes().fold(2_166_136_261_u32, |hash, byte| {
@@ -51,19 +51,19 @@ fn remote_bootstrap(
     let surface_id = quote_posix_shell_arg(surface_id);
     let token = quote_posix_shell_arg(token);
     let writer = quote_posix_shell_arg(&format!(
-        "import base64,os;open(os.environ['WMUX_REMOTE_CLI'],'wb').write(base64.b64decode('{encoded_cli}'))"
+        "import base64,os;open(os.environ['MUXPIT_REMOTE_CLI'],'wb').write(base64.b64decode('{encoded_cli}'))"
     ));
     let install = format!(
-        "if command -v python3 >/dev/null 2>&1; then WMUX_REMOTE_CLI=\"$wmux_dir/wmux-cli\" python3 -c {writer}; chmod 700 \"$wmux_dir/wmux-cli\"; ln -sf wmux-cli \"$wmux_dir/wmux\"; export PATH=\"$wmux_dir:$PATH\"; else echo '[wmux] remote control needs python3' >&2; fi"
+        "if command -v python3 >/dev/null 2>&1; then MUXPIT_REMOTE_CLI=\"$muxpit_dir/muxpit-cli\" python3 -c {writer}; chmod 700 \"$muxpit_dir/muxpit-cli\"; ln -sf muxpit-cli \"$muxpit_dir/muxpit\"; export PATH=\"$muxpit_dir:$PATH\"; else echo '[muxpit] remote control needs python3' >&2; fi"
     );
     vec![
-        "wmux_dir=${TMPDIR:-/tmp}/wmux-${UID:-user}".to_string(),
-        "mkdir -p \"$wmux_dir\" && chmod 700 \"$wmux_dir\"".to_string(),
-        format!("export WMUX_WORKSPACE_ID={workspace_id}"),
-        format!("export WMUX_SURFACE_ID={surface_id}"),
-        format!("export WMUX_CONTROL_TOKEN={token}"),
-        format!("export WMUX_CONTROL_PORT={remote_port}"),
-        "export WMUX_BUNDLED_CLI_PATH=\"$wmux_dir/wmux-cli\"".to_string(),
+        "muxpit_dir=${TMPDIR:-/tmp}/muxpit-${UID:-user}".to_string(),
+        "mkdir -p \"$muxpit_dir\" && chmod 700 \"$muxpit_dir\"".to_string(),
+        format!("export MUXPIT_WORKSPACE_ID={workspace_id}"),
+        format!("export MUXPIT_SURFACE_ID={surface_id}"),
+        format!("export MUXPIT_CONTROL_TOKEN={token}"),
+        format!("export MUXPIT_CONTROL_PORT={remote_port}"),
+        "export MUXPIT_BUNDLED_CLI_PATH=\"$muxpit_dir/muxpit-cli\"".to_string(),
         install,
         original_remote.to_string(),
     ]
@@ -105,11 +105,11 @@ mod tests {
         assert_eq!(wrapped[target - 2], "-R");
         assert!(wrapped[target - 1].starts_with("127.0.0.1:"));
         let remote = &wrapped[target + 1];
-        assert!(remote.contains("WMUX_WORKSPACE_ID"));
-        assert!(remote.contains("WMUX_SURFACE_ID"));
-        assert!(remote.contains("WMUX_CONTROL_TOKEN"));
+        assert!(remote.contains("MUXPIT_WORKSPACE_ID"));
+        assert!(remote.contains("MUXPIT_SURFACE_ID"));
+        assert!(remote.contains("MUXPIT_CONTROL_TOKEN"));
         assert!(wrapped[target - 1].ends_with(":127.0.0.1:37321"));
-        assert!(remote.contains("WMUX_CONTROL_PORT"));
+        assert!(remote.contains("MUXPIT_CONTROL_PORT"));
         assert!(remote.contains("exec codex"));
     }
 

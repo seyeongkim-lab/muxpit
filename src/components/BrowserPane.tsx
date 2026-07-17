@@ -114,7 +114,7 @@ export const BrowserPane = ({
   }, [createWebview, label, visible]);
 
   useEffect(() => {
-    const unlisten = listen<BrowserNavigatedEvent>("wmux-browser-navigated", ({ payload }) => {
+    const unlisten = listen<BrowserNavigatedEvent>("muxpit-browser-navigated", ({ payload }) => {
       if (payload.label !== label) return;
       setInputUrl(payload.url);
       setBrowserUrl(workspaceId, id, payload.url);
@@ -180,22 +180,22 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    backgroundColor: "var(--wmux-bg)",
+    backgroundColor: "var(--muxpit-bg)",
   },
   urlBar: {
     display: "flex",
     gap: 6,
     padding: "5px 7px",
-    backgroundColor: "var(--wmux-bg-soft)",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    backgroundColor: "var(--muxpit-bg-soft)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
     alignItems: "center",
     flexShrink: 0,
   },
   navButton: {
-    background: "var(--wmux-bg-elev)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    background: "var(--muxpit-bg-elev)",
+    border: "1px solid var(--muxpit-hairline-strong)",
     borderRadius: 4,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 11,
     padding: "3px 8px",
     cursor: "pointer",
@@ -204,10 +204,10 @@ const styles: Record<string, React.CSSProperties> = {
   urlInput: {
     flex: 1,
     minWidth: 0,
-    background: "var(--wmux-bg)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    background: "var(--muxpit-bg)",
+    border: "1px solid var(--muxpit-hairline-strong)",
     borderRadius: 4,
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 12,
     padding: "4px 8px",
     outline: "none",
@@ -221,7 +221,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   preview: {
     padding: 10,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 11,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -233,8 +233,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     placeItems: "center",
     padding: 20,
-    color: "var(--wmux-danger)",
-    backgroundColor: "var(--wmux-bg)",
+    color: "var(--muxpit-danger)",
+    backgroundColor: "var(--muxpit-bg)",
     fontSize: 12,
     textAlign: "center",
   },

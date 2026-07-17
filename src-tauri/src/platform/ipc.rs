@@ -162,7 +162,7 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
                 .params
                 .get("title")
                 .and_then(|v| v.as_str())
-                .unwrap_or("wmux");
+                .unwrap_or("muxpit");
             let body = req
                 .params
                 .get("body")
@@ -181,7 +181,7 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             insert_optional_string(&mut payload, "source", source);
             insert_optional_string(&mut payload, "event", event);
 
-            let _ = app.emit("wmux-notify", serde_json::Value::Object(payload));
+            let _ = app.emit("muxpit-notify", serde_json::Value::Object(payload));
 
             IpcResponse {
                 ok: true,
@@ -238,7 +238,7 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
             insert_optional_string(&mut payload, "cwd", cwd);
             insert_optional_string(&mut payload, "status", status);
 
-            let _ = app.emit("wmux-agent-session", serde_json::Value::Object(payload));
+            let _ = app.emit("muxpit-agent-session", serde_json::Value::Object(payload));
 
             IpcResponse {
                 ok: true,
@@ -267,7 +267,7 @@ fn handle_request(req: &IpcRequest, app: &AppHandle) -> IpcResponse {
                 return IpcResponse {
                     ok: false,
                     data: None,
-                    error: Some("Missing wmux control context".to_string()),
+                    error: Some("Missing muxpit control context".to_string()),
                 };
             };
             let authorized = app.state::<crate::pty::PtyManager>().control_token_matches(
@@ -368,7 +368,7 @@ fn handle_remote_agent_event(
         insert_optional_string(&mut payload, "session_id", Some(session_id));
         insert_limited_string(&mut payload, params, "cwd", 4096);
         insert_limited_string(&mut payload, params, "status", 512);
-        app.emit("wmux-agent-session", serde_json::Value::Object(payload))
+        app.emit("muxpit-agent-session", serde_json::Value::Object(payload))
             .map_err(|error| error.to_string())?;
     }
 
@@ -392,7 +392,7 @@ fn handle_remote_agent_event(
         insert_optional_string(&mut payload, "event", Some(event));
         insert_optional_string(&mut payload, "title", Some(agent_display_name(source)));
         insert_optional_string(&mut payload, "body", Some(&body));
-        app.emit("wmux-notify", serde_json::Value::Object(payload))
+        app.emit("muxpit-notify", serde_json::Value::Object(payload))
             .map_err(|error| error.to_string())?;
     }
 

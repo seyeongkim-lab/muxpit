@@ -284,11 +284,11 @@ mod tests {
     #[test]
     fn session_changed() {
         let mut p = TmuxCcParser::new();
-        let events = p.feed(b"%session-changed $0 wmux-host\n");
+        let events = p.feed(b"%session-changed $0 muxpit-host\n");
         match &events[0] {
             TmuxEvent::SessionChanged { session_id, name } => {
                 assert_eq!(session_id, "$0");
-                assert_eq!(name, "wmux-host");
+                assert_eq!(name, "muxpit-host");
             }
             other => panic!("wrong: {other:?}"),
         }

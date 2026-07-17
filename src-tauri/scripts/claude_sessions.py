@@ -163,7 +163,7 @@ def list_sessions(root):
             sessions.append(session_metadata(path, updated_at, entries))
         except OSError:
             continue
-    print(json.dumps({"type": "wmux_sessions", "sessions": sessions}), flush=True)
+    print(json.dumps({"type": "muxpit_sessions", "sessions": sessions}), flush=True)
 
 
 def load_session(root, session_id):
@@ -176,7 +176,7 @@ def load_session(root, session_id):
             continue
     if not matches:
         print(json.dumps({
-            "type": "wmux_error",
+            "type": "muxpit_error",
             "message": "Claude session was not found",
         }), flush=True)
         return
@@ -185,12 +185,12 @@ def load_session(root, session_id):
         entries = list(json_items(read_tail(path, HISTORY_TAIL_BYTES)))
     except OSError:
         print(json.dumps({
-            "type": "wmux_error",
+            "type": "muxpit_error",
             "message": "Claude session could not be read",
         }), flush=True)
         return
     print(json.dumps({
-        "type": "wmux_claude_session",
+        "type": "muxpit_claude_session",
         "session": session_metadata(path, updated_at, entries),
         "items": history_items(entries),
     }), flush=True)

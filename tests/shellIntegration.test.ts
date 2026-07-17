@@ -24,7 +24,7 @@ test("shell history hook is injected for plain POSIX shells", () => {
 test("shell history hook skips panes where injection would be disruptive", () => {
   assert.equal(shouldInjectShellHistoryHook({ ...baseContext, aiKind: "claude" }), false);
   assert.equal(shouldInjectShellHistoryHook({ ...baseContext, spawnCommand: "ssh host claude" }), false);
-  assert.equal(shouldInjectShellHistoryHook({ ...baseContext, tmuxSession: "wmux-host" }), false);
+  assert.equal(shouldInjectShellHistoryHook({ ...baseContext, tmuxSession: "muxpit-host" }), false);
   assert.equal(shouldInjectShellHistoryHook({ ...baseContext, target: "local-windows" }), false);
   assert.equal(shouldInjectShellHistoryHook({ ...baseContext, spawnCommand: "pwsh", target: "spawn-windows" }), false);
 });

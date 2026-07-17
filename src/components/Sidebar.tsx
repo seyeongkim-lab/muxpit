@@ -147,20 +147,20 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
 
   return (
     <div style={styles.sidebar}>
-      <div className="wmux-sidebar-header" style={styles.header}>
-        <span className="wmux-logo">wmux</span>
+      <div className="muxpit-sidebar-header" style={styles.header}>
+        <span className="muxpit-logo">muxpit</span>
         <div style={styles.headerBtns}>
-          <button className="wmux-btn" onClick={handleAdd} style={styles.addBtn} title="New workspace (Ctrl+Shift+T)">
+          <button className="muxpit-btn" onClick={handleAdd} style={styles.addBtn} title="New workspace (Ctrl+Shift+T)">
             +
           </button>
-          <button className="wmux-btn" onClick={toggleProfiles} style={styles.addBtn} title="Launch profiles">
+          <button className="muxpit-btn" onClick={toggleProfiles} style={styles.addBtn} title="Launch profiles">
             P
           </button>
-          <button className="wmux-btn" onClick={onOpenAgentLauncher} style={styles.addBtn} title="Open AI pane">
+          <button className="muxpit-btn" onClick={onOpenAgentLauncher} style={styles.addBtn} title="Open AI pane">
             AI
           </button>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={onToggleGridView}
             style={{ ...styles.addBtn, ...(gridView ? { background: "#313244", borderColor: "#89b4fa", color: "#cdd6f4" } : {}) }}
             title="Grid overview (Ctrl+Shift+G)"
@@ -172,7 +172,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
               <rect x="14" y="14" width="7" height="7" />
             </svg>
           </button>
-          <button className="wmux-btn" onClick={onOpenSettings} style={styles.addBtn} title="Settings (Ctrl+,)">
+          <button className="muxpit-btn" onClick={onOpenSettings} style={styles.addBtn} title="Settings (Ctrl+,)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -184,9 +184,9 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
       {/* SSH Hosts list */}
       <div style={styles.section}>
         <div style={styles.sectionHeader}>
-          <span className="wmux-section-label">HOSTS</span>
+          <span className="muxpit-section-label">HOSTS</span>
           <button
-            className="wmux-btn"
+            className="muxpit-btn"
             onClick={() => onOpenSshPanel?.()}
             style={styles.sectionAction}
             title="Manage SSH Hosts"
@@ -207,7 +207,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
             return (
               <div
                 key={host.id}
-                className="wmux-host-row"
+                className="muxpit-host-row"
                 style={{
                   ...styles.hostRow,
                   ...(isSelected ? styles.hostRowSelected : {}),
@@ -227,7 +227,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
                 title={`${host.name} — ${target}\nCtrl+Click to multi-select`}
               >
                 <span
-                  className="wmux-host-dot"
+                  className="muxpit-host-dot"
                   style={{
                     ...styles.hostDot,
                     backgroundColor: dotColor,
@@ -237,7 +237,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
                 <span style={styles.hostName}>{host.name}</span>
                 <span style={styles.hostTarget}>{target}</span>
                 <button
-                  className="wmux-btn"
+                  className="muxpit-btn"
                   style={styles.hostEditBtn}
                   title="Edit host"
                   onClick={(e) => {
@@ -273,7 +273,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
 
       <div style={styles.sessionSection}>
         <div style={styles.sectionHeader}>
-          <span className="wmux-section-label">SESSIONS</span>
+          <span className="muxpit-section-label">SESSIONS</span>
         </div>
         <div style={styles.list}>
           {workspaces.map((ws, i) => {
@@ -335,7 +335,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
             return (
               <div key={ws.id}>
               <div
-                className={`wmux-ws-item${isActive ? " wmux-ws-active" : ""}`}
+                className={`muxpit-ws-item${isActive ? " muxpit-ws-active" : ""}`}
                 draggable={editingId !== ws.id}
                 onDragStart={(e) => {
                   dragFromIdxRef.current = i;
@@ -377,7 +377,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
                   ...(isDropTarget ? styles.itemDropTarget : {}),
                 }}
               >
-                {isActive && <span className="wmux-active-bar" />}
+                {isActive && <span className="muxpit-active-bar" />}
                 <div style={styles.itemMain}>
                   <div style={styles.itemRow}>
                     <span style={styles.index}>{i + 1}</span>
@@ -405,7 +405,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
                       <span style={styles.badge}>{wsUnread}</span>
                     )}
                     <button
-                      className="wmux-btn"
+                      className="muxpit-btn"
                       onClick={(e) => handleClose(e, ws.id)}
                       style={styles.closeBtn}
                       title="Close workspace"
@@ -461,7 +461,7 @@ export const Sidebar = ({ onOpenSettings, onOpenAgentLauncher, onOpenSshPanel, o
 
       <div style={styles.footer}>
         <span style={styles.footerText}>{workspaces.length} sessions</span>
-        <button className="wmux-btn" style={styles.inboxButton} onClick={togglePanel} title="Agent inbox (Ctrl+Shift+I)">
+        <button className="muxpit-btn" style={styles.inboxButton} onClick={togglePanel} title="Agent inbox (Ctrl+Shift+I)">
           Inbox
           {totalUnread > 0 && <span style={styles.notifBadge}>{totalUnread}</span>}
         </button>
@@ -475,8 +475,8 @@ const styles: Record<string, React.CSSProperties> = {
     width: "16em",
     minWidth: "16em",
     height: "100%",
-    backgroundColor: "var(--wmux-bg)",
-    borderRight: "1px solid var(--wmux-hairline)",
+    backgroundColor: "var(--muxpit-bg)",
+    borderRight: "1px solid var(--muxpit-hairline)",
     display: "flex",
     flexDirection: "column",
     userSelect: "none",
@@ -491,13 +491,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     gap: 4,
   },
-  // Logo styling moved to .wmux-logo.
+  // Logo styling moved to .muxpit-logo.
   logo: {},
   addBtn: {
-    background: "var(--wmux-bg-elev)",
-    border: "1px solid var(--wmux-hairline-strong)",
+    background: "var(--muxpit-bg-elev)",
+    border: "1px solid var(--muxpit-hairline-strong)",
     borderRadius: 6,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 18,
     width: 28,
     height: 28,
@@ -522,24 +522,24 @@ const styles: Record<string, React.CSSProperties> = {
   item: {
     padding: "8px 12px 8px 14px",
     cursor: "grab",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 14,
     transition: "background 0.1s, opacity 0.1s",
   },
   itemActive: {
-    backgroundColor: "var(--wmux-accent-soft)",
-    color: "var(--wmux-text)",
+    backgroundColor: "var(--muxpit-accent-soft)",
+    color: "var(--muxpit-text)",
   },
   itemUnread: {
     backgroundColor: "rgba(249, 226, 175, 0.12)",
     boxShadow: "inset 0 0 0 1px rgba(249, 226, 175, 0.35)",
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
   },
   itemDragging: {
     opacity: 0.4,
   },
   itemDropTarget: {
-    borderTop: "2px solid var(--wmux-accent)",
+    borderTop: "2px solid var(--muxpit-accent)",
   },
   itemMain: {
     display: "flex",
@@ -552,7 +552,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   index: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     fontFamily: "monospace",
     minWidth: 16,
@@ -564,10 +564,10 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   renameInput: {
-    background: "var(--wmux-bg-soft)",
-    border: "1px solid var(--wmux-accent)",
+    background: "var(--muxpit-bg-soft)",
+    border: "1px solid var(--muxpit-accent)",
     borderRadius: 3,
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 14,
     padding: "1px 4px",
     flex: 1,
@@ -576,7 +576,7 @@ const styles: Record<string, React.CSSProperties> = {
   closeBtn: {
     background: "none",
     border: "none",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 13,
     cursor: "pointer",
     padding: "2px 4px",
@@ -592,7 +592,7 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   metaItem: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     fontFamily: "monospace",
     maxWidth: "100%",
@@ -614,7 +614,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#f9e2af",
   },
   panes: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
   },
   ports: {
@@ -647,7 +647,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "monospace",
   },
   metaCommand: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     fontFamily: "monospace",
     maxWidth: "100%",
@@ -656,8 +656,8 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   badge: {
-    backgroundColor: "var(--wmux-accent)",
-    color: "var(--wmux-bg)",
+    backgroundColor: "var(--muxpit-accent)",
+    color: "var(--muxpit-bg)",
     fontSize: 11,
     fontWeight: 700,
     borderRadius: 8,
@@ -668,13 +668,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   footer: {
     padding: "8px 12px",
-    borderTop: "1px solid var(--wmux-hairline)",
+    borderTop: "1px solid var(--muxpit-hairline)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
   },
   footerText: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
   },
   notifBadge: {
@@ -687,7 +687,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 5,
     padding: 0,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     background: "transparent",
     border: "none",
     fontSize: 12,
@@ -695,7 +695,7 @@ const styles: Record<string, React.CSSProperties> = {
 
   // Section (shared by HOSTS and SESSIONS)
   section: {
-    borderBottom: "1px solid var(--wmux-hairline)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
     display: "flex",
     flexDirection: "column" as const,
     flexShrink: 0,
@@ -707,17 +707,17 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 12px 5px",
   },
   sectionLabel: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 10,
     fontWeight: 700,
     letterSpacing: 0,
     fontFamily: "'JetBrains Mono', monospace",
   },
   sectionAction: {
-    background: "var(--wmux-bg-elev)",
-    border: "1px solid var(--wmux-hairline)",
+    background: "var(--muxpit-bg-elev)",
+    border: "1px solid var(--muxpit-hairline)",
     borderRadius: 4,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 13,
     width: 18,
     height: 18,
@@ -745,7 +745,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   hostRowSelected: {
-    backgroundColor: "var(--wmux-accent-mid)",
+    backgroundColor: "var(--muxpit-accent-mid)",
   },
   hostDot: {
     width: 8,
@@ -754,7 +754,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   hostName: {
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 13,
     flexShrink: 0,
     maxWidth: 80,
@@ -763,7 +763,7 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   hostTarget: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 11,
     fontFamily: "'JetBrains Mono', monospace",
     marginLeft: "auto",
@@ -773,7 +773,7 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   hostEmpty: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     padding: "8px 12px",
     cursor: "pointer",
@@ -782,7 +782,7 @@ const styles: Record<string, React.CSSProperties> = {
   hostEditBtn: {
     background: "transparent",
     border: "none",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     fontSize: 12,
     padding: "2px 6px",
@@ -793,13 +793,13 @@ const styles: Record<string, React.CSSProperties> = {
 
   connectBar: {
     padding: "4px 10px",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
   },
   connectAllBtn: {
-    background: "var(--wmux-accent)",
+    background: "var(--muxpit-accent)",
     border: "none",
     borderRadius: 3,
-    color: "var(--wmux-bg)",
+    color: "var(--muxpit-bg)",
     fontSize: 12,
     fontWeight: 600,
     padding: "4px 8px",

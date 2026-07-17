@@ -87,9 +87,9 @@ fn prepare_cli_sidecar() {
         .expect("src-tauri has a parent")
         .to_path_buf();
 
-    println!("cargo:rerun-if-changed=../wmux-cli/Cargo.toml");
-    println!("cargo:rerun-if-changed=../wmux-cli/src");
-    println!("cargo:rerun-if-changed=../crates/wmux-platform/src");
+    println!("cargo:rerun-if-changed=../muxpit-cli/Cargo.toml");
+    println!("cargo:rerun-if-changed=../muxpit-cli/src");
+    println!("cargo:rerun-if-changed=../crates/muxpit-platform/src");
 
     let sidecar_dir = repo_root.join("target").join("sidecars");
     let sidecar_path = sidecar_dir.join(sidecar_name(&target));
@@ -100,11 +100,11 @@ fn prepare_cli_sidecar() {
     if target != host && profile != "release" {
         std::fs::write(
             &sidecar_path,
-            format!("wmux-cli sidecar placeholder for {target}\n"),
+            format!("muxpit-cli sidecar placeholder for {target}\n"),
         )
         .unwrap_or_else(|e| {
             panic!(
-                "failed to create wmux-cli placeholder sidecar {}: {e}",
+                "failed to create muxpit-cli placeholder sidecar {}: {e}",
                 sidecar_path.display()
             )
         });
@@ -116,27 +116,27 @@ fn prepare_cli_sidecar() {
     cargo.current_dir(&repo_root).args([
         "build",
         "--manifest-path",
-        "wmux-cli/Cargo.toml",
+        "muxpit-cli/Cargo.toml",
         "--release",
     ]);
     if target != host {
         cargo.args(["--target", &target]);
     }
 
-    let status = cargo.status().expect("failed to run cargo for wmux-cli");
+    let status = cargo.status().expect("failed to run cargo for muxpit-cli");
     if !status.success() {
-        panic!("failed to build wmux-cli sidecar for {target}");
+        panic!("failed to build muxpit-cli sidecar for {target}");
     }
 
     let cli_output = if target == host {
         repo_root
-            .join("wmux-cli")
+            .join("muxpit-cli")
             .join("target")
             .join("release")
             .join(cli_executable_name(&target))
     } else {
         repo_root
-            .join("wmux-cli")
+            .join("muxpit-cli")
             .join("target")
             .join(&target)
             .join("release")
@@ -145,7 +145,7 @@ fn prepare_cli_sidecar() {
 
     std::fs::copy(&cli_output, &sidecar_path).unwrap_or_else(|e| {
         panic!(
-            "failed to copy wmux-cli sidecar {} -> {}: {e}",
+            "failed to copy muxpit-cli sidecar {} -> {}: {e}",
             cli_output.display(),
             sidecar_path.display()
         )
@@ -155,26 +155,26 @@ fn prepare_cli_sidecar() {
     {
         use std::os::unix::fs::PermissionsExt;
         let mut permissions = std::fs::metadata(&sidecar_path)
-            .expect("failed to stat wmux-cli sidecar")
+            .expect("failed to stat muxpit-cli sidecar")
             .permissions();
         permissions.set_mode(permissions.mode() | 0o755);
         std::fs::set_permissions(&sidecar_path, permissions)
-            .expect("failed to chmod wmux-cli sidecar");
+            .expect("failed to chmod muxpit-cli sidecar");
     }
 }
 
 fn cli_executable_name(target: &str) -> &'static str {
     if target.contains("windows") {
-        "wmux-cli.exe"
+        "muxpit-cli.exe"
     } else {
-        "wmux-cli"
+        "muxpit-cli"
     }
 }
 
 fn sidecar_name(target: &str) -> String {
     if target.contains("windows") {
-        format!("wmux-cli-{target}.exe")
+        format!("muxpit-cli-{target}.exe")
     } else {
-        format!("wmux-cli-{target}")
+        format!("muxpit-cli-{target}")
     }
 }

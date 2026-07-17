@@ -3,7 +3,7 @@
  *
  * Mirrors `pty.rs::spawn_tmux_cc` (src-tauri/src/pty.rs:79-82) so the frontend
  * stores the same string the remote tmux server actually sees. Without this,
- * `wmux-10.0.0.5` on the frontend would diverge from `wmux-10_0_0_5` on
+ * `muxpit-10.0.0.5` on the frontend would diverge from `muxpit-10_0_0_5` on
  * the server, breaking wrapper-session matching in the Sidebar list.
  */
 export const sanitizeTmuxSessionName = (name: string): string =>

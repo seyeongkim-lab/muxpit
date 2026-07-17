@@ -35,7 +35,7 @@ export interface AgentSessionRuntime {
 
 export type AgentSessionRuntimes = Record<string, AgentSessionRuntime>;
 
-const NEW_SESSION_KEY = "__wmux_new_session__";
+const NEW_SESSION_KEY = "__muxpit_new_session__";
 
 export const sessionRuntimeKey = (sessionId: string | null | undefined): string =>
   sessionId || NEW_SESSION_KEY;

@@ -568,7 +568,7 @@ export const useTerminalSession = ({
   useEffect(() => {
     disposedRef.current = false;
     initTerminal().catch((err) => {
-      console.error(`[wmux] initTerminal failed for leaf ${leafId}:`, err);
+      console.error(`[muxpit] initTerminal failed for leaf ${leafId}:`, err);
     });
     return () => {
       disposedRef.current = true;

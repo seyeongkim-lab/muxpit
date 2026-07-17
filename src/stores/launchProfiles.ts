@@ -8,7 +8,7 @@ import {
 import type { Workspace } from "./workspace.ts";
 import { useWorkspaceStore } from "./workspace.ts";
 
-const STORAGE_KEY = "wmux-launch-profiles";
+const STORAGE_KEY = "muxpit-launch-profiles";
 let nodeCounter = 0;
 
 const nextNodeId = (): string => `profile-node-${Date.now()}-${nodeCounter++}`;

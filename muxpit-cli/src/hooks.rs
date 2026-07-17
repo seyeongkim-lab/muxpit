@@ -95,18 +95,18 @@ impl Agent {
             Agent::Codex => "hooks.json",
             Agent::Claude => "settings.json",
             Agent::Gemini => "settings.json",
-            Agent::Copilot => "hooks/wmux.json",
-            Agent::OpenCode => "plugins/wmux.js",
+            Agent::Copilot => "hooks/muxpit.json",
+            Agent::OpenCode => "plugins/muxpit.js",
         }
     }
 
     fn disabled_env(self) -> &'static str {
         match self {
-            Agent::Codex => "WMUX_CODEX_HOOKS_DISABLED",
-            Agent::Claude => "WMUX_CLAUDE_HOOKS_DISABLED",
-            Agent::Gemini => "WMUX_GEMINI_HOOKS_DISABLED",
-            Agent::Copilot => "WMUX_COPILOT_HOOKS_DISABLED",
-            Agent::OpenCode => "WMUX_OPENCODE_HOOKS_DISABLED",
+            Agent::Codex => "MUXPIT_CODEX_HOOKS_DISABLED",
+            Agent::Claude => "MUXPIT_CLAUDE_HOOKS_DISABLED",
+            Agent::Gemini => "MUXPIT_GEMINI_HOOKS_DISABLED",
+            Agent::Copilot => "MUXPIT_COPILOT_HOOKS_DISABLED",
+            Agent::OpenCode => "MUXPIT_OPENCODE_HOOKS_DISABLED",
         }
     }
 }
@@ -492,19 +492,19 @@ fn print_hooks_help() {
         .collect::<Vec<_>>()
         .join("\n");
     println!(
-        "wmux-cli hooks - install and run agent notification hooks
+        "muxpit-cli hooks - install and run agent notification hooks
 
 Usage:
-  wmux-cli hooks setup [{agents}] [--agent <agent>] [--yes|-y]
-  wmux-cli hooks uninstall [{agents}] [--agent <agent>] [--yes|-y]
-  wmux-cli hooks <agent> install [--yes|-y]
-  wmux-cli hooks <agent> uninstall [--yes|-y]
-  wmux-cli hooks <agent> <event>
+  muxpit-cli hooks setup [{agents}] [--agent <agent>] [--yes|-y]
+  muxpit-cli hooks uninstall [{agents}] [--agent <agent>] [--yes|-y]
+  muxpit-cli hooks <agent> install [--yes|-y]
+  muxpit-cli hooks <agent> uninstall [--yes|-y]
+  muxpit-cli hooks <agent> <event>
 
 Known events:
 {event_lines}
 
-Installed hooks no-op unless WMUX_SURFACE_ID is present."
+Installed hooks no-op unless MUXPIT_SURFACE_ID is present."
     );
 }
 
@@ -657,7 +657,7 @@ fn uninstall_agent_config(agent: Agent, yes: bool) -> Result<(), String> {
             &format!("{} hooks", agent.display_name()),
         )?;
     } else {
-        println!("Removed 0 wmux hook(s) from {}", config_path.display());
+        println!("Removed 0 muxpit hook(s) from {}", config_path.display());
     }
 
     Ok(())
@@ -756,7 +756,7 @@ fn uninstall_copilot_hooks(yes: bool) -> Result<(), String> {
 
     let mut config = read_json_object(&path)?;
     if !remove_owned_copilot_hooks(&mut config)? {
-        println!("Removed 0 wmux hook(s) from {}", path.display());
+        println!("Removed 0 muxpit hook(s) from {}", path.display());
         return Ok(());
     }
     write_json_if_changed(&path, &config, yes, "GitHub Copilot CLI hooks")
@@ -804,19 +804,19 @@ fn is_owned_copilot_hook(value: &Value) -> bool {
     })
 }
 
-const OPENCODE_PLUGIN_MARKER: &str = "wmux-opencode-plugin";
+const OPENCODE_PLUGIN_MARKER: &str = "muxpit-opencode-plugin";
 
 fn opencode_plugin_source(binary: &Path) -> String {
     let binary = serde_json::to_string(binary.to_string_lossy().as_ref())
-        .unwrap_or_else(|_| "\"wmux-cli\"".to_string());
+        .unwrap_or_else(|_| "\"muxpit-cli\"".to_string());
     format!(
         r#"// {OPENCODE_PLUGIN_MARKER}
 import {{ spawn }} from "node:child_process"
 
-const wmuxCli = {binary}
+const muxpitCli = {binary}
 
 const report = (hookEvent, payload) => new Promise((resolve) => {{
-  const child = spawn(wmuxCli, ["hooks", "opencode", hookEvent], {{
+  const child = spawn(muxpitCli, ["hooks", "opencode", hookEvent], {{
     env: process.env,
     stdio: ["pipe", "ignore", "ignore"],
   }})
@@ -825,7 +825,7 @@ const report = (hookEvent, payload) => new Promise((resolve) => {{
   child.stdin?.end(JSON.stringify(payload))
 }})
 
-export const WmuxPlugin = async ({{ directory }}) => ({{
+export const MuxpitPlugin = async ({{ directory }}) => ({{
   event: async ({{ event }}) => {{
     const properties = event.properties ?? {{}}
     const info = properties.info ?? {{}}
@@ -850,7 +850,7 @@ export const WmuxPlugin = async ({{ directory }}) => ({{
 }
 
 fn install_opencode_plugin(yes: bool) -> Result<(), String> {
-    let binary = env::current_exe().map_err(|e| format!("Could not resolve wmux-cli: {e}"))?;
+    let binary = env::current_exe().map_err(|e| format!("Could not resolve muxpit-cli: {e}"))?;
     let path = Agent::OpenCode
         .config_dir()?
         .join(Agent::OpenCode.config_file());
@@ -875,7 +875,7 @@ fn uninstall_managed_file(agent: Agent, yes: bool) -> Result<(), String> {
     let content =
         fs::read_to_string(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
     let marker = match agent {
-        Agent::Copilot => "wmux-cli hooks copilot",
+        Agent::Copilot => "muxpit-cli hooks copilot",
         Agent::OpenCode => OPENCODE_PLUGIN_MARKER,
         _ => return Err("Managed file uninstall is not supported for this agent".to_string()),
     };
@@ -907,7 +907,7 @@ fn run_agent_hook(agent: Agent, event: AgentHookEvent) -> Result<(), String> {
     let payload = read_hook_payload();
     let outcome = agent_adapter(agent).handle_event(event, &payload);
 
-    if env::var_os("WMUX_SURFACE_ID").is_some() {
+    if env::var_os("MUXPIT_SURFACE_ID").is_some() {
         if let Some(params) = hook_session_params(agent, event, &payload) {
             let _ = crate::send_request_value("agent-session", Value::Object(params));
         }
@@ -918,8 +918,8 @@ fn run_agent_hook(agent: Agent, event: AgentHookEvent) -> Result<(), String> {
             params.insert("body".to_string(), json!(notification.body));
             params.insert("source".to_string(), json!(agent.name()));
             params.insert("event".to_string(), json!(event.name()));
-            insert_env(&mut params, "workspace_id", "WMUX_WORKSPACE_ID");
-            insert_env(&mut params, "surface_id", "WMUX_SURFACE_ID");
+            insert_env(&mut params, "workspace_id", "MUXPIT_WORKSPACE_ID");
+            insert_env(&mut params, "surface_id", "MUXPIT_SURFACE_ID");
 
             let _ = crate::send_request_value("notify", Value::Object(params));
         }
@@ -973,12 +973,12 @@ fn hook_session_params(
     if let Some(status) = hook_status_text(event, payload) {
         params.insert("status".to_string(), json!(status));
     }
-    insert_env(&mut params, "workspace_id", "WMUX_WORKSPACE_ID");
-    insert_env(&mut params, "surface_id", "WMUX_SURFACE_ID");
+    insert_env(&mut params, "workspace_id", "MUXPIT_WORKSPACE_ID");
+    insert_env(&mut params, "surface_id", "MUXPIT_SURFACE_ID");
     insert_env(
         &mut params,
         "agent_session_token",
-        "WMUX_AGENT_SESSION_TOKEN",
+        "MUXPIT_AGENT_SESSION_TOKEN",
     );
     Some(params)
 }
@@ -1128,7 +1128,7 @@ fn hook_group(agent: Agent, event: AgentHookEvent) -> Value {
         hook.insert("timeout".to_string(), json!(5));
     }
     if agent == Agent::Gemini {
-        hook.insert("name".to_string(), json!("wmux"));
+        hook.insert("name".to_string(), json!("muxpit"));
     }
 
     let mut group = Map::new();
@@ -1200,8 +1200,8 @@ fn is_owned_hook_value(value: &Value, agent: Agent) -> bool {
     let Some(command) = value.get("command").and_then(Value::as_str) else {
         return false;
     };
-    command.contains(&format!("wmux hooks {}", agent.name()))
-        || command.contains(&format!("wmux-cli hooks {}", agent.name()))
+    command.contains(&format!("muxpit hooks {}", agent.name()))
+        || command.contains(&format!("muxpit-cli hooks {}", agent.name()))
         || command.contains(&format!("hooks {} ", agent.name()))
 }
 
@@ -1360,9 +1360,9 @@ mod tests {
         );
         assert!(copilot_hooks_config().to_string().contains("sessionStart"));
         assert!(copilot_hooks_config().to_string().contains("errorOccurred"));
-        assert!(opencode_plugin_source(Path::new("/tmp/wmux-cli")).contains("session.created"));
-        assert!(opencode_plugin_source(Path::new("/tmp/wmux-cli")).contains("permission.asked"));
-        assert!(!opencode_plugin_source(Path::new("/tmp/wmux-cli")).contains("permission.updated"));
+        assert!(opencode_plugin_source(Path::new("/tmp/muxpit-cli")).contains("session.created"));
+        assert!(opencode_plugin_source(Path::new("/tmp/muxpit-cli")).contains("permission.asked"));
+        assert!(!opencode_plugin_source(Path::new("/tmp/muxpit-cli")).contains("permission.updated"));
     }
 
     #[test]

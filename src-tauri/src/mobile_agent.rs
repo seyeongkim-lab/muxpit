@@ -14,8 +14,8 @@ use tokio::sync::RwLock;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LINE_BYTES: usize = 12 * 1024 * 1024;
-const SSH_CREDENTIAL_SERVICE: &str = "com.wmux.terminal.ssh";
-const HOST_PROFILE_SERVICE: &str = "com.wmux.terminal.hosts";
+const SSH_CREDENTIAL_SERVICE: &str = "com.muxpit.terminal.ssh";
+const HOST_PROFILE_SERVICE: &str = "com.muxpit.terminal.hosts";
 const HOST_PROFILE_ENTRY: &str = "profiles";
 
 const CLAUDE_SESSION_SCRIPT: &str = include_str!("../scripts/claude_sessions.py");
@@ -152,7 +152,7 @@ fn secure_entry(service: &str, entry_id: &str) -> Result<keyring_core::Entry, St
     }
     CREDENTIAL_STORE
         .get_or_init(|| {
-            let configuration = HashMap::from([("name", "wmux-ssh")]);
+            let configuration = HashMap::from([("name", "muxpit-ssh")]);
             let store = android_native_keyring_store::Store::new_with_configuration(&configuration)
                 .map_err(|error| format!("Could not open secure credential storage: {error}"))?;
             keyring_core::set_default_store(store);
@@ -835,7 +835,7 @@ pub fn run() {
                 .build(),
         )
         .run(tauri::generate_context!())
-        .expect("error while running wmux mobile application");
+        .expect("error while running muxpit mobile application");
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ type PersistedLayout = Pick<
   "monitorHeight" | "claudeHeight" | "filesRailWidth"
 >;
 
-const STORAGE_KEY = "wmux-sidebar-layout";
+const STORAGE_KEY = "muxpit-sidebar-layout";
 const DEFAULTS = { monitorHeight: 320, claudeHeight: 140, filesRailWidth: 272 };
 const MIN_H = 80;
 const MAX_H = 800;

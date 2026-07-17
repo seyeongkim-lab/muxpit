@@ -114,8 +114,8 @@ export class CodexMobileClient {
   async connect(): Promise<void> {
     await this.request("initialize", {
       clientInfo: {
-        name: "wmux_mobile",
-        title: "wmux Mobile",
+        name: "muxpit_mobile",
+        title: "muxpit Mobile",
         version: "0.2.17",
       },
     });

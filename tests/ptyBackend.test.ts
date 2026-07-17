@@ -50,7 +50,7 @@ test("PTY backend spawn helper uses tmux-CC only with session and command", asyn
     await spawnTerminalPty(backend, {
       ...baseRequest,
       spawnCommand: "ssh me@host",
-      tmuxSession: "wmux-host",
+      tmuxSession: "muxpit-host",
     }),
     2,
   );
@@ -62,7 +62,7 @@ test("PTY backend spawn helper falls back to plain PTY when tmux session has no 
   assert.equal(
     await spawnTerminalPty(backend, {
       ...baseRequest,
-      tmuxSession: "wmux-host",
+      tmuxSession: "muxpit-host",
     }),
     1,
   );
@@ -82,11 +82,11 @@ test("PTY backend spawn helper forwards cwd only to plain PTY spawns", async () 
   await spawnTerminalPty(backend, {
     ...baseRequest,
     spawnCommand: "ssh me@host",
-    tmuxSession: "wmux-host",
+    tmuxSession: "muxpit-host",
     cwd: "/home/me/project",
     enableCwdReporting: true,
   });
-  assert.equal(tmuxRequests[0].sessionName, "wmux-host");
+  assert.equal(tmuxRequests[0].sessionName, "muxpit-host");
   assert.equal(tmuxRequests.length, 1);
 });
 

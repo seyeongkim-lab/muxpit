@@ -64,7 +64,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession, isWsActive }: Props)
     // Activate the workspace too so the user lands on the pane that's about
     // to display the new session.
     setActiveWs(wsId);
-    void switchTo(wsId, sessionId).catch((e) => console.error("[wmux] switch session:", e));
+    void switchTo(wsId, sessionId).catch((e) => console.error("[muxpit] switch session:", e));
   };
 
   const handleKill = (s: TmuxSession) => {
@@ -75,12 +75,12 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession, isWsActive }: Props)
     if (!killTarget) return;
     const id = killTarget.id;
     setKillTarget(null);
-    void killSession(wsId, id).catch((e) => console.error("[wmux] kill session:", e));
+    void killSession(wsId, id).catch((e) => console.error("[muxpit] kill session:", e));
   };
 
   const submitNew = () => {
     // With no live pane there is no attached client to switch; open a pane
-    // directly (empty name reopens the wmux wrapper session).
+    // directly (empty name reopens the muxpit wrapper session).
     if (!hasLivePane) {
       openInNewPane(newName.trim() || wrapperSession);
       setNewName("");
@@ -88,7 +88,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession, isWsActive }: Props)
       return;
     }
     void createNew(wsId, newName.trim() || undefined)
-      .catch((e) => console.error("[wmux] new session:", e))
+      .catch((e) => console.error("[muxpit] new session:", e))
       .finally(() => {
         setNewName("");
         setAdding(false);
@@ -97,7 +97,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession, isWsActive }: Props)
 
   return (
     <div
-      className="wmux-tmux-sessions"
+      className="muxpit-tmux-sessions"
       style={styles.container}
       // Parent ws-item handles workspace drag; if we let its onDragStart fire
       // from inside this list, clicks get swallowed. Parent checks for this
@@ -138,10 +138,10 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession, isWsActive }: Props)
           >
             <span style={{ ...styles.dot, opacity: isActive ? (isWsActive ? 1 : 0.5) : 0.35 }}>●</span>
             <span style={styles.name}>{s.name}</span>
-            {isWrapper && <span style={styles.wrapperBadge}>wmux</span>}
+            {isWrapper && <span style={styles.wrapperBadge}>muxpit</span>}
             <span style={styles.windows}>{s.windows}w</span>
             <button
-              className="wmux-btn"
+              className="muxpit-btn"
               style={styles.killBtn}
               title="Kill session"
               onClick={(e) => {
@@ -188,7 +188,7 @@ export const SidebarTmuxSessions = ({ wsId, wrapperSession, isWsActive }: Props)
         message={
           killTarget
             ? killTarget.name === wrapperSession
-              ? `Kill the wmux wrapper session "${killTarget.name}"?\nThis will close the SSH connection.`
+              ? `Kill the muxpit wrapper session "${killTarget.name}"?\nThis will close the SSH connection.`
               : `Kill tmux session "${killTarget.name}"?`
             : ""
         }
@@ -219,24 +219,24 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "3px 12px 3px 6px",
     cursor: "pointer",
     fontSize: 12,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     borderLeft: "2px solid transparent",
   },
   rowActive: {
-    color: "var(--wmux-text)",
-    backgroundColor: "var(--wmux-accent-soft)",
-    borderLeftColor: "var(--wmux-accent)",
+    color: "var(--muxpit-text)",
+    backgroundColor: "var(--muxpit-accent-soft)",
+    borderLeftColor: "var(--muxpit-accent)",
     cursor: "default",
   },
   // Active session of an inactive workspace: keep a faint marker but drop the
   // bright text / accent fill so it reads as dimmed like the workspace above.
   rowActiveDim: {
-    borderLeftColor: "var(--wmux-hairline)",
+    borderLeftColor: "var(--muxpit-hairline)",
     cursor: "default",
   },
   dot: {
     fontSize: 8,
-    color: "var(--wmux-accent)",
+    color: "var(--muxpit-accent)",
     width: 10,
     flexShrink: 0,
     textAlign: "center" as const,
@@ -248,17 +248,17 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   wrapperBadge: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 9,
     fontFamily: "'JetBrains Mono', monospace",
-    backgroundColor: "var(--wmux-bg-elev)",
-    border: "1px solid var(--wmux-hairline)",
+    backgroundColor: "var(--muxpit-bg-elev)",
+    border: "1px solid var(--muxpit-hairline)",
     borderRadius: 3,
     padding: "0 4px",
     flexShrink: 0,
   },
   windows: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 10,
     fontFamily: "'JetBrains Mono', monospace",
     flexShrink: 0,
@@ -266,7 +266,7 @@ const styles: Record<string, React.CSSProperties> = {
   killBtn: {
     background: "transparent",
     border: "none",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     cursor: "pointer",
     fontSize: 11,
     padding: "0 4px",
@@ -276,7 +276,7 @@ const styles: Record<string, React.CSSProperties> = {
   addRow: {
     paddingLeft: 18,
     padding: "3px 12px 3px 18px",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 11,
     fontStyle: "italic" as const,
     cursor: "pointer",
@@ -284,7 +284,7 @@ const styles: Record<string, React.CSSProperties> = {
   empty: {
     paddingLeft: 18,
     padding: "3px 12px 3px 18px",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 11,
     fontStyle: "italic" as const,
   },
@@ -297,10 +297,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   input: {
     flex: 1,
-    background: "var(--wmux-bg-soft)",
-    border: "1px solid var(--wmux-accent)",
+    background: "var(--muxpit-bg-soft)",
+    border: "1px solid var(--muxpit-accent)",
     borderRadius: 3,
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 12,
     padding: "1px 4px",
     outline: "none",

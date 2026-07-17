@@ -1,4 +1,4 @@
-"""Generate wmux app icons."""
+"""Generate muxpit app icons."""
 from PIL import Image, ImageDraw, ImageFont
 import os
 

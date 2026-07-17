@@ -4,20 +4,20 @@ import { parseSshCommandLine } from "./sshConnection.ts";
 
 // Shell history capture hook: injects a bash PROMPT_COMMAND + zsh preexec hook into the spawned
 // shell (local or SSH remote) so it emits OSC 777;cmd;<command> before every interactive command.
-// wmux parses those sequences and stores them in the shared history store.
+// muxpit parses those sequences and stores them in the shared history store.
 // The trailing `&& clear` hides the visual footprint of the injection.
 export const SHELL_HISTORY_HOOK =
   '{ if [ -n "$BASH_VERSION" ]; then ' +
-  '__wmux_emit() { local c=$(fc -ln -1 2>/dev/null); c="${c# }"; c="${c#\t}"; ' +
-  '[ -z "$c" ] && return; [ "$c" = "$__wmux_prev" ] && return; ' +
-  'case "$c" in *__wmux_emit*|*__wmux_preexec*) return;; esac; ' +
-  'printf \'\\033]777;cmd;%s\\a\' "$c"; __wmux_prev="$c"; }; ' +
-  'PROMPT_COMMAND="__wmux_emit;${PROMPT_COMMAND:-}"; ' +
+  '__muxpit_emit() { local c=$(fc -ln -1 2>/dev/null); c="${c# }"; c="${c#\t}"; ' +
+  '[ -z "$c" ] && return; [ "$c" = "$__muxpit_prev" ] && return; ' +
+  'case "$c" in *__muxpit_emit*|*__muxpit_preexec*) return;; esac; ' +
+  'printf \'\\033]777;cmd;%s\\a\' "$c"; __muxpit_prev="$c"; }; ' +
+  'PROMPT_COMMAND="__muxpit_emit;${PROMPT_COMMAND:-}"; ' +
   'elif [ -n "$ZSH_VERSION" ]; then ' +
   'autoload -Uz add-zsh-hook; ' +
-  '__wmux_preexec() { case "$1" in *__wmux_emit*|*__wmux_preexec*) return;; esac; ' +
+  '__muxpit_preexec() { case "$1" in *__muxpit_emit*|*__muxpit_preexec*) return;; esac; ' +
   'printf \'\\033]777;cmd;%s\\a\' "$1"; }; ' +
-  'add-zsh-hook preexec __wmux_preexec; ' +
+  'add-zsh-hook preexec __muxpit_preexec; ' +
   'fi; } 2>/dev/null && clear\r';
 
 const AI_CLI_COMMAND_PATTERN = /(?:^|[\s"'\/])(claude|codex|gemini|copilot|opencode)(?=$|[\s;"'])/i;

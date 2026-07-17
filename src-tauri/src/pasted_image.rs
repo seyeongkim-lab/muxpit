@@ -11,9 +11,9 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 const IMAGE_UPLOAD_OPTION_ALLOWLIST: &[&str] = &["-p", "-i", "-J", "-F", "-o", "-l"];
 
-pub const REMOTE_IMAGE_UPLOAD_SCRIPT: &str = "umask 077; dir=\"$HOME/.wmux/screenshots\"; \
-     mkdir -p \"$dir\" && wmux_image_path=$(mktemp \"$dir/wmux-XXXXXX.png\") && \
-     cat > \"$wmux_image_path\" && chmod 600 \"$wmux_image_path\" && printf '%s\\n' \"$wmux_image_path\"";
+pub const REMOTE_IMAGE_UPLOAD_SCRIPT: &str = "umask 077; dir=\"$HOME/.muxpit/screenshots\"; \
+     mkdir -p \"$dir\" && muxpit_image_path=$(mktemp \"$dir/muxpit-XXXXXX.png\") && \
+     cat > \"$muxpit_image_path\" && chmod 600 \"$muxpit_image_path\" && printf '%s\\n' \"$muxpit_image_path\"";
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(test), allow(dead_code))]
@@ -84,7 +84,7 @@ fn non_empty_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
 
 fn local_screenshot_dir() -> Result<PathBuf, String> {
     home_dir()
-        .map(|home| home.join(".wmux").join("screenshots"))
+        .map(|home| home.join(".muxpit").join("screenshots"))
         .ok_or_else(|| "could not resolve home directory".to_string())
 }
 
@@ -95,7 +95,7 @@ fn ensure_private_image_dir(dir: &Path) -> Result<(), String> {
     {
         if let Some(parent) = dir
             .parent()
-            .filter(|parent| parent.file_name().and_then(|name| name.to_str()) == Some(".wmux"))
+            .filter(|parent| parent.file_name().and_then(|name| name.to_str()) == Some(".muxpit"))
         {
             fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
                 .map_err(|e| format!("image directory permission update failed: {e}"))?;
@@ -115,7 +115,7 @@ fn unique_image_file(dir: &Path) -> Result<(PathBuf, File), String> {
     let pid = std::process::id();
 
     for attempt in 0..1000_u16 {
-        let path = dir.join(format!("wmux-{stamp}-{pid}-{attempt}.png"));
+        let path = dir.join(format!("muxpit-{stamp}-{pid}-{attempt}.png"));
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -203,7 +203,7 @@ mod tests {
 
     fn unique_test_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "wmux-{name}-{}-{}",
+            "muxpit-{name}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn local_image_save_writes_file_under_requested_dir() {
         let root = unique_test_dir("local-image-save");
-        let dir = root.join(".wmux").join("screenshots");
+        let dir = root.join(".muxpit").join("screenshots");
         let path = save_image_bytes_to_dir(&dir, b"image").unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), b"image");
@@ -237,7 +237,7 @@ mod tests {
                 0o700
             );
             assert_eq!(
-                fs::metadata(root.join(".wmux"))
+                fs::metadata(root.join(".muxpit"))
                     .unwrap()
                     .permissions()
                     .mode()
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn remote_image_script_does_not_assign_zsh_path_special_parameter() {
-        assert!(REMOTE_IMAGE_UPLOAD_SCRIPT.contains("wmux_image_path="));
+        assert!(REMOTE_IMAGE_UPLOAD_SCRIPT.contains("muxpit_image_path="));
         assert!(!REMOTE_IMAGE_UPLOAD_SCRIPT.contains(" path="));
     }
 

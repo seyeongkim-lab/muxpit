@@ -586,8 +586,8 @@ fn is_shell_process(name: &str) -> bool {
             | "ssh"
             | "tmux"
             | "login"
-            | "wmux"
-            | "wmux-cli"
+            | "muxpit"
+            | "muxpit-cli"
     )
 }
 

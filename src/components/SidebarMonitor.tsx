@@ -162,12 +162,12 @@ export const SidebarMonitor = ({ monitorId, sshTarget, sshCommand, sshConnection
   };
 
   return (
-    <div className="wmux-card" style={{ ...styles.container, height }}>
+    <div className="muxpit-card" style={{ ...styles.container, height }}>
       <div style={styles.resizeHandle} onMouseDown={onResizeStart} title="Drag to resize" />
       {/* Header */}
       <div style={styles.header}>
         <span style={styles.hostname}>{latest?.hostname || sshTarget}</span>
-        <button className="wmux-btn" onClick={onClose} style={styles.closeBtn} title="Close monitor">x</button>
+        <button className="muxpit-btn" onClick={onClose} style={styles.closeBtn} title="Close monitor">x</button>
       </div>
 
       {error ? (
@@ -284,12 +284,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "5px 10px",
-    background: "var(--wmux-bg-elev)",
-    borderBottom: "1px solid var(--wmux-hairline)",
+    background: "var(--muxpit-bg-elev)",
+    borderBottom: "1px solid var(--muxpit-hairline)",
     flexShrink: 0,
   },
   hostname: {
-    color: "var(--wmux-accent)",
+    color: "var(--muxpit-accent)",
     fontWeight: 600,
     fontSize: 14,
     overflow: "hidden",
@@ -299,7 +299,7 @@ const styles: Record<string, React.CSSProperties> = {
   closeBtn: {
     background: "none",
     border: "none",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     cursor: "pointer",
     padding: "0 2px",
@@ -314,7 +314,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   loading: {
     padding: "8px",
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     textAlign: "center" as const,
     fontSize: 11,
   },
@@ -330,7 +330,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 4,
   },
   barLabel: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 13,
     width: 30,
     flexShrink: 0,
@@ -338,7 +338,7 @@ const styles: Record<string, React.CSSProperties> = {
   barTrack: {
     flex: 1,
     height: 6,
-    backgroundColor: "var(--wmux-hairline-strong)",
+    backgroundColor: "var(--muxpit-hairline-strong)",
     borderRadius: 2,
     overflow: "hidden",
   },
@@ -361,7 +361,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   netSection: {
     padding: "4px 8px",
-    borderTop: "1px solid var(--wmux-hairline)",
+    borderTop: "1px solid var(--muxpit-hairline)",
     display: "flex",
     flexDirection: "column" as const,
     gap: 2,
@@ -379,17 +379,17 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "4px 8px",
   },
   loadLabel: {
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 13,
     width: 30,
   },
   loadValues: {
-    color: "var(--wmux-text)",
+    color: "var(--muxpit-text)",
     fontSize: 13,
   },
   diskSection: {
     padding: "4px 8px",
-    borderTop: "1px solid var(--wmux-hairline)",
+    borderTop: "1px solid var(--muxpit-hairline)",
     display: "flex",
     flexDirection: "column" as const,
     gap: 3,
@@ -400,7 +400,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 4,
   },
   diskMount: {
-    color: "var(--wmux-accent-2)",
+    color: "var(--muxpit-accent-2)",
     fontSize: 11,
     width: 32,
     flexShrink: 0,
@@ -411,7 +411,7 @@ const styles: Record<string, React.CSSProperties> = {
   diskBarTrack: {
     flex: 1,
     height: 6,
-    backgroundColor: "var(--wmux-hairline-strong)",
+    backgroundColor: "var(--muxpit-hairline-strong)",
     borderRadius: 2,
     overflow: "hidden",
   },
@@ -429,13 +429,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   processes: {
     padding: "4px 8px 6px",
-    borderTop: "1px solid var(--wmux-hairline)",
+    borderTop: "1px solid var(--muxpit-hairline)",
     marginTop: 4,
   },
   procHeader: {
     display: "flex",
     gap: 4,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
     fontSize: 12,
     fontWeight: 600,
     marginBottom: 1,
@@ -451,6 +451,6 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
-    color: "var(--wmux-subtext)",
+    color: "var(--muxpit-subtext)",
   },
 };

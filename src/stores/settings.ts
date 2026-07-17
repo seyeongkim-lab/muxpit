@@ -130,7 +130,7 @@ type SavedSettings = Record<string, any>;
 
 const loadSaved = (): SavedSettings => {
   try {
-    const saved = localStorage.getItem("wmux-settings");
+    const saved = localStorage.getItem("muxpit-settings") ?? localStorage.getItem("wmux-settings");
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -162,7 +162,7 @@ if (resetSavedWebglRenderer) {
   saved.enableWebglRendererUserSet = false;
   saved.webglRendererCompatibilityVersion = WEBGL_RENDERER_COMPATIBILITY_VERSION;
   try {
-    localStorage.setItem("wmux-settings", JSON.stringify(saved));
+    localStorage.setItem("muxpit-settings", JSON.stringify(saved));
   } catch {}
 }
 const initialEnableWebglRendererUserSet =
@@ -399,7 +399,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 const saveSettings = (state: SettingsState) => {
   try {
     localStorage.setItem(
-      "wmux-settings",
+      "muxpit-settings",
       JSON.stringify({
         fontSize: state.fontSize,
         fontFamilies: state.fontFamilies,

@@ -46,7 +46,7 @@ test("desktop selection restores the exact host provider and session", () => {
 
 test("desktop selection rejects providers outside the installed client set", () => {
   const storage = new MemoryStorage();
-  storage.setItem("wmux-desktop-agent-selection-v1", JSON.stringify({
+  storage.setItem("muxpit-desktop-agent-selection-v1", JSON.stringify({
     version: 1,
     targetKey: "local",
     provider: "unknown",
@@ -58,16 +58,16 @@ test("desktop selection rejects providers outside the installed client set", () 
 
 test("legacy migration reads every cwd snapshot for the selected host", () => {
   const storage = new MemoryStorage();
-  storage.setItem("wmux-desktop-agent-workbench-v1:local|C:\\repo-a", "{}");
-  storage.setItem("wmux-desktop-agent-workbench-v1:local|C:\\repo-b", "{}");
-  storage.setItem("wmux-desktop-agent-workbench-v1:user@host|/repo-a", "{}");
+  storage.setItem("muxpit-desktop-agent-workbench-v1:local|C:\\repo-a", "{}");
+  storage.setItem("muxpit-desktop-agent-workbench-v1:local|C:\\repo-b", "{}");
+  storage.setItem("muxpit-desktop-agent-workbench-v1:user@host|/repo-a", "{}");
   storage.setItem("unrelated", "{}");
 
   assert.deepEqual(desktopLegacySnapshotKeys(storage, ["local|"]), [
-    "wmux-desktop-agent-workbench-v1:local|C:\\repo-a",
-    "wmux-desktop-agent-workbench-v1:local|C:\\repo-b",
+    "muxpit-desktop-agent-workbench-v1:local|C:\\repo-a",
+    "muxpit-desktop-agent-workbench-v1:local|C:\\repo-b",
   ]);
   assert.deepEqual(desktopLegacySnapshotKeys(storage, ["user@host|"]), [
-    "wmux-desktop-agent-workbench-v1:user@host|/repo-a",
+    "muxpit-desktop-agent-workbench-v1:user@host|/repo-a",
   ]);
 });
