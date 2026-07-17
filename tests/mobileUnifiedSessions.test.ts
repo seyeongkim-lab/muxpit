@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createSessionRuntime, sessionRuntimeKey } from "../src/mobile/agentSessionRuntime.ts";
+import { replaceAgentSessions, type MobileSession } from "../src/mobile/agentProtocol.ts";
 import {
   buildUnifiedSessionIndex,
   unifiedSessionKey,
@@ -107,6 +108,20 @@ test("unified session keys include host and provider", () => {
   ]));
 });
 
+test("fresh provider sessions replace device-specific cached entries", () => {
+  let sessions: MobileSession[] = [
+    { id: "shared", title: "Old title", provider: "codex", updatedAt: 10 },
+    { id: "stale", title: "Only on this device", provider: "codex", updatedAt: 20 },
+  ];
+  sessions = replaceAgentSessions([
+    { id: "shared", title: "Current title", provider: "codex", updatedAt: 30 },
+    { id: "remote", title: "Remote session", provider: "codex", updatedAt: 40 },
+  ]);
+
+  assert.deepEqual(sessions.map((session) => session.id), ["remote", "shared"]);
+  assert.equal(sessions[1].title, "Current title");
+});
+
 test("unified mobile sessions include every desktop provider", () => {
   const profile = host("alpha", "Alpha");
   const providers = ["claude", "codex", "gemini", "copilot", "opencode"] as const;
@@ -134,7 +149,7 @@ test("mobile refreshes every saved host without replacing active SSH channels", 
   assert.doesNotMatch(nativeAgent, /mobile_ssh_disconnect\(state\.clone\(\)\)\.await/);
   assert.match(build, /"mobile_agent_installed"/);
   assert.match(capability, /"allow-mobile-agent-installed"/);
-  assert.match(mobileApp, /sessions: mergeAgentSessions\(view\.sessions, event\.sessions\)/);
+  assert.match(mobileApp, /sessions: replaceAgentSessions\(event\.sessions\)/);
 });
 
 test("mobile opens and controls every desktop ACP provider", () => {

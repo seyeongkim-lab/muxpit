@@ -15,8 +15,8 @@ import {
   ClaudeStreamNormalizer,
   JsonLineDecoder,
   composerAction,
-  mergeAgentSessions,
   normalizeClaudeHistoryMessage,
+  replaceAgentSessions,
   type MobileAgentEvent,
   type MobileSession,
   type MobileTimelineItem,
@@ -478,14 +478,14 @@ export const MobileApp = () => {
     if (profileId === currentProfileRef.current?.id) {
       updateProviderView(kind, (view) => ({
         ...view,
-        sessions: mergeAgentSessions(view.sessions, fresh),
+        sessions: replaceAgentSessions(fresh),
       }));
       return;
     }
     const cached = loadCachedWorkbenchView(profileId, kind) ?? emptyWorkbenchView();
     saveCachedWorkbenchView(profileId, kind, {
       ...cached,
-      sessions: mergeAgentSessions(cached.sessions, fresh),
+      sessions: replaceAgentSessions(fresh),
     });
     setProviderViewRevision((revision) => revision + 1);
   };
@@ -1344,7 +1344,7 @@ export const MobileApp = () => {
       case "sessionsLoaded":
         updateProviderView(kind, (view) => ({
           ...view,
-          sessions: mergeAgentSessions(view.sessions, event.sessions),
+          sessions: replaceAgentSessions(event.sessions),
         }));
         return;
       case "sessionLoaded":

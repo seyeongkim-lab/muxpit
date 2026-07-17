@@ -54,6 +54,9 @@ export const mergeAgentSessions = (
     (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
 };
 
+export const replaceAgentSessions = (fresh: MobileSession[]): MobileSession[] =>
+  mergeAgentSessions([], fresh);
+
 export interface MobileTimelineItem {
   id: string;
   kind: "user" | "assistant" | "tool" | "status";

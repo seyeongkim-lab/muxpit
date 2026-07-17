@@ -39,6 +39,7 @@ import {
   composerAction,
   mergeAgentSessions,
   normalizeClaudeHistoryMessage,
+  replaceAgentSessions,
   type MobileAgentEvent,
   type MobileSession,
   type MobileTimelineItem,
@@ -439,7 +440,7 @@ const DesktopTargetRuntime = ({
       case "sessionsLoaded":
         updateView(kind, (current) => ({
           ...current,
-          sessions: mergeAgentSessions(current.sessions, event.sessions),
+          sessions: replaceAgentSessions(event.sessions),
           status: "ready",
         }));
         return;
