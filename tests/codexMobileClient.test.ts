@@ -14,7 +14,7 @@ test("Codex mobile client initializes before listing sessions", async () => {
   const initializing = client.initialize();
   await Promise.resolve();
   assert.equal(sent[0].method, "initialize");
-  assert.equal((sent[0].params as { clientInfo: { version: string } }).clientInfo.version, "0.2.10");
+  assert.equal((sent[0].params as { clientInfo: { version: string } }).clientInfo.version, "0.2.11");
   client.receive(JSON.stringify({ id: sent[0].id, result: { userAgent: "codex" } }));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(sent[1].method, "initialized");
@@ -22,6 +22,68 @@ test("Codex mobile client initializes before listing sessions", async () => {
   client.receive(JSON.stringify({ id: sent[2].id, result: { data: [] } }));
   await initializing;
   assert.deepEqual(events, [{ type: "sessionsLoaded", sessions: [] }]);
+});
+
+test("Codex mobile client can connect before the full session list loads", async () => {
+  const sent: Record<string, unknown>[] = [];
+  const client = new CodexMobileClient(
+    async (line) => { sent.push(JSON.parse(line) as Record<string, unknown>); },
+    () => {},
+  );
+
+  const connecting = client.connect();
+  await Promise.resolve();
+  client.receive(JSON.stringify({ id: sent[0].id, result: {} }));
+  await connecting;
+
+  assert.deepEqual(sent.map((message) => message.method), ["initialize", "initialized"]);
+});
+
+test("Codex mobile client loads every session page before updating the rail", async () => {
+  const sent: Record<string, unknown>[] = [];
+  const events: unknown[] = [];
+  const client = new CodexMobileClient(
+    async (line) => { sent.push(JSON.parse(line) as Record<string, unknown>); },
+    (event) => { events.push(event); },
+  );
+
+  const loading = client.listSessions();
+  await Promise.resolve();
+  assert.deepEqual(sent[0].params, {
+    limit: 100,
+    sortKey: "updated_at",
+    sortDirection: "desc",
+  });
+  client.receive(JSON.stringify({
+    id: sent[0].id,
+    result: {
+      data: [{ id: "thread-new", preview: "New", updatedAt: 20 }],
+      nextCursor: "page-2",
+    },
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(sent[1].params, {
+    cursor: "page-2",
+    limit: 100,
+    sortKey: "updated_at",
+    sortDirection: "desc",
+  });
+  client.receive(JSON.stringify({
+    id: sent[1].id,
+    result: {
+      data: [{ id: "thread-old", preview: "Old", updatedAt: 10 }],
+      nextCursor: null,
+    },
+  }));
+  await loading;
+
+  assert.deepEqual(events, [{
+    type: "sessionsLoaded",
+    sessions: [
+      { id: "thread-new", title: "New", provider: "codex", cwd: undefined, updatedAt: 20 },
+      { id: "thread-old", title: "Old", provider: "codex", cwd: undefined, updatedAt: 10 },
+    ],
+  }]);
 });
 
 test("Codex mobile client sends turn, steer, interrupt, and approval shapes", async () => {

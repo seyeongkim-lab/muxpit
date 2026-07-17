@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import {
+  buildDesktopSessionIndex,
+  desktopSessionKey,
+  type DesktopSessionEntry,
+} from "../agent/desktopUnifiedSessions.ts";
+import {
+  desktopLegacySnapshotKeys,
+  loadDesktopWorkbenchSelection,
+  saveDesktopWorkbenchSelection,
+} from "../agent/desktopWorkbenchPersistence.ts";
+import {
   closeDesktopAgent,
   listDesktopClaudeSessions,
   loadDesktopClaudeSession,
@@ -14,6 +24,7 @@ import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo.ts";
 import {
   ClaudeStreamNormalizer,
   JsonLineDecoder,
+  composerAction,
   normalizeClaudeHistoryMessage,
   type MobileAgentEvent,
   type MobileSession,
@@ -32,6 +43,7 @@ import {
   updateSessionRuntime,
   type AgentApprovalRequest,
   type AgentChannelPurpose,
+  type AgentExecutionSettings,
   type AgentSessionRuntime,
   type AgentSessionRuntimes,
 } from "../mobile/agentSessionRuntime.ts";
@@ -40,11 +52,12 @@ import {
   saveAgentWorkbenchSnapshot,
   type AgentWorkbenchViewSnapshot,
 } from "../mobile/agentWorkbenchPersistence.ts";
-import { CodexMobileClient } from "../mobile/codexMobileClient.ts";
+import { CodexMobileClient, type CodexModelOption } from "../mobile/codexMobileClient.ts";
 import { AI_KINDS } from "../stores/aiCli.ts";
+import { buildSshConnection, useSshHostsStore } from "../stores/sshHosts.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
+import { collectOrderedLeaves } from "../utils/layoutGeometry.ts";
 import { parseSshCommandLine } from "../utils/sshConnection.ts";
-import { findTerminalLeaf } from "../utils/terminalSessionLayout.ts";
 import "./AgentWorkbenchPanel.css";
 
 interface AgentWorkbenchPanelProps {
@@ -55,6 +68,7 @@ interface AgentWorkbenchPanelProps {
 interface ProviderView {
   sessions: MobileSession[];
   activeSessionId: string | null;
+  closedSessionIds: string[];
   runtimes: AgentSessionRuntimes;
   error: string | null;
   status: "idle" | "connecting" | "ready";
@@ -65,13 +79,60 @@ interface ChannelMeta {
   purpose: AgentChannelPurpose;
   handledPayload: boolean;
   sessionId?: string;
+  launchSettings?: AgentExecutionSettings;
+}
+
+interface DesktopTargetDescriptor {
+  key: string;
+  label: string;
+  target: DesktopAgentTarget;
+  legacyStorageKeys: string[];
+  legacyStoragePrefixes: string[];
+  workspaceId?: string;
+  leafId?: string;
+}
+
+interface DesktopTargetSnapshot {
+  views: Record<AiKind, ProviderView>;
+  installed: Set<AiKind>;
+  probed: boolean;
+  probing: boolean;
+  provider: AiKind;
+}
+
+interface DesktopTargetSelection {
+  nonce: number;
+  targetKey: string;
+  provider: AiKind;
+  sessionId: string | null;
+  create: boolean;
+}
+
+interface DesktopTargetCommand {
+  nonce: number;
+  targetKey: string;
+  provider: AiKind;
+  sessionId: string;
+  action: "stop" | "close" | "restore";
+}
+
+interface DesktopTargetRuntimeProps {
+  active: boolean;
+  command?: DesktopTargetCommand;
+  discover: boolean;
+  selection?: DesktopTargetSelection;
+  target: DesktopTargetDescriptor;
+  onSnapshot: (targetKey: string, snapshot: DesktopTargetSnapshot) => void;
 }
 
 const MIN_WORKBENCH_WIDTH = 420;
 const MIN_TERMINAL_WIDTH = 280;
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
-const DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v1:";
+const DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v2:";
+const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v1:";
 const WORKBENCH_PERSIST_DELAY_MS = 200;
+const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 const PROVIDER_NAMES: Record<AiKind, string> = {
   claude: "Claude",
@@ -92,6 +153,7 @@ const PROVIDER_MARKS: Record<AiKind, string> = {
 const emptyView = (): ProviderView => ({
   sessions: [],
   activeSessionId: null,
+  closedSessionIds: [],
   runtimes: {},
   error: null,
   status: "idle",
@@ -105,23 +167,13 @@ const emptyViews = (): Record<AiKind, ProviderView> => ({
   opencode: emptyView(),
 });
 
-const restoreViews = (
-  snapshots: Partial<Record<AiKind, AgentWorkbenchViewSnapshot>>,
-): Record<AiKind, ProviderView> => {
-  const views = emptyViews();
-  for (const kind of AI_KINDS) {
-    const snapshot = snapshots[kind];
-    if (snapshot) views[kind] = { ...views[kind], ...snapshot };
-  }
-  return views;
-};
-
 const snapshotViews = (
   views: Record<AiKind, ProviderView>,
 ): Record<AiKind, AgentWorkbenchViewSnapshot> => Object.fromEntries(
   AI_KINDS.map((kind) => [kind, {
     sessions: views[kind].sessions,
     activeSessionId: views[kind].activeSessionId,
+    closedSessionIds: views[kind].closedSessionIds,
     runtimes: views[kind].runtimes,
   }]),
 ) as Record<AiKind, AgentWorkbenchViewSnapshot>;
@@ -160,8 +212,32 @@ const appendDelta = (
     : [...items, { id, kind, text }];
 };
 
+const mergeSessions = (
+  cached: MobileSession[],
+  fresh: MobileSession[],
+): MobileSession[] => {
+  const sessions = new Map(cached.map((session) => [session.id, session]));
+  for (const session of fresh) sessions.set(session.id, session);
+  return [...sessions.values()].sort((left, right) =>
+    (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+};
+
 const providerChannelKey = (kind: AiKind, sessionId?: string | null): string =>
   kind === "claude" ? `${kind}:${sessionRuntimeKey(sessionId)}` : kind;
+
+const resolvedExecutionSettings = (
+  requested: AgentExecutionSettings,
+  effective: AgentExecutionSettings,
+): AgentExecutionSettings => ({
+  model: requested.model ?? effective.model,
+  effort: requested.effort ?? effective.effort,
+  serviceTier: requested.serviceTier ?? effective.serviceTier,
+});
+
+const sameClaudeLaunchSettings = (
+  left: AgentExecutionSettings | undefined,
+  right: AgentExecutionSettings,
+): boolean => left?.model === right.model && left.effort === right.effort;
 
 const stoppedRuntimes = (runtimes: AgentSessionRuntimes): AgentSessionRuntimes =>
   Object.fromEntries(Object.entries(runtimes).map(([key, runtime]) => [key, {
@@ -177,25 +253,97 @@ const claudeInput = (text: string): string => JSON.stringify({
   message: { role: "user", content: [{ type: "text", text }] },
 });
 
-const targetLabel = (target: DesktopAgentTarget): string => {
-  const host = target.sshConnection?.target
-    ?? parseSshCommandLine(target.sshCommand)?.connection.target
-    ?? "local";
-  return `${host} · ${target.cwd ?? "current directory"}`;
+const targetContextKey = (target: DesktopAgentTarget): string => {
+  const connection = target.sshConnection ?? parseSshCommandLine(target.sshCommand)?.connection;
+  if (connection) {
+    return `ssh:${connection.program}:${connection.target}:${connection.options.join("\u0000")}`;
+  }
+  return target.sshCommand ? `ssh-command:${target.sshCommand}` : "local";
 };
 
-export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps) => {
-  const workspaces = useWorkspaceStore((state) => state.workspaces);
-  const activeId = useWorkspaceStore((state) => state.activeId);
-  const leafCwds = useWorkspaceInfoStore((state) => state.leafCwds);
-  const workspaceInfo = useWorkspaceInfoStore((state) => state.info);
-  const [provider, setProvider] = useState<AiKind>("codex");
+const loadTargetSnapshot = (
+  target: DesktopTargetDescriptor,
+): Pick<DesktopTargetSnapshot, "provider" | "views"> => {
+  const current = loadAgentWorkbenchSnapshot(
+    `${DESKTOP_WORKBENCH_STORAGE_PREFIX}${target.key}`,
+    AI_KINDS,
+  );
+  const legacyStorageKeys = [...new Set([
+    ...target.legacyStorageKeys.map((key) => `${LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX}${key}`),
+    ...desktopLegacySnapshotKeys(localStorage, target.legacyStoragePrefixes),
+  ])];
+  const legacy = legacyStorageKeys.flatMap((storageKey) => {
+    const snapshot = loadAgentWorkbenchSnapshot(
+      storageKey,
+      AI_KINDS,
+    );
+    return snapshot ? [snapshot] : [];
+  });
+  const snapshots = [...legacy, ...(current ? [current] : [])];
+  const views = emptyViews();
+  for (const snapshot of snapshots) {
+    for (const kind of AI_KINDS) {
+      const restored = snapshot.views[kind];
+      if (!restored) continue;
+      const sessions = new Map(views[kind].sessions.map((session) => [session.id, session]));
+      for (const session of restored.sessions) sessions.set(session.id, session);
+      views[kind] = {
+        ...views[kind],
+        sessions: mergeSessions([], [...sessions.values()]),
+        activeSessionId: restored.activeSessionId ?? views[kind].activeSessionId,
+        closedSessionIds: [...new Set([
+          ...views[kind].closedSessionIds,
+          ...(restored.closedSessionIds ?? []),
+        ])],
+        runtimes: { ...views[kind].runtimes, ...restored.runtimes },
+      };
+    }
+  }
+  const orderedLegacy = [...legacy].sort((left, right) => {
+    const updatedAt = (snapshot: typeof left): number => {
+      const view = snapshot.views[snapshot.provider];
+      return view?.sessions.find((session) => session.id === view.activeSessionId)?.updatedAt ?? 0;
+    };
+    return updatedAt(left) - updatedAt(right);
+  });
+  const preferred = current ?? orderedLegacy[orderedLegacy.length - 1];
+  if (preferred) {
+    const activeSessionId = preferred.views[preferred.provider]?.activeSessionId;
+    if (activeSessionId) views[preferred.provider].activeSessionId = activeSessionId;
+  }
+  return {
+    provider: preferred?.provider ?? "codex",
+    views,
+  };
+};
+
+const DesktopTargetRuntime = ({
+  active,
+  command,
+  discover,
+  selection,
+  target: targetDescriptor,
+  onSnapshot,
+}: DesktopTargetRuntimeProps) => {
+  const initialSnapshot = useRef(loadTargetSnapshot(targetDescriptor));
+  const restoredSelection = selection?.targetKey === targetDescriptor.key ? selection : undefined;
+  const initialProvider = restoredSelection?.provider ?? initialSnapshot.current.provider;
+  const [provider, setProvider] = useState<AiKind>(initialProvider);
   const [installed, setInstalled] = useState<Set<AiKind>>(new Set());
   const [probedTarget, setProbedTarget] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
-  const [views, setViews] = useState<Record<AiKind, ProviderView>>(emptyViews);
-  const [sessionSearch, setSessionSearch] = useState("");
-  const [width, setWidth] = useState(560);
+  const [codexModels, setCodexModels] = useState<CodexModelOption[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [views, setViews] = useState<Record<AiKind, ProviderView>>(() => {
+    if (!restoredSelection?.sessionId) return initialSnapshot.current.views;
+    return {
+      ...initialSnapshot.current.views,
+      [restoredSelection.provider]: {
+        ...initialSnapshot.current.views[restoredSelection.provider],
+        activeSessionId: restoredSelection.sessionId,
+      },
+    };
+  });
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const viewsRef = useRef(views);
   const providerRef = useRef(provider);
@@ -216,34 +364,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     sessionId: string | null,
     text: string,
     queued?: boolean,
-  ) => Promise<void>>(async () => {});
-
-  const workspace = workspaces.find((candidate) => candidate.id === activeId);
-  const leaf = workspace
-    ? findTerminalLeaf(workspaces, workspace.id, workspace.focusedLeafId)
-    : undefined;
-  const parsedSsh = parseSshCommandLine(leaf?.sshCommand ?? leaf?.command);
-  const target = useMemo<DesktopAgentTarget>(() => ({
-    cwd: workspace && leaf
-      ? leafCwds[workspace.id]?.[leaf.id]
-        ?? leaf.lastCwd
-        ?? workspaceInfo[workspace.id]?.cwd
-        ?? undefined
-      : undefined,
-    sshCommand: leaf?.sshCommand ?? (parsedSsh ? leaf?.command : undefined),
-    sshConnection: leaf?.sshConnection ?? parsedSsh?.connection,
-  }), [
-    leaf?.command,
-    leaf?.id,
-    leaf?.lastCwd,
-    leaf?.sshCommand,
-    leaf?.sshConnection,
-    leafCwds,
-    parsedSsh,
-    workspace,
-    workspaceInfo,
-  ]);
-  const targetKey = `${target.sshConnection?.target ?? target.sshCommand ?? "local"}|${target.cwd ?? ""}`;
+  ) => Promise<boolean>>(async () => false);
+  const queuedDispatches = useRef(new Set<string>());
+  const handledSelection = useRef(0);
+  const handledCommand = useRef(0);
+  const discoveredProviders = useRef(new Set<AiKind>());
+  const target = targetDescriptor.target;
+  const targetKey = targetDescriptor.key;
   const view = views[provider];
   const runtime = readSessionRuntime(view.runtimes, view.activeSessionId);
   const latestTimelineTextLength = runtime.items[runtime.items.length - 1]?.text.length ?? 0;
@@ -286,7 +413,11 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   const applyEvent = useCallback((kind: AiKind, event: MobileAgentEvent): void => {
     switch (event.type) {
       case "sessionsLoaded":
-        updateView(kind, (current) => ({ ...current, sessions: event.sessions, status: "ready" }));
+        updateView(kind, (current) => ({
+          ...current,
+          sessions: mergeSessions(current.sessions, event.sessions),
+          status: "ready",
+        }));
         return;
       case "sessionLoaded":
         updateView(kind, (current) => ({
@@ -311,6 +442,12 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         }));
         return;
       case "turnStarted":
+        updateView(kind, (current) => ({
+          ...current,
+          sessions: current.sessions.map((session) => session.id === event.sessionId
+            ? { ...session, updatedAt: Math.floor(Date.now() / 1000) }
+            : session),
+        }));
         updateRuntime(kind, event.sessionId, (current) => ({
           ...current,
           activeTurnId: event.turnId,
@@ -319,20 +456,37 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         }));
         return;
       case "turnCompleted": {
-        let queued: string | undefined;
-        updateRuntime(kind, event.sessionId, (current) => {
-          queued = current.queue[0];
-          return {
-            ...current,
-            activeTurnId: null,
-            running: false,
-            waiting: false,
-            queue: current.queue.slice(1),
-          };
-        });
-        const next = queued;
+        const sessionRuntime = readSessionRuntime(
+          viewsRef.current[kind].runtimes,
+          event.sessionId,
+        );
+        const next = sessionRuntime.queue[0];
+        updateRuntime(kind, event.sessionId, (current) => ({
+          ...current,
+          activeTurnId: null,
+          running: false,
+          waiting: false,
+        }));
         if (next) {
-          setTimeout(() => void submitRef.current(kind, event.sessionId, next, true), 0);
+          const dispatchKey = `${kind}:${event.sessionId}`;
+          if (!queuedDispatches.current.has(dispatchKey)) {
+            queuedDispatches.current.add(dispatchKey);
+            setTimeout(() => {
+              void (async () => {
+                try {
+                  const sent = await submitRef.current(kind, event.sessionId, next, true);
+                  if (sent) {
+                    updateRuntime(kind, event.sessionId, (current) => ({
+                      ...current,
+                      queue: current.queue[0] === next ? current.queue.slice(1) : current.queue,
+                    }));
+                  }
+                } finally {
+                  queuedDispatches.current.delete(dispatchKey);
+                }
+              })();
+            }, 0);
+          }
         }
         return;
       }
@@ -446,7 +600,11 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       void closeChannel(channelId);
     }, CLAUDE_HELPER_TIMEOUT_MS));
     try {
-      if (sessionId) await loadDesktopClaudeSession(channelId, sessionId, target);
+      const session = sessionId
+        ? viewsRef.current.claude.sessions.find((candidate) => candidate.id === sessionId)
+        : undefined;
+      const sessionTarget = session?.cwd ? { ...target, cwd: session.cwd } : target;
+      if (sessionId) await loadDesktopClaudeSession(channelId, sessionId, sessionTarget);
       else await listDesktopClaudeSessions(channelId, target);
     } catch (reason) {
       channels.current.delete(channelId);
@@ -483,11 +641,21 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     let opening!: Promise<string | undefined>;
     opening = (async () => {
       const channelId = nextChannelId(kind, "provider");
+      const activeSessionId = sessionId ?? viewsRef.current[kind].activeSessionId;
+      const activeSession = viewsRef.current[kind].sessions.find(
+        (candidate) => candidate.id === activeSessionId,
+      );
+      const sessionTarget = activeSession?.cwd ? { ...target, cwd: activeSession.cwd } : target;
+      const launchRuntime = readSessionRuntime(
+        viewsRef.current[kind].runtimes,
+        activeSessionId,
+      );
       channels.current.set(channelId, {
         provider: kind,
         purpose: "provider",
         handledPayload: false,
         ...(sessionId ? { sessionId } : {}),
+        ...(kind === "claude" ? { launchSettings: launchRuntime.executionSettings } : {}),
       });
       decoders.current.set(channelId, new JsonLineDecoder());
       if (kind === "claude") {
@@ -495,14 +663,10 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       }
       updateView(kind, (current) => ({ ...current, status: "connecting", error: null }));
       try {
-        const launchRuntime = readSessionRuntime(
-          viewsRef.current[kind].runtimes,
-          sessionId ?? viewsRef.current[kind].activeSessionId,
-        );
         await openDesktopAgent(
           channelId,
           kind,
-          target,
+          sessionTarget,
           kind === "claude" ? sessionId : undefined,
           launchRuntime.executionSettings,
         );
@@ -517,14 +681,21 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
             (event) => applyEvent(kind, event),
           );
           codexClients.current.set(kind, client);
-          await client.initialize();
-          const activeSessionId = sessionId ?? viewsRef.current[kind].activeSessionId ?? undefined;
-          if (activeSessionId) {
+          await client.connect();
+          void client.listSessions().catch((reason) => {
+            updateView(kind, (current) => ({ ...current, error: String(reason) }));
+          });
+          void client.listModels().then(setCodexModels).catch(() => setCodexModels([]));
+          const resumedSessionId = activeSessionId ?? undefined;
+          if (resumedSessionId) {
             try {
-              const settings = await client.resumeSession(activeSessionId);
-              updateRuntime(kind, activeSessionId, (runtime) => ({
+              const settings = await client.resumeSession(resumedSessionId);
+              updateRuntime(kind, resumedSessionId, (runtime) => ({
                 ...runtime,
-                executionSettings: settings,
+                executionSettings: resolvedExecutionSettings(
+                  runtime.executionSettings,
+                  settings,
+                ),
               }));
             } catch (reason) {
               updateView(kind, (current) => ({ ...current, error: String(reason) }));
@@ -547,20 +718,20 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           );
           acpClients.current.set(kind, client);
           await client.initialize();
-          const activeSessionId = sessionId ?? viewsRef.current[kind].activeSessionId ?? undefined;
-          if (activeSessionId) {
+          const resumedSessionId = activeSessionId ?? undefined;
+          if (resumedSessionId) {
             const activeSession = viewsRef.current[kind].sessions.find(
-              (candidate) => candidate.id === activeSessionId,
+              (candidate) => candidate.id === resumedSessionId,
             );
             try {
-              await client.loadSession(activeSessionId, activeSession?.cwd ?? target.cwd ?? ".");
+              await client.loadSession(resumedSessionId, activeSession?.cwd ?? target.cwd ?? ".");
             } catch (reason) {
               updateView(kind, (current) => ({ ...current, error: String(reason) }));
             }
           }
           updateView(kind, (current) => ({ ...current, status: "ready" }));
         }
-        updateRuntime(kind, sessionId ?? viewsRef.current[kind].activeSessionId, (runtime) => ({
+        updateRuntime(kind, activeSessionId, (runtime) => ({
           ...runtime,
           connectionState: "connected",
         }));
@@ -785,55 +956,36 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     };
   }, [applyEvent, updateRuntime, updateView]);
 
-  useEffect(() => {
-    if (!open || !leaf || probedTarget === targetKey) return;
-    let cancelled = false;
+  useEffect(() => () => {
     runtimeGeneration.current += 1;
+    for (const client of codexClients.current.values()) client.close("Target removed");
+    for (const client of acpClients.current.values()) client.close("Target removed");
+    for (const channelId of channels.current.keys()) void closeDesktopAgent(channelId);
+  }, []);
+
+  useEffect(() => {
+    if (!discover || probedTarget === targetKey) return;
+    let cancelled = false;
     setProbing(true);
-    setInstalled(new Set());
-    setProbedTarget(null);
-    const currentChannels = [...channels.current.keys()];
-    channels.current.clear();
-    decoders.current.clear();
-    claudeNormalizers.current.clear();
-    stderr.current.clear();
-    for (const timeout of helperTimeouts.current.values()) clearTimeout(timeout);
-    helperTimeouts.current.clear();
-    const restored = loadAgentWorkbenchSnapshot(
-      `${DESKTOP_WORKBENCH_STORAGE_PREFIX}${targetKey}`,
-      AI_KINDS,
-    );
-    const nextViews = restoreViews(restored?.views ?? {});
-    const restoredProvider = restored?.provider ?? provider;
-    setViews(nextViews);
-    viewsRef.current = nextViews;
-    setProvider(restoredProvider);
-    providerChannels.current.clear();
-    openingProviders.current.clear();
-    for (const client of codexClients.current.values()) client.close("Target changed");
-    for (const client of acpClients.current.values()) client.close("Target changed");
-    codexClients.current.clear();
-    acpClients.current.clear();
-    for (const channelId of currentChannels) void closeChannel(channelId);
     void probeDesktopAgents(AI_KINDS, target)
       .then((found) => {
         if (cancelled) return;
         setInstalled(found);
         setProbedTarget(targetKey);
-        if (!found.has(restoredProvider)) {
+        if (!found.has(providerRef.current)) {
           setProvider(AI_KINDS.find((kind) => found.has(kind)) ?? "codex");
         }
       })
       .catch((reason) => {
         if (!cancelled) {
-          updateView(restoredProvider, (current) => ({ ...current, error: String(reason) }));
+          updateView(providerRef.current, (current) => ({ ...current, error: String(reason) }));
         }
       })
       .finally(() => {
         if (!cancelled) setProbing(false);
       });
     return () => { cancelled = true; };
-  }, [closeChannel, leaf?.id, open, probedTarget, targetKey]);
+  }, [discover, probedTarget, target, targetKey, updateView]);
 
   const persistWorkbench = useCallback((): void => {
     if (probedTarget !== targetKey) return;
@@ -850,14 +1002,54 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
 
   useEffect(() => {
     const persistWhenHidden = (): void => {
-      if (document.visibilityState === "hidden") persistWorkbench();
+      if (document.visibilityState === "hidden") {
+        persistWorkbench();
+        return;
+      }
+      if (document.visibilityState === "visible" && discover && probedTarget === targetKey) {
+        for (const kind of AI_KINDS) {
+          if (!installed.has(kind)) continue;
+          const sessionId = viewsRef.current[kind].activeSessionId ?? undefined;
+          if (kind === "claude" && !sessionId) {
+            void openClaudeAux("claude-list");
+            continue;
+          }
+          const channelKey = providerChannelKey(kind, sessionId);
+          const sessionRuntime = readSessionRuntime(viewsRef.current[kind].runtimes, sessionId);
+          if (
+            sessionRuntime.connectionState === "disconnected"
+            || !providerChannels.current.has(channelKey)
+          ) {
+            void openProvider(kind, kind === "claude" ? sessionId : undefined);
+          }
+        }
+      }
     };
     document.addEventListener("visibilitychange", persistWhenHidden);
-    return () => document.removeEventListener("visibilitychange", persistWhenHidden);
-  }, [persistWorkbench]);
+    window.addEventListener("beforeunload", persistWorkbench);
+    return () => {
+      document.removeEventListener("visibilitychange", persistWhenHidden);
+      window.removeEventListener("beforeunload", persistWorkbench);
+    };
+  }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, targetKey]);
 
   useEffect(() => {
-    if (!open || probedTarget !== targetKey || !installed.has(provider)) return;
+    if (!discover || probedTarget !== targetKey) return;
+    for (const kind of AI_KINDS) {
+      if (!installed.has(kind) || discoveredProviders.current.has(kind)) continue;
+      discoveredProviders.current.add(kind);
+      if (kind === "claude") {
+        void openClaudeAux("claude-list");
+        continue;
+      }
+      void openProvider(kind).then((channelId) => {
+        if (!channelId) discoveredProviders.current.delete(kind);
+      });
+    }
+  }, [discover, installed, openClaudeAux, openProvider, probedTarget, targetKey]);
+
+  useEffect(() => {
+    if (!active || probedTarget !== targetKey || !installed.has(provider)) return;
     if (provider === "claude") {
       const activeSessionId = viewsRef.current.claude.activeSessionId ?? undefined;
       const activeRuntime = readSessionRuntime(
@@ -874,25 +1066,34 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       return;
     }
     void openProvider(provider);
-  }, [installed, open, openClaudeAux, openProvider, probedTarget, provider, targetKey]);
+  }, [
+    active,
+    installed,
+    openClaudeAux,
+    openProvider,
+    probedTarget,
+    provider,
+    runtime.connectionState,
+    targetKey,
+  ]);
 
   useLayoutEffect(() => {
-    if (!open || !timelineRef.current) return;
+    if (!active || !timelineRef.current) return;
     timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
   }, [
     latestTimelineTextLength,
-    open,
+    active,
     provider,
     runtime.approvals.length,
     runtime.items.length,
     runtime.running,
   ]);
 
-  const selectSession = async (session: MobileSession): Promise<void> => {
-    const selectedRuntime = readSessionRuntime(viewsRef.current[provider].runtimes, session.id);
+  const selectSession = async (kind: AiKind, session: MobileSession): Promise<void> => {
+    const selectedRuntime = readSessionRuntime(viewsRef.current[kind].runtimes, session.id);
     const shouldReconnect = selectedRuntime.connectionState === "disconnected";
     const shouldLoadHistory = selectedRuntime.historyState === "idle";
-    updateView(provider, (current) => ({
+    updateView(kind, (current) => ({
       ...current,
       activeSessionId: session.id,
       runtimes: updateSessionRuntime(
@@ -903,30 +1104,33 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       error: null,
     }));
     try {
-      const providerClientMissing = provider === "codex"
-        ? !codexClients.current.has(provider)
-        : provider !== "claude" && !acpClients.current.has(provider);
+      const providerClientMissing = kind === "codex"
+        ? !codexClients.current.has(kind)
+        : kind !== "claude" && !acpClients.current.has(kind);
       if (shouldReconnect || providerClientMissing) {
-        await openProvider(provider, provider === "claude" ? session.id : undefined);
+        await openProvider(kind, kind === "claude" ? session.id : undefined);
         return;
       }
-      if (provider === "codex") {
+      if (kind === "codex") {
         if (shouldLoadHistory) {
-          const settings = await codexClients.current.get(provider)?.resumeSession(session.id);
-          if (settings) updateRuntime(provider, session.id, (runtime) => ({
+          const settings = await codexClients.current.get(kind)?.resumeSession(session.id);
+          if (settings) updateRuntime(kind, session.id, (runtime) => ({
             ...runtime,
-            executionSettings: settings,
+            executionSettings: resolvedExecutionSettings(
+              runtime.executionSettings,
+              settings,
+            ),
           }));
         }
-      } else if (provider === "claude") {
+      } else if (kind === "claude") {
         if (shouldLoadHistory) await openClaudeAux("claude-history", session.id);
       } else {
         if (shouldLoadHistory) {
-          await acpClients.current.get(provider)?.loadSession(session.id, session.cwd ?? target.cwd ?? ".");
+          await acpClients.current.get(kind)?.loadSession(session.id, session.cwd ?? target.cwd ?? ".");
         }
       }
     } catch (reason) {
-      updateView(provider, (current) => ({
+      updateView(kind, (current) => ({
         ...current,
         runtimes: updateSessionRuntime(current.runtimes, session.id, failSessionHistory),
         error: String(reason),
@@ -934,8 +1138,8 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     }
   };
 
-  const newSession = async (): Promise<void> => {
-    updateView(provider, (current) => ({
+  const newSession = async (kind: AiKind): Promise<void> => {
+    updateView(kind, (current) => ({
       ...current,
       activeSessionId: null,
       runtimes: { ...current.runtimes, [sessionRuntimeKey(null)]: createSessionRuntime() },
@@ -943,63 +1147,97 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     }));
     try {
       let sessionId: string | undefined;
-      if (provider === "codex") {
-        const started = await codexClients.current.get(provider)?.startSession(
+      if (kind === "codex") {
+        await openProvider(kind);
+        const started = await codexClients.current.get(kind)?.startSession(
           target.cwd,
-          readSessionRuntime(viewsRef.current[provider].runtimes, null).executionSettings,
+          readSessionRuntime(viewsRef.current[kind].runtimes, null).executionSettings,
         );
         sessionId = started?.threadId;
-      } else if (provider === "claude") {
-        await openProvider(provider);
+        if (sessionId && started) {
+          updateRuntime(kind, null, (runtime) => ({
+            ...runtime,
+            executionSettings: resolvedExecutionSettings(
+              runtime.executionSettings,
+              started.settings,
+            ),
+          }));
+        }
+      } else if (kind === "claude") {
+        await openProvider(kind);
       } else {
-        sessionId = await acpClients.current.get(provider)?.newSession(target.cwd ?? ".");
+        await openProvider(kind);
+        sessionId = await acpClients.current.get(kind)?.newSession(target.cwd ?? ".");
       }
       if (sessionId) {
-        updateView(provider, (current) => ({
+        updateView(kind, (current) => ({
           ...current,
           activeSessionId: sessionId,
           runtimes: moveSessionRuntime(current.runtimes, null, sessionId),
         }));
       }
     } catch (reason) {
-      updateView(provider, (current) => ({ ...current, error: String(reason) }));
+      updateView(kind, (current) => ({ ...current, error: String(reason) }));
     }
   };
+
+  useEffect(() => {
+    if (
+      !active
+      || !selection
+      || selection.targetKey !== targetKey
+      || handledSelection.current === selection.nonce
+      || probedTarget !== targetKey
+    ) return;
+    handledSelection.current = selection.nonce;
+    setProvider(selection.provider);
+    if (!installed.has(selection.provider)) {
+      updateView(selection.provider, (current) => ({
+        ...current,
+        error: `${PROVIDER_NAMES[selection.provider]} is not installed on ${targetDescriptor.label}`,
+      }));
+      return;
+    }
+    if (selection.create) {
+      void newSession(selection.provider);
+      return;
+    }
+    const session = viewsRef.current[selection.provider].sessions.find(
+      (candidate) => candidate.id === selection.sessionId,
+    );
+    if (session) void selectSession(selection.provider, session);
+  }, [active, installed, probedTarget, selection, targetDescriptor.label, targetKey, updateView]);
 
   const sendText = async (
     kind: AiKind,
     text: string,
     queued = false,
     requestedSessionId?: string | null,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
     const current = viewsRef.current[kind];
     let sessionId = requestedSessionId === undefined
       ? current.activeSessionId
       : requestedSessionId;
-    const currentRuntime = readSessionRuntime(current.runtimes, sessionId);
-    if (currentRuntime.historyState === "loading") return;
-    if (currentRuntime.running && currentRuntime.queueMode && !queued) {
+    let currentRuntime = readSessionRuntime(current.runtimes, sessionId);
+    const sessionCwd = current.sessions.find((session) => session.id === sessionId)?.cwd
+      ?? target.cwd;
+    if (currentRuntime.historyState === "loading") return false;
+    const action = queued ? "send" : composerAction(currentRuntime.running, currentRuntime.queueMode);
+    if (action === "queue") {
       updateRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         queue: [...runtime.queue, trimmed],
         draft: "",
       }));
-      return;
+      return true;
     }
     updateView(kind, (state) => ({ ...state, error: null }));
-    updateRuntime(kind, sessionId, (runtime) => ({
-      ...runtime,
-      draft: "",
-      running: true,
-      waiting: false,
-      historyState: "loaded",
-      items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
-    }));
-    try {
-      const channelId = await openProvider(kind, kind === "claude" ? sessionId ?? undefined : undefined);
-      if (kind === "codex") {
+
+    if (kind === "codex") {
+      try {
+        await openProvider(kind);
         const client = codexClients.current.get(kind);
         if (!client) throw new Error("Codex channel is not ready");
         if (!sessionId) {
@@ -1013,22 +1251,96 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
             ...state,
             activeSessionId: state.activeSessionId === null ? createdSessionId : state.activeSessionId,
             runtimes: moveSessionRuntime(state.runtimes, null, createdSessionId),
+            sessions: state.sessions.some((session) => session.id === createdSessionId)
+              ? state.sessions
+              : [{
+                  id: createdSessionId,
+                  title: trimmed.slice(0, 80),
+                  cwd: target.cwd,
+                  updatedAt: Math.floor(Date.now() / 1000),
+                  provider: kind,
+                }, ...state.sessions],
           }));
+          currentRuntime = readSessionRuntime(viewsRef.current[kind].runtimes, createdSessionId);
+          updateRuntime(kind, createdSessionId, (runtime) => ({
+            ...runtime,
+            executionSettings: resolvedExecutionSettings(
+              currentRuntime.executionSettings,
+              started.settings,
+            ),
+          }));
+          currentRuntime = readSessionRuntime(viewsRef.current[kind].runtimes, createdSessionId);
         }
-        if (currentRuntime.running && currentRuntime.activeTurnId && !queued) {
+        updateRuntime(kind, sessionId, (runtime) => ({
+          ...runtime,
+          draft: "",
+          running: true,
+          waiting: false,
+          historyState: "loaded",
+          items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
+        }));
+        if (action === "steer" && currentRuntime.activeTurnId) {
           await client.steer(sessionId, currentRuntime.activeTurnId, trimmed);
         } else {
           await client.startTurn(
             sessionId,
             trimmed,
-            target.cwd,
+            sessionCwd,
             readSessionRuntime(viewsRef.current[kind].runtimes, sessionId).executionSettings,
           );
         }
-      } else if (kind === "claude") {
-        if (!channelId) throw new Error("Claude channel is not ready");
+        return true;
+      } catch (reason) {
+        if (action !== "steer") {
+          updateRuntime(kind, sessionId, (runtime) => ({
+            ...runtime,
+            running: false,
+            waiting: false,
+          }));
+        }
+        updateView(kind, (state) => ({ ...state, error: String(reason) }));
+        return false;
+      }
+    }
+
+    if (kind === "claude") {
+      let channelId = providerChannels.current.get(providerChannelKey(kind, sessionId));
+      const channelMeta = channelId ? channels.current.get(channelId) : undefined;
+      if (
+        channelId
+        && action === "send"
+        && !sameClaudeLaunchSettings(channelMeta?.launchSettings, currentRuntime.executionSettings)
+      ) {
+        providerChannels.current.delete(providerChannelKey(kind, sessionId));
+        await closeChannel(channelId).catch(() => {});
+        channelId = await openProvider(kind, sessionId ?? undefined);
+      }
+      if (!channelId) channelId = await openProvider(kind, sessionId ?? undefined);
+      if (!channelId) return false;
+      updateRuntime(kind, sessionId, (runtime) => ({
+        ...runtime,
+        draft: "",
+        running: true,
+        waiting: false,
+        historyState: "loaded",
+        items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
+      }));
+      try {
         await writeDesktopAgentLine(channelId, claudeInput(trimmed));
-      } else {
+        return true;
+      } catch (reason) {
+        updateRuntime(kind, sessionId, (runtime) => ({
+          ...runtime,
+          running: false,
+          waiting: false,
+        }));
+        updateView(kind, (state) => ({ ...state, error: String(reason) }));
+        return false;
+      }
+    }
+
+    try {
+        await openProvider(kind);
         const client = acpClients.current.get(kind);
         if (!client) throw new Error(`${PROVIDER_NAMES[kind]} channel is not ready`);
         if (!sessionId) {
@@ -1038,48 +1350,98 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
             ...state,
             activeSessionId: state.activeSessionId === null ? createdSessionId : state.activeSessionId,
             runtimes: moveSessionRuntime(state.runtimes, null, createdSessionId),
+            sessions: state.sessions.some((session) => session.id === createdSessionId)
+              ? state.sessions
+              : [{
+                  id: createdSessionId,
+                  title: trimmed.slice(0, 80),
+                  cwd: target.cwd,
+                  updatedAt: Math.floor(Date.now() / 1000),
+                  provider: kind,
+                }, ...state.sessions],
           }));
         }
-        if (currentRuntime.running && !queued) await client.cancel(sessionId);
+        updateRuntime(kind, sessionId, (runtime) => ({
+          ...runtime,
+          draft: "",
+          running: true,
+          waiting: false,
+          historyState: "loaded",
+          items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
+        }));
+        if (action === "steer") await client.cancel(sessionId);
         const stopReason = await client.prompt(sessionId, trimmed);
         applyEvent(kind, { type: "turnCompleted", sessionId, status: stopReason });
-      }
+        return true;
     } catch (reason) {
       updateRuntime(kind, sessionId, (runtime) => ({ ...runtime, running: false, waiting: false }));
       updateView(kind, (state) => ({ ...state, error: String(reason) }));
+      return false;
     }
   };
   submitRef.current = (kind, sessionId, text, queued) =>
     sendText(kind, text, queued, sessionId);
 
-  const stop = async (): Promise<void> => {
-    const current = viewsRef.current[provider];
-    const sessionId = current.activeSessionId;
+  const stopSession = useCallback(async (
+    kind: AiKind,
+    sessionId: string | null,
+  ): Promise<void> => {
+    const current = viewsRef.current[kind];
     const currentRuntime = readSessionRuntime(current.runtimes, sessionId);
+    if (!currentRuntime.running && !currentRuntime.waiting) return;
     try {
-      if (provider === "codex" && sessionId && currentRuntime.activeTurnId) {
-        await codexClients.current.get(provider)?.interrupt(sessionId, currentRuntime.activeTurnId);
-      } else if (provider === "claude") {
-        const key = providerChannelKey(provider, sessionId);
+      if (kind === "codex" && sessionId && currentRuntime.activeTurnId) {
+        await codexClients.current.get(kind)?.interrupt(sessionId, currentRuntime.activeTurnId);
+      } else if (kind === "claude") {
+        const key = providerChannelKey(kind, sessionId);
         const channelId = providerChannels.current.get(key);
         if (channelId) {
           providerChannels.current.delete(key);
           await closeChannel(channelId);
         }
       } else if (sessionId) {
-        await acpClients.current.get(provider)?.cancel(sessionId);
+        await acpClients.current.get(kind)?.cancel(sessionId);
       }
-      updateRuntime(provider, sessionId, (runtime) => ({
+      updateRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         running: false,
         waiting: false,
         activeTurnId: null,
-        connectionState: provider === "claude" ? "idle" : runtime.connectionState,
+        connectionState: kind === "claude" ? "idle" : runtime.connectionState,
       }));
     } catch (reason) {
-      updateView(provider, (state) => ({ ...state, error: String(reason) }));
+      updateView(kind, (state) => ({ ...state, error: String(reason) }));
     }
-  };
+  }, [closeChannel, updateRuntime, updateView]);
+
+  const stop = (): Promise<void> => stopSession(provider, viewsRef.current[provider].activeSessionId);
+
+  useEffect(() => {
+    if (
+      !command
+      || command.targetKey !== targetKey
+      || handledCommand.current === command.nonce
+    ) return;
+    handledCommand.current = command.nonce;
+    if (command.action === "stop") {
+      void stopSession(command.provider, command.sessionId);
+      return;
+    }
+    updateView(command.provider, (current) => {
+      const closed = new Set(current.closedSessionIds);
+      if (command.action === "close") closed.add(command.sessionId);
+      else closed.delete(command.sessionId);
+      const activeSessionId = command.action === "close"
+        && current.activeSessionId === command.sessionId
+        ? current.sessions.find((session) => !closed.has(session.id))?.id ?? null
+        : current.activeSessionId;
+      return {
+        ...current,
+        activeSessionId,
+        closedSessionIds: [...closed],
+      };
+    });
+  }, [command, stopSession, targetKey, updateView]);
 
   const resolveApproval = async (
     approval: AgentApprovalRequest,
@@ -1101,117 +1463,175 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     }
   };
 
-  const startResize = (event: React.MouseEvent<HTMLDivElement>): void => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = width;
-    const move = (moveEvent: MouseEvent) => {
-      const maxWidth = Math.max(MIN_WORKBENCH_WIDTH, window.innerWidth - MIN_TERMINAL_WIDTH);
-      setWidth(Math.min(maxWidth, Math.max(MIN_WORKBENCH_WIDTH, startWidth + startX - moveEvent.clientX)));
-    };
-    const stopResize = () => {
-      document.removeEventListener("mousemove", move);
-      document.removeEventListener("mouseup", stopResize);
-    };
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", stopResize);
+  const applyExecutionSettings = async (settings: AgentExecutionSettings): Promise<void> => {
+    const kind = providerRef.current;
+    const current = viewsRef.current[kind];
+    const sessionId = current.activeSessionId;
+    const previousSettings = readSessionRuntime(current.runtimes, sessionId).executionSettings;
+    updateRuntime(kind, sessionId, (sessionRuntime) => ({
+      ...sessionRuntime,
+      executionSettings: settings,
+    }));
+    try {
+      if (kind === "codex" && sessionId) {
+        if (!codexClients.current.has(kind)) await openProvider(kind);
+        const client = codexClients.current.get(kind);
+        if (!client) throw new Error("Codex channel is not ready");
+        await client.updateSessionSettings(sessionId, settings);
+      }
+    } catch (reason) {
+      updateRuntime(kind, sessionId, (sessionRuntime) => ({
+        ...sessionRuntime,
+        executionSettings: previousSettings,
+      }));
+      updateView(kind, (currentView) => ({ ...currentView, error: String(reason) }));
+    }
   };
 
-  const filteredSessions = view.sessions.filter((session) => {
-    const search = sessionSearch.trim().toLowerCase();
-    return !search || `${session.title} ${session.cwd ?? ""}`.toLowerCase().includes(search);
-  });
-  const activeSession = view.sessions.find((session) => session.id === view.activeSessionId);
+  useEffect(() => {
+    onSnapshot(targetKey, {
+      views,
+      installed,
+      probed: probedTarget === targetKey,
+      probing,
+      provider,
+    });
+  }, [installed, onSnapshot, probedTarget, probing, provider, targetKey, views]);
 
-  if (!open) return null;
+  const activeSession = view.sessions.find((session) => session.id === view.activeSessionId);
+  const supportsExecutionSettings = provider === "codex" || provider === "claude";
+  const threadSettings = runtime.executionSettings;
+  const selectedCodexModel = codexModels.find((model) =>
+    model.model === threadSettings.model || model.id === threadSettings.model)
+    ?? codexModels.find((model) => model.isDefault);
+  const effortOptions = provider === "codex"
+    ? selectedCodexModel?.supportedReasoningEfforts ?? []
+    : [...CLAUDE_EFFORTS];
+  const serviceTierOptions = selectedCodexModel?.serviceTiers ?? [];
+  const modelLabel = provider === "codex"
+    ? selectedCodexModel?.displayName ?? threadSettings.model ?? "Default"
+    : threadSettings.model ?? "Default";
+  const effortLabel = threadSettings.effort ?? selectedCodexModel?.defaultReasoningEffort ?? "Default";
+  const serviceTierLabel = serviceTierOptions.find((tier) => tier.id === threadSettings.serviceTier)?.name
+    ?? threadSettings.serviceTier
+    ?? "Standard";
+  const executionSummaryLabel = [
+    modelLabel,
+    effortLabel,
+    provider === "codex" ? serviceTierLabel : null,
+  ].filter(Boolean).join(" · ");
+  const hasCachedView = view.sessions.length > 0 || Object.keys(view.runtimes).length > 0;
+
+  if (!active) return null;
+  if (probing && probedTarget !== targetKey && !hasCachedView) {
+    return <div className="agent-workbench-empty"><strong>Checking installed CLIs…</strong></div>;
+  }
+  if (probedTarget === targetKey && installed.size === 0) {
+    return (
+      <div className="agent-workbench-empty">
+        <strong>No supported CLI found</strong>
+        <p>Install a provider CLI on {target.sshConnection || target.sshCommand ? "the SSH host" : "this computer"}.</p>
+      </div>
+    );
+  }
 
   return (
-    <aside className="agent-workbench" style={{ width }} aria-label="AI workbench">
-      <div className="agent-workbench-resizer" onMouseDown={startResize} />
-      <header className="agent-workbench-header">
-        <div>
-          <strong>AI workbench</strong>
-          <span title={targetLabel(target)}>{targetLabel(target)}</span>
-        </div>
-        <button type="button" className="agent-icon-button" onClick={onClose} aria-label="Close AI workbench">×</button>
-      </header>
-
-      <nav className="agent-provider-tabs" aria-label="AI provider">
-        {AI_KINDS.map((kind) => {
-          const available = installed.has(kind);
-          return (
-            <button
-              type="button"
-              key={kind}
-              className={provider === kind ? "active" : ""}
-              disabled={!available}
-              onClick={() => setProvider(kind)}
-              title={available ? PROVIDER_NAMES[kind] : `${PROVIDER_NAMES[kind]} is not installed`}
-            >
-              <span>{PROVIDER_MARKS[kind]}</span>
-              {PROVIDER_NAMES[kind]}
-            </button>
-          );
-        })}
-      </nav>
-
-      {!leaf ? (
-        <div className="agent-workbench-empty">
-          <strong>Select a terminal pane</strong>
-          <p>The workbench follows its host and working directory.</p>
-        </div>
-      ) : probing ? (
-        <div className="agent-workbench-empty"><strong>Checking installed CLIs…</strong></div>
-      ) : installed.size === 0 ? (
-        <div className="agent-workbench-empty">
-          <strong>No supported CLI found</strong>
-          <p>Install a provider CLI on {target.sshConnection || target.sshCommand ? "the SSH host" : "this computer"}.</p>
-        </div>
-      ) : (
-        <div className="agent-workbench-body">
-          <section className="agent-session-column">
-            <div className="agent-session-actions">
-              <span>Sessions</span>
-              <button type="button" onClick={() => void newSession()}>New</button>
-            </div>
-            <input
-              type="search"
-              value={sessionSearch}
-              onChange={(event) => setSessionSearch(event.target.value)}
-              placeholder="Search"
-              aria-label="Search sessions"
-            />
-            <div className="agent-session-list">
-              {filteredSessions.map((session) => {
-                const sessionRuntime = readSessionRuntime(view.runtimes, session.id);
-                return (
-                  <button
-                    type="button"
-                    key={session.id}
-                    className={session.id === view.activeSessionId ? "active" : ""}
-                    onClick={() => void selectSession(session)}
-                  >
-                    <strong>{session.title}</strong>
-                    <span>{session.cwd ?? session.id}</span>
-                    <small className={sessionRuntime.running ? "running" : ""}>
-                      {sessionRuntime.running ? sessionRuntimeLabel(sessionRuntime) : relativeTime(session.updatedAt)}
-                    </small>
-                  </button>
-                );
-              })}
-              {filteredSessions.length === 0 ? <p>No saved sessions</p> : null}
-            </div>
-          </section>
-
-          <section className="agent-conversation">
+    <section className="agent-conversation">
             <header className="agent-conversation-header">
-              <div>
-                <span>{PROVIDER_NAMES[provider]}</span>
-                <strong>{activeSession?.title ?? "New session"}</strong>
+              <div className="agent-conversation-header-main">
+                <div>
+                  <span>{PROVIDER_NAMES[provider]}</span>
+                  <strong>{activeSession?.title ?? "New session"}</strong>
+                </div>
+                <div className="agent-conversation-header-actions">
+                  {supportsExecutionSettings ? (
+                    <button
+                      type="button"
+                      className="agent-execution-summary"
+                      onClick={() => setSettingsOpen((current) => !current)}
+                    >{executionSummaryLabel}</button>
+                  ) : null}
+                  <span className={runtime.running ? "agent-run-state running" : "agent-run-state"}>
+                    {view.status === "connecting" ? "Connecting" : sessionRuntimeLabel(runtime)}
+                  </span>
+                </div>
               </div>
-              <span className={runtime.running ? "agent-run-state running" : "agent-run-state"}>
-                {view.status === "connecting" ? "Connecting" : sessionRuntimeLabel(runtime)}
-              </span>
+              {settingsOpen && supportsExecutionSettings ? (
+                <div className="agent-execution-settings">
+                  <label>
+                    <span>Model</span>
+                    <select
+                      value={threadSettings.model ?? ""}
+                      disabled={provider === "claude" && runtime.running}
+                      onChange={(event) => {
+                        const model = event.target.value || null;
+                        if (provider !== "codex") {
+                          void applyExecutionSettings({ ...threadSettings, model });
+                          return;
+                        }
+                        const option = codexModels.find((candidate) =>
+                          candidate.model === model || candidate.id === model);
+                        const effort = option?.supportedReasoningEfforts.includes(threadSettings.effort ?? "")
+                          ? threadSettings.effort
+                          : option?.defaultReasoningEffort ?? null;
+                        const serviceTier = option?.serviceTiers.some((tier) => tier.id === threadSettings.serviceTier)
+                          ? threadSettings.serviceTier
+                          : option?.defaultServiceTier ?? null;
+                        void applyExecutionSettings({ model, effort, serviceTier });
+                      }}
+                    >
+                      <option value="">Default</option>
+                      {provider === "codex"
+                        ? codexModels.map((model) => (
+                            <option key={model.id} value={model.model}>{model.displayName}</option>
+                          ))
+                        : <>
+                            {threadSettings.model && !CLAUDE_MODELS.includes(threadSettings.model as typeof CLAUDE_MODELS[number])
+                              ? <option value={threadSettings.model}>{threadSettings.model}</option>
+                              : null}
+                            {CLAUDE_MODELS.map((model) => <option key={model} value={model}>{model}</option>)}
+                          </>}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Effort</span>
+                    <select
+                      value={threadSettings.effort ?? ""}
+                      disabled={provider === "claude" && runtime.running}
+                      onChange={(event) => void applyExecutionSettings({
+                        ...threadSettings,
+                        effort: event.target.value || null,
+                      })}
+                    >
+                      <option value="">Default</option>
+                      {threadSettings.effort && !effortOptions.includes(threadSettings.effort)
+                        ? <option value={threadSettings.effort}>{threadSettings.effort}</option>
+                        : null}
+                      {effortOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
+                    </select>
+                  </label>
+                  {provider === "codex" ? (
+                    <label>
+                      <span>Speed</span>
+                      <select
+                        value={threadSettings.serviceTier ?? ""}
+                        onChange={(event) => void applyExecutionSettings({
+                          ...threadSettings,
+                          serviceTier: event.target.value || null,
+                        })}
+                      >
+                        <option value="">Standard</option>
+                        {threadSettings.serviceTier && !serviceTierOptions.some((tier) => tier.id === threadSettings.serviceTier)
+                          ? <option value={threadSettings.serviceTier}>{threadSettings.serviceTier}</option>
+                          : null}
+                        {serviceTierOptions.map((tier) => (
+                          <option key={tier.id} value={tier.id}>{tier.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
             </header>
 
             <div ref={timelineRef} className="agent-timeline" aria-live="polite">
@@ -1229,7 +1649,6 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
               ) : null}
               {runtime.items.map((item) => (
                 <article key={item.id} className={`agent-timeline-row ${item.kind}`}>
-                  <span className="agent-timeline-rail" />
                   <div>
                     <small>{item.kind === "user" ? "You" : item.kind === "assistant" ? PROVIDER_NAMES[provider] : item.title ?? "Status"}</small>
                     {item.kind === "tool" ? <pre>{item.text}</pre> : <p>{item.text}</p>}
@@ -1258,7 +1677,12 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   </div>
                 </article>
               ))}
-              {runtime.running ? <div className="agent-working"><span /><span /><span /> Working</div> : null}
+              {runtime.running ? (
+                <div className="agent-working">
+                  <span /><span /><span />
+                  {runtime.connectionState === "disconnected" ? "Connection paused · checking task" : "Working"}
+                </div>
+              ) : null}
             </div>
 
             {runtime.queue.length > 0 ? (
@@ -1311,9 +1735,370 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                 </div>
               </div>
             </footer>
-          </section>
+    </section>
+  );
+};
+
+export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps) => {
+  const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const activeId = useWorkspaceStore((state) => state.activeId);
+  const leafCwds = useWorkspaceInfoStore((state) => state.leafCwds);
+  const workspaceInfo = useWorkspaceInfoStore((state) => state.info);
+  const sshHosts = useSshHostsStore((state) => state.hosts);
+  const initialSelection = useRef(loadDesktopWorkbenchSelection(localStorage, AI_KINDS));
+  const [selectedTargetKey, setSelectedTargetKey] = useState<string | null>(
+    initialSelection.current?.targetKey ?? null,
+  );
+  const [targetSnapshots, setTargetSnapshots] = useState<Record<string, DesktopTargetSnapshot>>({});
+  const [command, setCommand] = useState<DesktopTargetCommand>();
+  const [selection, setSelection] = useState<DesktopTargetSelection | undefined>(() =>
+    initialSelection.current ? {
+      nonce: 1,
+      ...initialSelection.current,
+      create: false,
+    } : undefined);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [showClosed, setShowClosed] = useState(false);
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [newSessionContext, setNewSessionContext] = useState("");
+  const [newSessionProvider, setNewSessionProvider] = useState<AiKind>("codex");
+  const [width, setWidth] = useState(620);
+  const selectionSequence = useRef(initialSelection.current ? 1 : 0);
+  const commandSequence = useRef(0);
+
+  const targets = useMemo<DesktopTargetDescriptor[]>(() => {
+    const contexts = new Map<string, DesktopTargetDescriptor>();
+    const savedHostNames = new Map(
+      sshHosts.map((host) => [buildSshConnection(host).target, host.name]),
+    );
+    for (const workspace of workspaces) {
+      for (const node of collectOrderedLeaves(workspace.layout)) {
+        if (node.type !== "leaf") continue;
+        const parsedSsh = parseSshCommandLine(node.sshCommand ?? node.command);
+        const cwd = leafCwds[workspace.id]?.[node.id]
+          ?? node.lastCwd
+          ?? workspaceInfo[workspace.id]?.cwd
+          ?? undefined;
+        const target: DesktopAgentTarget = {
+          cwd,
+          sshCommand: node.sshCommand ?? (parsedSsh ? node.command : undefined),
+          sshConnection: node.sshConnection ?? parsedSsh?.connection,
+        };
+        const key = targetContextKey(target);
+        const connectionTarget = target.sshConnection?.target
+          ?? parseSshCommandLine(target.sshCommand)?.connection.target;
+        const label = connectionTarget
+          ? savedHostNames.get(connectionTarget) ?? connectionTarget
+          : "Local";
+        const legacyKey = `${connectionTarget ?? target.sshCommand ?? "local"}|${cwd ?? ""}`;
+        const legacyPrefix = `${connectionTarget ?? target.sshCommand ?? "local"}|`;
+        const focused = workspace.id === activeId && workspace.focusedLeafId === node.id;
+        const current = contexts.get(key);
+        if (!current) {
+          contexts.set(key, {
+            key,
+            label,
+            target,
+            legacyStorageKeys: [legacyKey],
+            legacyStoragePrefixes: [legacyPrefix],
+            workspaceId: workspace.id,
+            leafId: node.id,
+          });
+          continue;
+        }
+        if (!current.legacyStorageKeys.includes(legacyKey)) {
+          current.legacyStorageKeys.push(legacyKey);
+        }
+        if (!current.legacyStoragePrefixes.includes(legacyPrefix)) {
+          current.legacyStoragePrefixes.push(legacyPrefix);
+        }
+        if (focused) {
+          contexts.set(key, {
+            ...current,
+            target,
+            workspaceId: workspace.id,
+            leafId: node.id,
+          });
+        }
+      }
+    }
+    for (const host of sshHosts) {
+      const connection = buildSshConnection(host);
+      const target: DesktopAgentTarget = { sshConnection: connection };
+      const key = targetContextKey(target);
+      const legacyKey = `${connection.target}|`;
+      const current = contexts.get(key);
+      if (current) {
+        current.label = host.name;
+        if (!current.legacyStorageKeys.includes(legacyKey)) {
+          current.legacyStorageKeys.push(legacyKey);
+        }
+        if (!current.legacyStoragePrefixes.includes(legacyKey)) {
+          current.legacyStoragePrefixes.push(legacyKey);
+        }
+      } else {
+        contexts.set(key, {
+          key,
+          label: host.name,
+          target,
+          legacyStorageKeys: [legacyKey],
+          legacyStoragePrefixes: [legacyKey],
+        });
+      }
+    }
+    if (!contexts.has("local")) {
+      contexts.set("local", {
+        key: "local",
+        label: "Local",
+        target: {},
+        legacyStorageKeys: ["local|"],
+        legacyStoragePrefixes: ["local|"],
+      });
+    }
+    return [...contexts.values()];
+  }, [activeId, leafCwds, sshHosts, workspaceInfo, workspaces]);
+
+  const focusedTarget = targets.find((target) => {
+    const workspace = workspaces.find((candidate) => candidate.id === target.workspaceId);
+    return workspace?.id === activeId && workspace.focusedLeafId === target.leafId;
+  });
+  const activeTargetKey = targets.some((target) => target.key === selectedTargetKey)
+    ? selectedTargetKey as string
+    : focusedTarget?.key ?? targets[0]?.key ?? "local";
+
+  const updateTargetSnapshot = useCallback((
+    targetKey: string,
+    snapshot: DesktopTargetSnapshot,
+  ): void => {
+    setTargetSnapshots((current) => {
+      const previous = current[targetKey];
+      if (
+        previous?.views === snapshot.views
+        && previous.installed === snapshot.installed
+        && previous.probed === snapshot.probed
+        && previous.probing === snapshot.probing
+        && previous.provider === snapshot.provider
+      ) return current;
+      return { ...current, [targetKey]: snapshot };
+    });
+  }, []);
+
+  const sessions = useMemo(() => buildDesktopSessionIndex(targets.flatMap((target) => {
+    const snapshot = targetSnapshots[target.key];
+    return snapshot ? [{
+      contextKey: target.key,
+      contextLabel: target.label,
+      views: snapshotViews(snapshot.views),
+    }] : [];
+  })), [targetSnapshots, targets]);
+  const openSessions = sessions.filter((entry) => !entry.closed);
+  const closedSessions = sessions.filter((entry) => entry.closed);
+  const listedSessions = showClosed ? closedSessions : openSessions;
+  const filteredSessions = listedSessions.filter((entry) => {
+    const search = sessionSearch.trim().toLowerCase();
+    return !search || `${entry.session.title} ${entry.session.cwd ?? ""} ${entry.contextLabel} ${PROVIDER_NAMES[entry.provider]}`
+      .toLowerCase()
+      .includes(search);
+  });
+  const activeSnapshot = targetSnapshots[activeTargetKey];
+  const activeProvider = activeSnapshot?.provider ?? "codex";
+  const activeSessionId = activeSnapshot?.views[activeProvider].activeSessionId ?? null;
+  const activeSessionKey = activeSessionId
+    ? `${activeTargetKey}:${activeProvider}:${activeSessionId}`
+    : null;
+
+  useEffect(() => {
+    if (!activeSnapshot?.probed) return;
+    saveDesktopWorkbenchSelection(localStorage, {
+      targetKey: activeTargetKey,
+      provider: activeProvider,
+      sessionId: activeSessionId,
+    });
+  }, [activeProvider, activeSessionId, activeSnapshot?.probed, activeTargetKey]);
+
+  const focusTarget = useCallback((targetKey: string): void => {
+    const target = targets.find((candidate) => candidate.key === targetKey);
+    if (!target?.workspaceId || !target.leafId) return;
+    const store = useWorkspaceStore.getState();
+    store.setActive(target.workspaceId);
+    store.setFocusedLeaf(target.workspaceId, target.leafId);
+  }, [targets]);
+
+  const requestSelection = useCallback((
+    targetKey: string,
+    provider: AiKind,
+    sessionId: string | null,
+    create: boolean,
+  ): void => {
+    selectionSequence.current += 1;
+    setSelectedTargetKey(targetKey);
+    setSelection({
+      nonce: selectionSequence.current,
+      targetKey,
+      provider,
+      sessionId,
+      create,
+    });
+    focusTarget(targetKey);
+  }, [focusTarget]);
+
+  const requestCommand = useCallback((
+    entry: DesktopSessionEntry,
+    action: DesktopTargetCommand["action"],
+  ): void => {
+    if (action === "restore") setShowClosed(false);
+    commandSequence.current += 1;
+    setCommand({
+      nonce: commandSequence.current,
+      targetKey: entry.contextKey,
+      provider: entry.provider,
+      sessionId: entry.session.id,
+      action,
+    });
+  }, []);
+
+  const selectUnifiedSession = useCallback((entry: DesktopSessionEntry): void => {
+    if (entry.closed) requestCommand(entry, "restore");
+    requestSelection(entry.contextKey, entry.provider, entry.session.id, false);
+  }, [requestCommand, requestSelection]);
+
+  const showNewSession = (): void => {
+    setNewSessionContext(activeTargetKey);
+    setNewSessionProvider(activeProvider);
+    setNewSessionOpen((current) => !current);
+  };
+
+  const createUnifiedSession = (): void => {
+    const targetKey = newSessionContext || activeTargetKey;
+    requestSelection(targetKey, newSessionProvider, null, true);
+    setNewSessionOpen(false);
+  };
+
+  const startResize = (event: React.MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+    const move = (moveEvent: MouseEvent) => {
+      const maxWidth = Math.max(MIN_WORKBENCH_WIDTH, window.innerWidth - MIN_TERMINAL_WIDTH);
+      setWidth(Math.min(maxWidth, Math.max(MIN_WORKBENCH_WIDTH, startWidth + startX - moveEvent.clientX)));
+    };
+    const stopResize = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", stopResize);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", stopResize);
+  };
+
+  return (
+    <aside className="agent-workbench" style={{ width }} aria-label="AI workbench" hidden={!open}>
+      <div className="agent-workbench-resizer" onMouseDown={startResize} />
+      <header className="agent-workbench-header">
+        <div>
+          <strong>AI workbench</strong>
+          <span>{openSessions.length} sessions across {targets.length} hosts</span>
         </div>
-      )}
+        <button type="button" className="agent-icon-button" onClick={onClose} aria-label="Close AI workbench">×</button>
+      </header>
+
+      <div className="agent-workbench-body">
+        <section className="agent-session-column">
+          <div className="agent-session-actions">
+            <span>Sessions</span>
+            <div>
+              {closedSessions.length > 0 ? (
+                <button
+                  type="button"
+                  className={showClosed ? "active" : ""}
+                  onClick={() => setShowClosed((current) => !current)}
+                >{showClosed ? "Open" : `Closed ${closedSessions.length}`}</button>
+              ) : null}
+              <button type="button" onClick={showNewSession}>New</button>
+            </div>
+          </div>
+          {newSessionOpen ? (
+            <div className="agent-new-session">
+              <label>
+                <span>Host</span>
+                <select value={newSessionContext} onChange={(event) => setNewSessionContext(event.target.value)}>
+                  {targets.map((target) => <option key={target.key} value={target.key}>{target.label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Provider</span>
+                <select value={newSessionProvider} onChange={(event) => setNewSessionProvider(event.target.value as AiKind)}>
+                  {AI_KINDS.map((kind) => {
+                    const snapshot = targetSnapshots[newSessionContext];
+                    return (
+                      <option
+                        key={kind}
+                        value={kind}
+                        disabled={snapshot?.probed === true && !snapshot.installed.has(kind)}
+                      >{PROVIDER_NAMES[kind]}</option>
+                    );
+                  })}
+                </select>
+              </label>
+              <button type="button" onClick={createUnifiedSession}>Start</button>
+            </div>
+          ) : null}
+          <input
+            type="search"
+            value={sessionSearch}
+            onChange={(event) => setSessionSearch(event.target.value)}
+            placeholder="Search host, provider, or session"
+            aria-label="Search sessions"
+          />
+          <div className="agent-session-list">
+            {filteredSessions.map((entry) => (
+              <div
+                key={desktopSessionKey(entry)}
+                className={desktopSessionKey(entry) === activeSessionKey
+                  ? "agent-session-row active"
+                  : "agent-session-row"}
+              >
+                <button
+                  type="button"
+                  className="agent-session-main"
+                  onClick={() => selectUnifiedSession(entry)}
+                >
+                  <span className="agent-session-context">
+                    <span className="agent-session-provider-mark">{PROVIDER_MARKS[entry.provider]}</span>
+                    <span>{entry.contextLabel}</span>
+                  </span>
+                  <strong>{entry.session.title}</strong>
+                  <span className="agent-session-cwd">{entry.session.cwd ?? entry.session.id}</span>
+                  <small className={entry.runtime.running ? "running" : ""}>
+                    {entry.runtime.running ? sessionRuntimeLabel(entry.runtime) : relativeTime(entry.session.updatedAt)}
+                  </small>
+                </button>
+                {entry.runtime.running ? (
+                  <button type="button" className="agent-session-control stop" onClick={() => requestCommand(entry, "stop")}>Stop</button>
+                ) : entry.closed ? (
+                  <button type="button" className="agent-session-control" onClick={() => requestCommand(entry, "restore")}>Restore</button>
+                ) : (
+                  <button type="button" className="agent-session-control" onClick={() => requestCommand(entry, "close")}>Close</button>
+                )}
+              </div>
+            ))}
+            {filteredSessions.length === 0 ? <p>No saved sessions</p> : null}
+          </div>
+        </section>
+
+        <div className="agent-target-runtimes">
+          {targets.map((target) => (
+            <DesktopTargetRuntime
+              key={target.key}
+              command={command}
+              discover={open}
+              active={open && target.key === activeTargetKey}
+              selection={selection}
+              target={target}
+              onSnapshot={updateTargetSnapshot}
+            />
+          ))}
+        </div>
+      </div>
     </aside>
   );
 };

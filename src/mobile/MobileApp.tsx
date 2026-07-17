@@ -729,8 +729,9 @@ export const MobileApp = () => {
             (event) => normalizedHandlerRef.current("codex", event),
           );
           codexClient.current = client;
-          await client.initialize();
-          setCodexModels(await client.listModels().catch(() => []));
+          await client.connect();
+          void client.listSessions().catch((reason) => setProviderError("codex", String(reason)));
+          void client.listModels().then(setCodexModels).catch(() => setCodexModels([]));
           if (activeProviderSessionId) {
             const settings = await client.resumeSession(activeProviderSessionId);
             updateProviderRuntime("codex", activeProviderSessionId, (runtime) => ({

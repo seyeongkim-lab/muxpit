@@ -9,6 +9,7 @@ import {
 export interface AgentWorkbenchViewSnapshot {
   sessions: MobileSession[];
   activeSessionId: string | null;
+  closedSessionIds?: string[];
   runtimes: AgentSessionRuntimes;
 }
 
@@ -130,9 +131,13 @@ const restoredView = (value: unknown): AgentWorkbenchViewSnapshot | undefined =>
   const activeSessionId = typeof view.activeSessionId === "string"
     ? view.activeSessionId
     : null;
+  const closedSessionIds = Array.isArray(view.closedSessionIds)
+    ? [...new Set(view.closedSessionIds.filter((id): id is string => typeof id === "string"))]
+    : [];
   return {
     sessions,
     activeSessionId,
+    closedSessionIds,
     runtimes: restoredRuntimes(view.runtimes),
   };
 };
@@ -150,6 +155,7 @@ const storedRuntime = (runtime: AgentSessionRuntime): StoredAgentSessionRuntime 
 const storedView = (view: AgentWorkbenchViewSnapshot): Record<string, unknown> => ({
   sessions: view.sessions,
   activeSessionId: view.activeSessionId,
+  closedSessionIds: view.closedSessionIds ?? [],
   runtimes: Object.fromEntries(Object.entries(view.runtimes).map(([key, runtime]) => [
     key,
     storedRuntime(runtime),

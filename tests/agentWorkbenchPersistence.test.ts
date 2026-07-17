@@ -29,6 +29,7 @@ test("workbench snapshot restores content without stale transport state", () => 
       claude: {
         sessions: [{ id: "session-a", title: "Keep working", provider: "claude" }],
         activeSessionId: "session-a",
+        closedSessionIds: ["session-closed"],
         runtimes: {
           [sessionRuntimeKey("session-a")]: {
             ...createSessionRuntime(),
@@ -61,6 +62,7 @@ test("workbench snapshot restores content without stale transport state", () => 
   assert.equal(restored?.provider, "claude");
   assert.equal(restored?.profileId, "host-a");
   assert.equal(restored?.views.claude?.activeSessionId, "session-a");
+  assert.deepEqual(restored?.views.claude?.closedSessionIds, ["session-closed"]);
   const runtime = restored?.views.claude?.runtimes[sessionRuntimeKey("session-a")];
   assert.deepEqual(runtime?.items, [
     { id: "message-a", kind: "assistant", text: "saved output" },

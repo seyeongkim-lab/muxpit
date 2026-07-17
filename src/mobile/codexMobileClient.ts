@@ -14,7 +14,6 @@ interface PendingRequest {
 }
 
 const NORMALIZED_RESPONSE_METHODS = new Set([
-  "thread/list",
   "thread/start",
   "thread/resume",
 ]);
@@ -108,24 +107,43 @@ export class CodexMobileClient {
     this.onEvent = onEvent;
   }
 
-  async initialize(): Promise<void> {
+  async connect(): Promise<void> {
     await this.request("initialize", {
       clientInfo: {
         name: "wmux_mobile",
         title: "wmux Mobile",
-        version: "0.2.10",
+        version: "0.2.11",
       },
     });
     await this.notify("initialized", {});
+  }
+
+  async initialize(): Promise<void> {
+    await this.connect();
     await this.listSessions();
   }
 
   async listSessions(): Promise<void> {
-    await this.request("thread/list", {
-      limit: 100,
-      sortKey: "updated_at",
-      sortDirection: "desc",
-    });
+    const data: unknown[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const result = await this.request("thread/list", {
+        ...(cursor ? { cursor } : {}),
+        limit: 100,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+      });
+      if (Array.isArray(result.data)) data.push(...result.data);
+      const nextCursor = typeof result.nextCursor === "string" ? result.nextCursor : null;
+      if (!nextCursor || seenCursors.has(nextCursor)) {
+        cursor = null;
+      } else {
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      }
+    } while (cursor);
+    for (const event of normalizeCodexMessage({ result: { data } })) this.onEvent(event);
   }
 
   async listModels(): Promise<CodexModelOption[]> {

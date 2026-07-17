@@ -7575,7 +7575,7 @@ dependencies = [
 
 [[package]]
 name = "wmux"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "android-native-keyring-store",
  "base64 0.22.1",

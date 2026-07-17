@@ -51,14 +51,106 @@ test("AI workbench follows streaming output and approves permission requests", (
   assert.match(workbench, /automaticPermissionOptionId\(event\.options\)/);
 });
 
+test("desktop workbench exposes mobile execution settings", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /client\.listModels\(\)/);
+  assert.match(workbench, /updateSessionSettings\(sessionId, settings\)/);
+  assert.match(workbench, /sameClaudeLaunchSettings/);
+  assert.match(workbench, />Model</);
+  assert.match(workbench, />Effort</);
+  assert.match(workbench, />Speed</);
+});
+
+test("desktop queue removes an instruction only after it was sent", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /queuedDispatches/);
+  assert.match(workbench, /const sent = await submitRef\.current/);
+  assert.match(workbench, /if \(sent\) \{/);
+});
+
+test("desktop workbench resumes disconnected providers when visible", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /document\.visibilityState === "visible"/);
+  assert.match(workbench, /void openProvider\(kind/);
+});
+
+test("desktop workbench renders cached sessions while provider probing runs", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /const hasCachedView = view\.sessions\.length > 0/);
+  assert.match(workbench, /probing && probedTarget !== targetKey && !hasCachedView/);
+});
+
+test("desktop session rail can stop close and restore sessions", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /action: "stop" \| "close" \| "restore"/);
+  assert.match(workbench, /closedSessionIds/);
+  assert.match(workbench, />Stop</);
+  assert.match(workbench, />Close</);
+  assert.match(workbench, />Restore</);
+});
+
 test("AI workbench keeps the composer visible while session history loads", () => {
   const styles = readSource("../src/components/AgentWorkbenchPanel.css");
 
+  assert.match(styles, /\.agent-workbench \{[^}]*align-self: stretch;/);
+  assert.match(styles, /\.agent-workbench \{[^}]*min-height: 0;/);
   assert.match(styles, /\.agent-workbench-body \{[^}]*overflow: hidden;/);
+  assert.match(styles, /\.agent-session-column \{[^}]*min-height: 0;/);
   assert.match(styles, /\.agent-conversation \{[^}]*display: grid;/);
   assert.match(styles, /\.agent-conversation \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto auto;/);
   assert.match(styles, /\.agent-composer \{[^}]*grid-row: 4;/);
   assert.match(styles, /\.agent-composer textarea \{[^}]*resize: none;/);
+});
+
+test("desktop workbench uses one host and provider session rail", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /buildDesktopSessionIndex/);
+  assert.match(workbench, /contextLabel/);
+  assert.match(workbench, /PROVIDER_MARKS\[entry\.provider\]/);
+  assert.match(workbench, /newSessionContext/);
+  assert.match(workbench, /newSessionProvider/);
+  assert.doesNotMatch(workbench, /<nav className="agent-provider-tabs"/);
+});
+
+test("desktop target runtimes stay mounted across unified session switches", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /targets\.map\(\(target\) => \(/);
+  assert.match(workbench, /<DesktopTargetRuntime/);
+  assert.match(workbench, /discover=\{open\}/);
+  assert.match(workbench, /active=\{open && target\.key === activeTargetKey\}/);
+  assert.match(workbench, /onSnapshot=\{updateTargetSnapshot\}/);
+});
+
+test("unified desktop rail discovers sessions on every saved host", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /if \(!discover \|\| probedTarget === targetKey\) return;/);
+  assert.match(workbench, /for \(const kind of AI_KINDS\)/);
+  assert.match(workbench, /openClaudeAux\("claude-list"\)/);
+  assert.match(workbench, /openProvider\(kind\)/);
+});
+
+test("desktop workbench restores the last host provider and session", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /loadDesktopWorkbenchSelection\(localStorage, AI_KINDS\)/);
+  assert.match(workbench, /saveDesktopWorkbenchSelection\(localStorage/);
+  assert.match(workbench, /desktopLegacySnapshotKeys\(localStorage, target\.legacyStoragePrefixes\)/);
+  assert.match(workbench, /window\.addEventListener\("beforeunload", persistWorkbench\)/);
+});
+
+test("fresh provider lists preserve cached desktop sessions", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /const mergeSessions/);
+  assert.match(workbench, /sessions: mergeSessions\(current\.sessions, event\.sessions\)/);
 });
 
 test("AI workbench stores composer state in each session runtime", () => {
@@ -78,18 +170,20 @@ test("AI workbench reconnects the cached active session after provider startup",
   );
 
   assert.match(openProvider, /viewsRef\.current\[kind\]\.activeSessionId/);
-  assert.match(openProvider, /client\.resumeSession\(activeSessionId\)/);
-  assert.match(openProvider, /client\.loadSession\(activeSessionId/);
+  assert.match(openProvider, /client\.resumeSession\(resumedSessionId\)/);
+  assert.match(openProvider, /client\.loadSession\(resumedSessionId/);
 });
 
-test("AI workbench invalidates old target channels before restoring the next target", () => {
+test("AI workbench does not close target channels when another target becomes active", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
   const targetEffect = workbench.slice(
-    workbench.indexOf("if (!open || !leaf || probedTarget === targetKey) return"),
+    workbench.indexOf("if (!discover || probedTarget === targetKey) return"),
     workbench.indexOf("const persistWorkbench"),
   );
 
-  assert.ok(targetEffect.indexOf("channels.current.clear()") < targetEffect.indexOf("setViews(nextViews)"));
+  assert.match(targetEffect, /probeDesktopAgents\(AI_KINDS, target\)/);
+  assert.doesNotMatch(targetEffect, /channels\.current\.clear\(\)/);
+  assert.doesNotMatch(targetEffect, /closeChannel\(/);
 });
 
 test("AI workbench loads Claude history without starting an idle process", () => {
@@ -101,7 +195,7 @@ test("AI workbench loads Claude history without starting an idle process", () =>
 
   assert.match(selectSession, /if \(shouldLoadHistory\) await openClaudeAux\("claude-history", session\.id\)/);
   assert.doesNotMatch(selectSession, /closeChannel\(/);
-  assert.match(workbench, /sessionRuntimeLabel\(sessionRuntime\)/);
+  assert.match(workbench, /sessionRuntimeLabel\(entry\.runtime\)/);
 });
 
 test("AI workbench resumes a disconnected session when it is opened", () => {
@@ -112,14 +206,14 @@ test("AI workbench resumes a disconnected session when it is opened", () => {
   );
 
   assert.match(selectSession, /selectedRuntime\.connectionState === "disconnected"/);
-  assert.match(selectSession, /await openProvider\(provider, provider === "claude" \? session\.id : undefined\)/);
+  assert.match(selectSession, /await openProvider\(kind, kind === "claude" \? session\.id : undefined\)/);
 });
 
-test("AI workbench provider tab lists Claude sessions without starting a process", () => {
+test("AI workbench active target lists Claude sessions without starting a process", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
   const providerEffect = workbench.slice(
-    workbench.indexOf("if (!open || probedTarget !== targetKey"),
-    workbench.indexOf("useLayoutEffect", workbench.indexOf("if (!open || probedTarget !== targetKey")),
+    workbench.indexOf("if (!active || probedTarget !== targetKey"),
+    workbench.indexOf("useLayoutEffect", workbench.indexOf("if (!active || probedTarget !== targetKey")),
   );
 
   assert.match(providerEffect, /provider === "claude"/);
@@ -131,14 +225,9 @@ test("AI workbench provider tab lists Claude sessions without starting a process
 test("AI workbench reopens without resetting a live target", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 
-  assert.match(
-    workbench,
-    /if \(!open \|\| !leaf \|\| probedTarget === targetKey\) return;/,
-  );
-  assert.match(
-    workbench,
-    /\[closeChannel, leaf\?\.id, open, probedTarget, targetKey\]/,
-  );
+  assert.match(workbench, /if \(!active\) return null;/);
+  assert.match(workbench, /active=\{open && target\.key === activeTargetKey\}/);
+  assert.match(workbench, /for \(const channelId of channels\.current\.keys\(\)\) void closeDesktopAgent\(channelId\)/);
 });
 
 test("AI workbench entry points remain visible without unread notifications", () => {
