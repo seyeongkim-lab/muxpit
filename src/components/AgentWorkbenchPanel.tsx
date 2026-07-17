@@ -3,6 +3,10 @@ import claudeIconUrl from "../assets/provider-claude.svg";
 import codexIconUrl from "../assets/provider-codex.svg";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import {
+  desktopAgentChannelId,
+  newDesktopAgentChannelNamespace,
+} from "../agent/desktopAgentChannels.ts";
+import {
   buildDesktopSessionIndex,
   desktopSessionKey,
   type DesktopSessionEntry,
@@ -375,6 +379,7 @@ const DesktopTargetRuntime = ({
   const expectedClose = useRef(new Set<string>());
   const stderr = useRef(new Map<string, string>());
   const helperTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const channelNamespace = useRef(newDesktopAgentChannelNamespace());
   const channelSequence = useRef(0);
   const runtimeGeneration = useRef(0);
   const submitRef = useRef<(
@@ -414,7 +419,13 @@ const DesktopTargetRuntime = ({
 
   const nextChannelId = useCallback((kind: AiKind, purpose: ChannelMeta["purpose"]): string => {
     channelSequence.current += 1;
-    return `${kind}-${purpose}-${Date.now()}-${channelSequence.current}`;
+    return desktopAgentChannelId(
+      channelNamespace.current,
+      kind,
+      purpose,
+      Date.now(),
+      channelSequence.current,
+    );
   }, []);
 
   const closeChannel = useCallback(async (channelId: string): Promise<void> => {

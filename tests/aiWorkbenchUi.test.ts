@@ -156,10 +156,14 @@ test("desktop target runtimes stay mounted across unified session switches", () 
   assert.match(workbench, /onSnapshot=\{updateTargetSnapshot\}/);
 });
 
-test("unified desktop rail discovers sessions on every saved host", () => {
+test("unified desktop rail discovers sessions on every saved host and local machine", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 
+  assert.match(workbench, /if \(!contexts\.has\("local"\)\)/);
+  assert.match(workbench, /contexts\.set\("local", \{[\s\S]*?target: \{\}/);
+  assert.match(workbench, /targets\.map\(\(target\) => \([\s\S]*?<DesktopTargetRuntime/);
   assert.match(workbench, /if \(!discover \|\| probedTarget === targetKey\) return;/);
+  assert.match(workbench, /probeDesktopAgents\(AI_KINDS, target\)/);
   assert.match(workbench, /for \(const kind of AI_KINDS\)/);
   assert.match(workbench, /openClaudeAux\("claude-list"\)/);
   assert.match(workbench, /openProvider\(kind\)/);
