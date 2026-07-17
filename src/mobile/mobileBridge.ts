@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AgentExecutionSettings } from "./agentSessionRuntime.ts";
+import type { HostProfile } from "./hostProfiles.ts";
 
 export type SshAuth =
   | { type: "password"; password: string }
@@ -39,6 +40,12 @@ export const saveSshCredential = (profileId: string, auth: SshAuth): Promise<voi
 
 export const loadSshCredential = (profileId: string): Promise<SshAuth | null> =>
   invoke<SshAuth | null>("mobile_credential_load", { profileId });
+
+export const saveHostProfilesSecure = (profiles: HostProfile[]): Promise<void> =>
+  invoke("mobile_profiles_save", { profiles });
+
+export const loadHostProfilesSecure = (): Promise<HostProfile[]> =>
+  invoke<HostProfile[]>("mobile_profiles_load");
 
 export const openAgent = (
   channelId: string,

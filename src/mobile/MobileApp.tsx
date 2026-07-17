@@ -39,11 +39,13 @@ import {
   disconnectSsh,
   listClaudeSessions,
   loadClaudeSession,
+  loadHostProfilesSecure,
   loadSshCredential,
   onAgentTransport,
   openAgent,
   probeAgent,
   probeSsh,
+  saveHostProfilesSecure,
   saveSshCredential,
   writeAgentLine,
   type MobileAgentTransportEvent,
@@ -309,6 +311,7 @@ export const MobileApp = () => {
   const latestTimelineTextLength = items[items.length - 1]?.text.length ?? 0;
 
   const credentialCache = useRef(new Map<string, SshAuth>());
+  const profilesRef = useRef<HostProfile[]>(initialProfiles);
   const restoredProfileId = useRef(initialWorkbench?.profileId);
   const decoders = useRef(new Map<string, JsonLineDecoder>());
   const claudeNormalizers = useRef(new Map<string, ClaudeStreamNormalizer>());
@@ -348,6 +351,7 @@ export const MobileApp = () => {
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   useEffect(() => { currentProfileRef.current = currentProfile; }, [currentProfile]);
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
+  useEffect(() => { profilesRef.current = profiles; }, [profiles]);
 
   const credentialForProfile = async (profileId: string): Promise<SshAuth | undefined> => {
     const cached = credentialCache.current.get(profileId);
@@ -498,12 +502,12 @@ export const MobileApp = () => {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-  const rememberProfile = (profile: HostProfile): void => {
-    setProfiles((previous) => {
-      const next = upsertHostProfile(previous, profile);
-      saveHostProfiles(next);
-      return next;
-    });
+  const rememberProfile = async (profile: HostProfile): Promise<void> => {
+    const next = upsertHostProfile(profilesRef.current, profile);
+    profilesRef.current = next;
+    setProfiles(next);
+    saveHostProfiles(next);
+    await saveHostProfilesSecure(next);
   };
 
   const resetAgentState = (preserveView = false): void => {
@@ -805,7 +809,12 @@ export const MobileApp = () => {
       }
       const trustedProfile = { ...profile, trustedFingerprint: result.fingerprint };
       credentialCache.current.set(profile.id, auth);
-      rememberProfile(trustedProfile);
+      let profileSaveError: string | null = null;
+      try {
+        await rememberProfile(trustedProfile);
+      } catch (reason) {
+        profileSaveError = `SSH connected, but the host profile could not be backed up: ${String(reason)}`;
+      }
       setCurrentProfile(trustedProfile);
       currentProfileRef.current = trustedProfile;
       setForm(formFromProfile(trustedProfile));
@@ -826,7 +835,9 @@ export const MobileApp = () => {
         preservingView,
         restore?.cwd,
       );
-      if (credentialSaveError && channelId !== undefined) setError(credentialSaveError);
+      if (channelId !== undefined && (profileSaveError || credentialSaveError)) {
+        setError([profileSaveError, credentialSaveError].filter(Boolean).join(" "));
+      }
     } catch (reason) {
       setConnectionStatus("disconnected");
       connectionStatusRef.current = "disconnected";
@@ -835,20 +846,46 @@ export const MobileApp = () => {
   };
 
   useEffect(() => {
-    if (MOBILE_DEMO || !initialProfile || initialRestoreStarted.current) return;
+    if (MOBILE_DEMO || initialRestoreStarted.current) return;
     initialRestoreStarted.current = true;
     let disposed = false;
     const restoreInitialProfile = async (): Promise<void> => {
+      let availableProfiles = profilesRef.current;
       try {
-        const auth = await credentialForProfile(initialProfile.id);
+        const secureProfiles = await loadHostProfilesSecure();
+        const mergedProfiles = availableProfiles.reduce(
+          (current, profile) => upsertHostProfile(current, profile),
+          secureProfiles,
+        );
+        if (disposed) return;
+        availableProfiles = mergedProfiles;
+        profilesRef.current = mergedProfiles;
+        setProfiles(mergedProfiles);
+        saveHostProfiles(mergedProfiles);
+        if (mergedProfiles.length > 0) await saveHostProfilesSecure(mergedProfiles);
+      } catch (reason) {
+        if (availableProfiles.length === 0 && !disposed) {
+          setError(`Could not load saved host profiles: ${String(reason)}`);
+        }
+      }
+      const restoreProfile = availableProfiles.find(
+        (profile) => profile.id === initialWorkbench?.profileId,
+      ) ?? availableProfiles[0];
+      if (disposed || !restoreProfile) return;
+      setForm(formFromProfile(restoreProfile));
+      try {
+        const auth = await credentialForProfile(restoreProfile.id);
         if (disposed || !auth) return;
+        const restoredView = loadCachedWorkbenchView(restoreProfile.id, initialProvider)
+          ?? (restoreProfile.id === initialProfile?.id ? initialView : undefined);
+        if (restoredView) replaceWorkbenchView(restoredView);
         const sessionId = activeSessionRef.current ?? undefined;
         const sessionCwd = sessionsRef.current.find((session) => session.id === sessionId)?.cwd;
         await connectProfile(
-          initialProfile,
+          restoreProfile,
           auth,
-          initialProfile.trustedFingerprint,
-          initialView
+          restoreProfile.trustedFingerprint,
+          restoredView
             ? { provider: initialProvider, sessionId, cwd: sessionCwd }
             : undefined,
         );

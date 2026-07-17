@@ -14,6 +14,8 @@
     "allow-mobile-ssh-probe",
     "allow-mobile-credential-save",
     "allow-mobile-credential-load",
+    "allow-mobile-profiles-save",
+    "allow-mobile-profiles-load",
     "allow-mobile-agent-open",
     "allow-mobile-agent-probe",
     "allow-mobile-agent-write",

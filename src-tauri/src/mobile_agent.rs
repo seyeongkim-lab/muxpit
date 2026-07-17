@@ -15,6 +15,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const SSH_CREDENTIAL_SERVICE: &str = "com.wmux.terminal.ssh";
+const HOST_PROFILE_SERVICE: &str = "com.wmux.terminal.hosts";
+const HOST_PROFILE_ENTRY: &str = "profiles";
 
 const CLAUDE_SESSION_SCRIPT: &str = include_str!("../scripts/claude_sessions.py");
 
@@ -76,6 +78,18 @@ pub enum SshAuth {
     },
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileHostProfile {
+    id: String,
+    name: String,
+    host: String,
+    port: u16,
+    user: String,
+    cwd: String,
+    trusted_fingerprint: Option<String>,
+}
+
 fn valid_credential_profile_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -121,8 +135,8 @@ async fn initialize_android_credential_context(webview: Webview) -> Result<(), S
 }
 
 #[cfg(target_os = "android")]
-fn credential_entry(profile_id: &str) -> Result<keyring_core::Entry, String> {
-    if !valid_credential_profile_id(profile_id) {
+fn secure_entry(service: &str, entry_id: &str) -> Result<keyring_core::Entry, String> {
+    if !valid_credential_profile_id(entry_id) {
         return Err("Invalid credential profile id".into());
     }
     CREDENTIAL_STORE
@@ -134,8 +148,13 @@ fn credential_entry(profile_id: &str) -> Result<keyring_core::Entry, String> {
             Ok(())
         })
         .clone()?;
-    keyring_core::Entry::new(SSH_CREDENTIAL_SERVICE, profile_id)
-        .map_err(|error| format!("Could not open SSH credential: {error}"))
+    keyring_core::Entry::new(service, entry_id)
+        .map_err(|error| format!("Could not open secure storage entry: {error}"))
+}
+
+#[cfg(target_os = "android")]
+fn credential_entry(profile_id: &str) -> Result<keyring_core::Entry, String> {
+    secure_entry(SSH_CREDENTIAL_SERVICE, profile_id)
 }
 
 #[cfg(target_os = "android")]
@@ -170,6 +189,33 @@ pub async fn mobile_credential_load(
         .map_err(|error| format!("Could not decode SSH credential: {error}"))
 }
 
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn mobile_profiles_save(
+    webview: Webview,
+    profiles: Vec<MobileHostProfile>,
+) -> Result<(), String> {
+    initialize_android_credential_context(webview).await?;
+    let secret = serde_json::to_vec(&profiles)
+        .map_err(|error| format!("Could not encode host profiles: {error}"))?;
+    secure_entry(HOST_PROFILE_SERVICE, HOST_PROFILE_ENTRY)?
+        .set_secret(&secret)
+        .map_err(|error| format!("Could not save host profiles: {error}"))
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn mobile_profiles_load(webview: Webview) -> Result<Vec<MobileHostProfile>, String> {
+    initialize_android_credential_context(webview).await?;
+    let secret = match secure_entry(HOST_PROFILE_SERVICE, HOST_PROFILE_ENTRY)?.get_secret() {
+        Ok(secret) => secret,
+        Err(keyring_core::Error::NoEntry) => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Could not load host profiles: {error}")),
+    };
+    serde_json::from_slice(&secret)
+        .map_err(|error| format!("Could not decode host profiles: {error}"))
+}
+
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn mobile_credential_save(_profile_id: String, _auth: SshAuth) -> Result<(), String> {
@@ -180,6 +226,18 @@ pub fn mobile_credential_save(_profile_id: String, _auth: SshAuth) -> Result<(),
 #[tauri::command]
 pub fn mobile_credential_load(_profile_id: String) -> Result<Option<SshAuth>, String> {
     Err("Secure credential storage is only available on Android".into())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn mobile_profiles_save(_profiles: Vec<MobileHostProfile>) -> Result<(), String> {
+    Err("Secure profile storage is only available on Android".into())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn mobile_profiles_load() -> Result<Vec<MobileHostProfile>, String> {
+    Err("Secure profile storage is only available on Android".into())
 }
 
 #[derive(Serialize)]
@@ -607,6 +665,8 @@ pub fn run() {
             mobile_ssh_probe,
             mobile_credential_save,
             mobile_credential_load,
+            mobile_profiles_save,
+            mobile_profiles_load,
             mobile_agent_open,
             mobile_agent_probe,
             mobile_agent_write,

@@ -254,7 +254,20 @@ test("saved SSH credentials restore cold starts and host switches", () => {
   );
 
   assert.match(app, /const credentialForProfile = async[\s\S]*await loadSshCredential\(profileId\)/);
-  assert.match(app, /const restoreInitialProfile = async[\s\S]*await credentialForProfile\(initialProfile.id\)[\s\S]*await connectProfile\(/);
+  assert.match(app, /const restoreInitialProfile = async[\s\S]*await credentialForProfile\(restoreProfile.id\)[\s\S]*await connectProfile\(/);
   assert.match(connectFromForm, /authFromForm\(form\) \?\? await credentialForProfile\(profile.id\)/);
   assert.match(switchHost, /await credentialForProfile\(profile.id\)/);
+});
+
+test("host profiles are mirrored to Android secure storage", () => {
+  assert.match(bridge, /export const saveHostProfilesSecure[\s\S]*invoke\("mobile_profiles_save"/);
+  assert.match(bridge, /export const loadHostProfilesSecure[\s\S]*invoke<HostProfile\[\]>\("mobile_profiles_load"/);
+  assert.match(rust, /pub async fn mobile_profiles_save/);
+  assert.match(rust, /pub async fn mobile_profiles_load/);
+  assert.match(build, /"mobile_profiles_save"/);
+  assert.match(build, /"mobile_profiles_load"/);
+  assert.match(capability, /"allow-mobile-profiles-save"/);
+  assert.match(capability, /"allow-mobile-profiles-load"/);
+  assert.match(app, /await loadHostProfilesSecure\(\)/);
+  assert.match(app, /await saveHostProfilesSecure\(next\)/);
 });
