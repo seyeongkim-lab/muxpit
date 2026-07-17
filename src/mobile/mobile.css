@@ -57,8 +57,8 @@ textarea:focus-visible {
 .mobile-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+  gap: 6px;
+  padding: env(safe-area-inset-top) 8px 2px;
   background: #11141a;
   border-bottom: 1px solid #242a33;
 }
@@ -67,10 +67,10 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   min-width: 0;
-  min-height: 48px;
+  min-height: 44px;
   flex: 1;
-  gap: 9px;
-  padding: 6px 9px;
+  gap: 7px;
+  padding: 0 4px;
   border: 0;
   background: transparent;
   text-align: left;
@@ -96,26 +96,17 @@ textarea:focus-visible {
   flex: 1;
 }
 
-.host-pill-copy strong,
-.host-pill-copy small {
+.host-pill-copy strong {
   display: block;
   overflow: hidden;
+  font-size: 13px;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.host-pill-copy strong {
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.host-pill-copy small {
-  color: var(--muted);
-  font: 11px/16px "JetBrains Mono", "Roboto Mono", monospace;
-}
-
 .host-pill svg {
-  width: 16px;
+  width: 14px;
   fill: none;
   stroke: #9199a8;
   stroke-width: 1.5;
@@ -124,7 +115,7 @@ textarea:focus-visible {
 .provider-switch,
 .auth-switch {
   display: flex;
-  padding: 3px;
+  padding: 1px;
   border: 1px solid var(--line);
   background: #0d1014;
 }
@@ -134,9 +125,9 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   min-height: 44px;
-  padding: 0 12px;
+  padding: 0 8px;
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -164,10 +155,10 @@ textarea:focus-visible {
 .session-strip {
   display: flex;
   min-width: 0;
-  min-height: 56px;
+  min-height: 48px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 2px 8px;
   border-bottom: 1px solid #242a33;
   background: #13161c;
 }
@@ -204,45 +195,26 @@ textarea:focus-visible {
 }
 
 .session-chip {
-  display: grid;
-  min-width: 126px;
-  max-width: 160px;
+  display: flex;
+  min-width: 104px;
+  max-width: 136px;
   min-height: 44px;
-  grid-template-columns: minmax(0, 1fr);
-  align-content: center;
-  gap: 4px;
-  padding: 0 10px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
   border: 1px solid transparent;
   background: #181c23;
   color: #aeb5c1;
   text-align: left;
 }
 
-.session-chip > span {
+.session-chip-title {
+  min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.session-chip small {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #6f7785;
-  font: 9px/1 monospace;
-  white-space: nowrap;
-}
-
-.session-chip small.running,
-.session-chip small.waiting {
-  color: #66a3ff;
-  font-weight: 700;
-}
-
-.session-chip small.disconnected {
-  color: #ef8b8b;
 }
 
 .session-state-dot {
@@ -289,66 +261,61 @@ textarea:focus-visible {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 18px 14px 32px;
+  padding: 8px 12px 32px;
   scroll-padding-bottom: 24px;
 }
 
 .session-context {
   position: sticky;
   z-index: 5;
-  top: -18px;
-  margin: -18px -14px 18px;
-  padding: 14px 14px 10px;
+  top: -8px;
+  display: grid;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: -8px -12px 12px;
+  padding: 2px 8px 3px;
   border-bottom: 1px solid #242a33;
   background: rgba(15, 17, 21, 0.97);
 }
 
 .session-heading {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 9px;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 
 .execution-summary {
-  display: grid;
-  width: 100%;
-  min-height: 38px;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  display: flex;
+  width: auto;
+  min-width: 0;
+  max-width: 48vw;
+  min-height: 36px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 5px;
+  padding: 0 7px;
   border: 1px solid #2d3541;
   background: #151a21;
   color: #d8dde5;
   text-align: left;
 }
 
-.execution-summary span:not(.execution-summary-arrow) {
+.execution-summary-value {
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.execution-summary b {
-  display: block;
-  margin-bottom: 2px;
-  color: #778292;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .execution-summary-arrow {
+  flex: 0 0 auto;
   color: #82aeea;
-  font-size: 20px;
+  font-size: 17px;
 }
 
-.eyebrow,
 .timeline-label {
   display: block;
   margin-bottom: 5px;
@@ -360,20 +327,24 @@ textarea:focus-visible {
 }
 
 .session-heading h1 {
-  max-width: 74vw;
+  min-width: 0;
+  flex: 1;
   margin: 0;
   overflow: hidden;
-  font-size: 19px;
-  line-height: 1.3;
+  font-size: 14px;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .run-state {
-  padding: 5px 8px;
+  flex: 0 0 auto;
+  padding: 2px 5px;
   border: 1px solid #343b46;
   color: #8f98a7;
-  font-size: 11px;
+  font-size: 9px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 .run-state.running {

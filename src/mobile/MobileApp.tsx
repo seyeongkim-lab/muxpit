@@ -1612,17 +1612,26 @@ export const MobileApp = () => {
   const effortLabel = threadSettings.effort ?? selectedCodexModel?.defaultReasoningEffort ?? "Default";
   const serviceTierLabel = serviceTierOptions.find((tier) => tier.id === threadSettings.serviceTier)?.name
     ?? (threadSettings.serviceTier ? threadSettings.serviceTier : "Standard");
+  const executionSummaryLabel = [
+    modelLabel,
+    effortLabel,
+    provider === "codex" ? serviceTierLabel : null,
+  ].filter(Boolean).join(" · ");
   const codexActivity = activeSessionCount(readProviderView("codex").runtimes);
   const claudeActivity = activeSessionCount(readProviderView("claude").runtimes);
 
   return (
     <div className="mobile-app">
       <header className="mobile-header">
-        <button className="host-pill" type="button" onClick={() => setHostSheetOpen(true)}>
+        <button
+          className="host-pill"
+          type="button"
+          onClick={() => setHostSheetOpen(true)}
+          aria-label={`Connected to ${currentProfile.name}, ${currentProfile.user}@${currentProfile.host}`}
+        >
           <span className="online-dot" aria-hidden="true" />
           <span className="host-pill-copy">
             <strong>{currentProfile.name}</strong>
-            <small>{currentProfile.user}@{currentProfile.host}</small>
           </span>
           <ChevronDown />
         </button>
@@ -1653,12 +1662,10 @@ export const MobileApp = () => {
                 key={session.id}
                 className={session.id === activeSessionId ? "session-chip active" : "session-chip"}
                 onClick={() => void selectSession(session)}
+                aria-label={`${session.title}, ${sessionLabel}${updated ? `, ${updated}` : ""}`}
               >
-                <span>{session.title}</span>
-                <small className={sessionLabel.toLowerCase()}>
-                  <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} aria-hidden="true" />
-                  {sessionLabel}{updated ? ` · ${updated}` : ""}
-                </small>
+                <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} aria-hidden="true" />
+                <span className="session-chip-title">{session.title}</span>
               </button>
             );
           })}
@@ -1672,10 +1679,7 @@ export const MobileApp = () => {
       <main ref={timelineRef} className="activity-timeline" aria-live="polite">
         <section className="session-context">
           <div className="session-heading">
-            <div>
-              <span className="eyebrow">{provider}</span>
-              <h1>{activeSession?.title ?? "New session"}</h1>
-            </div>
+            <h1>{activeSession?.title ?? "New session"}</h1>
             <span className={running ? "run-state running" : "run-state"}>
               {sessionRuntimeLabel(runtime)}
             </span>
@@ -1684,10 +1688,9 @@ export const MobileApp = () => {
             type="button"
             className="execution-summary"
             onClick={() => setSettingsSheetOpen(true)}
+            aria-label={`Execution settings, ${executionSummaryLabel}`}
           >
-            <span><b>Model</b>{modelLabel}</span>
-            <span><b>Effort</b>{effortLabel}</span>
-            {provider === "codex" ? <span><b>Speed</b>{serviceTierLabel}</span> : null}
+            <span className="execution-summary-value">{executionSummaryLabel}</span>
             <span className="execution-summary-arrow" aria-hidden="true">›</span>
           </button>
         </section>
