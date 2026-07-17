@@ -48,32 +48,10 @@ textarea:focus-visible {
   width: 100%;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   height: 100dvh;
   background: #0f1115;
   color: #eef0f4;
-}
-
-.mobile-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: env(safe-area-inset-top) 8px 2px;
-  background: #11141a;
-  border-bottom: 1px solid #242a33;
-}
-
-.host-pill {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  min-height: 44px;
-  flex: 1;
-  gap: 7px;
-  padding: 0 4px;
-  border: 0;
-  background: transparent;
-  text-align: left;
 }
 
 .online-dot,
@@ -91,28 +69,6 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
-.host-pill-copy {
-  min-width: 0;
-  flex: 1;
-}
-
-.host-pill-copy strong {
-  display: block;
-  overflow: hidden;
-  font-size: 13px;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.host-pill svg {
-  width: 14px;
-  fill: none;
-  stroke: #9199a8;
-  stroke-width: 1.5;
-}
-
-.provider-switch,
 .auth-switch {
   display: flex;
   padding: 1px;
@@ -120,7 +76,6 @@ textarea:focus-visible {
   background: #0d1014;
 }
 
-.provider-switch button,
 .auth-switch button {
   display: flex;
   align-items: center;
@@ -135,18 +90,6 @@ textarea:focus-visible {
   font-weight: 650;
 }
 
-.provider-count {
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: #315f9d;
-  color: #ffffff;
-  font: 10px/16px "JetBrains Mono", "Roboto Mono", monospace;
-  text-align: center;
-}
-
-.provider-switch button.active,
 .auth-switch button.active {
   background: #242a34;
   color: #ffffff;
@@ -158,7 +101,7 @@ textarea:focus-visible {
   min-height: 48px;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: max(2px, env(safe-area-inset-top)) 8px 2px;
   border-bottom: 1px solid #242a33;
   background: #13161c;
 }
@@ -195,13 +138,15 @@ textarea:focus-visible {
 }
 
 .session-chip {
-  display: flex;
-  min-width: 104px;
-  max-width: 136px;
+  display: grid;
+  min-width: 128px;
+  max-width: 156px;
   min-height: 44px;
+  grid-template-columns: 7px minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: 6px;
-  padding: 0 9px;
+  column-gap: 7px;
+  padding: 4px 9px;
   border: 1px solid transparent;
   background: #181c23;
   color: #aeb5c1;
@@ -209,12 +154,27 @@ textarea:focus-visible {
 }
 
 .session-chip-title {
+  grid-column: 2;
   min-width: 0;
   overflow: hidden;
   font-size: 11px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-chip-meta {
+  grid-column: 2;
+  overflow: hidden;
+  color: #778191;
+  font: 9px/1.2 "JetBrains Mono", "Roboto Mono", monospace;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.session-chip .session-state-dot {
+  grid-row: 1 / 3;
 }
 
 .session-state-dot {
@@ -287,6 +247,23 @@ textarea:focus-visible {
   gap: 6px;
 }
 
+.session-heading-copy {
+  display: block;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-heading-copy small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #778191;
+  font: 9px/1.1 "JetBrains Mono", "Roboto Mono", monospace;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
 .execution-summary {
   display: flex;
   width: auto;
@@ -317,7 +294,7 @@ textarea:focus-visible {
 }
 
 .timeline-label {
-  display: block;
+  display: flex;
   margin-bottom: 5px;
   color: #7f8999;
   font-size: 10px;
@@ -396,35 +373,40 @@ textarea:focus-visible {
 
 .timeline-row,
 .approval-row {
-  display: grid;
-  grid-template-columns: 3px minmax(0, 1fr);
-  gap: 12px;
   margin: 0 0 20px;
-}
-
-.timeline-rail {
-  min-height: 100%;
-  background: #39414d;
-}
-
-.timeline-rail.user {
-  background: #5d6979;
-}
-
-.timeline-rail.assistant {
-  background: var(--blue);
-}
-
-.timeline-rail.tool {
-  background: #7991aa;
-}
-
-.timeline-rail.approval {
-  background: var(--red);
 }
 
 .timeline-content {
   min-width: 0;
+}
+
+.timeline-label::before {
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  background: currentColor;
+  border-radius: 50%;
+  content: "";
+}
+
+.timeline-label {
+  align-items: center;
+}
+
+.timeline-row.user .timeline-label {
+  color: #9da8b8;
+}
+
+.timeline-row.assistant .timeline-label {
+  color: var(--blue);
+}
+
+.timeline-row.tool .timeline-label {
+  color: #91a9c2;
+}
+
+.approval-row .timeline-label {
+  color: var(--red);
 }
 
 .timeline-content p {
@@ -463,6 +445,7 @@ textarea:focus-visible {
 }
 
 .approval-actions button,
+.sheet-primary,
 .sheet-secondary {
   min-height: 44px;
   padding: 0 14px;
@@ -470,6 +453,17 @@ textarea:focus-visible {
   background: #171b22;
   font-size: 12px;
   font-weight: 650;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sheet-primary {
+  border-color: #4779bb;
+  background: #24538e;
+  color: #ffffff;
 }
 
 .approval-actions .approve {
@@ -678,13 +672,15 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
-.execution-settings {
+.execution-settings,
+.new-session-form {
   display: grid;
   gap: 14px;
   padding: 8px 0;
 }
 
 .execution-settings label,
+.new-session-form label,
 .unsupported-setting {
   display: grid;
   grid-template-columns: 90px minmax(0, 1fr);
@@ -696,7 +692,8 @@ textarea:focus-visible {
   font-weight: 650;
 }
 
-.execution-settings select {
+.execution-settings select,
+.new-session-form select {
   box-sizing: border-box;
   width: 100%;
   min-height: 44px;
@@ -706,6 +703,11 @@ textarea:focus-visible {
   background: #0e1116;
   color: #eef0f4;
   font-size: 13px;
+}
+
+.new-session-form .sheet-primary {
+  width: 100%;
+  margin-top: 4px;
 }
 
 .execution-settings select:disabled {

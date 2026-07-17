@@ -14,7 +14,6 @@ import {
 } from "./agentProtocol.ts";
 import {
   beginSessionHistory,
-  activeSessionCount,
   completeSessionHistory,
   createSessionRuntime,
   failSessionHistory,
@@ -56,9 +55,15 @@ import {
   upsertHostProfile,
   type HostProfile,
 } from "./hostProfiles.ts";
+import {
+  buildUnifiedSessionIndex,
+  unifiedSessionKey,
+  type MobileProvider,
+  type UnifiedSessionEntry,
+} from "./unifiedSessions.ts";
 import "./mobile.css";
 
-type Provider = "codex" | "claude";
+type Provider = MobileProvider;
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
 const MOBILE_WORKBENCH_STORAGE_KEY = "wmux-mobile-agent-workbench-v1";
@@ -107,6 +112,23 @@ const DEMO_SESSIONS: MobileSession[] = [
   { id: "demo-2", title: "Fix CI failure", cwd: "/home/developer/service", updatedAt: Math.floor(Date.now() / 1000) - 1800, provider: "codex" },
   { id: "demo-3", title: "Review auth flow", cwd: "/home/developer/web", updatedAt: Math.floor(Date.now() / 1000) - 7200, provider: "codex" },
 ];
+
+const DEMO_CLAUDE_SESSIONS: MobileSession[] = [
+  { id: "demo-claude-1", title: "Release checklist", cwd: "/home/developer/project", updatedAt: Math.floor(Date.now() / 1000) - 420, provider: "claude" },
+];
+
+const DEMO_CLAUDE_VIEW: AgentWorkbenchViewSnapshot = {
+  sessions: DEMO_CLAUDE_SESSIONS,
+  activeSessionId: "demo-claude-1",
+  runtimes: {
+    [sessionRuntimeKey("demo-claude-1")]: {
+      ...createSessionRuntime(),
+      connectionState: "connected",
+      historyState: "loaded",
+      waiting: true,
+    },
+  },
+};
 
 const DEMO_ITEMS: MobileTimelineItem[] = [
   { id: "demo-user", kind: "user", text: "Android build 상태를 확인하고 실패한 테스트를 수정해." },
@@ -246,7 +268,7 @@ export const MobileApp = () => {
     ?? initialProfiles[0];
   const [initialViews] = useState<Partial<Record<Provider, AgentWorkbenchViewSnapshot>>>(() =>
     MOBILE_DEMO
-      ? {}
+      ? { claude: DEMO_CLAUDE_VIEW }
       : Object.fromEntries(MOBILE_PROVIDERS.flatMap((kind) => {
           const view = initialWorkbench?.views[kind]
             ?? (initialProfile ? loadCachedWorkbenchView(initialProfile.id, kind) : undefined);
@@ -275,10 +297,13 @@ export const MobileApp = () => {
   const [error, setError] = useState<string | null>(null);
   const [hostSheetOpen, setHostSheetOpen] = useState(false);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
+  const [newSessionSheetOpen, setNewSessionSheetOpen] = useState(false);
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
+  const [newSessionProfileId, setNewSessionProfileId] = useState(initialProfile?.id ?? "");
+  const [newSessionProvider, setNewSessionProvider] = useState<Provider>(initialProvider);
   const [codexModels, setCodexModels] = useState<CodexModelOption[]>(MOBILE_DEMO ? DEMO_MODELS : []);
-  const [, setProviderViewRevision] = useState(0);
+  const [providerViewRevision, setProviderViewRevision] = useState(0);
   const runtime = readSessionRuntime(runtimes, activeSessionId);
   const { approvals, items, queue, running } = runtime;
   const latestTimelineTextLength = items[items.length - 1]?.text.length ?? 0;
@@ -392,8 +417,6 @@ export const MobileApp = () => {
           ...runtime,
           activeTurnId: null,
           connectionState: "disconnected",
-          running: false,
-          waiting: false,
         }]),
       ),
     }));
@@ -404,14 +427,14 @@ export const MobileApp = () => {
   };
 
   persistWorkbenchRef.current = (): void => {
-    if (MOBILE_DEMO) return;
-    const profileId = currentProfileRef.current?.id ?? restoredProfileId.current;
-    if (!profileId) return;
     const currentProvider = providerRef.current;
     providerViews.current = {
       ...providerViews.current,
       [currentProvider]: activeProviderView(),
     };
+    if (MOBILE_DEMO) return;
+    const profileId = currentProfileRef.current?.id ?? restoredProfileId.current;
+    if (!profileId) return;
     const snapshot = {
       provider: currentProvider,
       profileId,
@@ -431,7 +454,7 @@ export const MobileApp = () => {
   useEffect(() => {
     const timeout = setTimeout(() => persistWorkbenchRef.current(), WORKBENCH_PERSIST_DELAY_MS);
     return () => clearTimeout(timeout);
-  }, [activeSessionId, currentProfile?.id, provider, runtimes, sessions]);
+  }, [activeSessionId, currentProfile?.id, provider, providerViewRevision, runtimes, sessions]);
 
   const updateRuntime = (
     sessionId: string | null | undefined,
@@ -499,8 +522,6 @@ export const MobileApp = () => {
             ...runtime,
             activeTurnId: null,
             connectionState: "disconnected",
-            running: false,
-            waiting: false,
           }));
         }
       }
@@ -526,8 +547,6 @@ export const MobileApp = () => {
       ? Object.fromEntries(Object.entries(runtimesRef.current).map(([key, runtime]) => [key, {
           ...runtime,
           activeTurnId: null,
-          running: false,
-          waiting: false,
         }]))
       : {};
     runtimesRef.current = next;
@@ -724,6 +743,9 @@ export const MobileApp = () => {
         updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
           ...runtime,
           connectionState: "connected",
+          ...(nextProvider === "claude" && preserveView
+            ? { activeTurnId: null, running: false, waiting: false }
+            : {}),
         }));
         return channelId;
       } catch (reason) {
@@ -871,8 +893,6 @@ export const MobileApp = () => {
               ...runtime,
               activeTurnId: null,
               connectionState: "disconnected",
-              running: false,
-              waiting: false,
             }));
           }
           channels.current.delete(entry.channelId);
@@ -1178,8 +1198,6 @@ export const MobileApp = () => {
           ...runtime,
           activeTurnId: null,
           connectionState: "disconnected",
-          running: false,
-          waiting: false,
         }));
       }
       return;
@@ -1431,6 +1449,55 @@ export const MobileApp = () => {
     }));
   };
 
+  const connectWorkbenchTarget = async (
+    profile: HostProfile,
+    nextProvider: Provider,
+    session?: MobileSession,
+    blank = false,
+  ): Promise<boolean> => {
+    persistWorkbenchRef.current();
+    let auth: SshAuth | undefined;
+    try {
+      auth = await credentialForProfile(profile.id);
+    } catch (reason) {
+      setError(`Could not load the saved SSH credential: ${String(reason)}`);
+      return false;
+    }
+    const cachedView = loadCachedWorkbenchView(profile.id, nextProvider) ?? emptyWorkbenchView();
+    const targetView = {
+      ...cachedView,
+      activeSessionId: blank ? null : session?.id ?? cachedView.activeSessionId,
+    };
+    if (!auth) {
+      await disconnectSsh().catch(() => {});
+      setConnectionStatus("disconnected");
+      connectionStatusRef.current = "disconnected";
+      setCurrentProfile(null);
+      currentProfileRef.current = null;
+      resetAgentState();
+      setProvider(nextProvider);
+      providerRef.current = nextProvider;
+      replaceProviderView(nextProvider, targetView);
+      restoredProfileId.current = profile.id;
+      setForm(formFromProfile(profile));
+      setError("Enter the saved host credential to open this session.");
+      return false;
+    }
+    resetAgentState();
+    setProvider(nextProvider);
+    providerRef.current = nextProvider;
+    replaceProviderView(nextProvider, targetView);
+    restoredProfileId.current = profile.id;
+    setForm(formFromProfile(profile));
+    await connectProfile(profile, auth, profile.trustedFingerprint, {
+      provider: nextProvider,
+      sessionId: blank ? undefined : session?.id,
+      cwd: blank ? profile.cwd : session?.cwd,
+    });
+    return connectionStatusRef.current === "connected"
+      && currentProfileRef.current?.id === profile.id;
+  };
+
   const selectSession = async (session: MobileSession): Promise<void> => {
     const kind = providerRef.current;
     const providerView = readProviderView(kind);
@@ -1443,6 +1510,7 @@ export const MobileApp = () => {
     if (shouldLoadHistory) {
       updateProviderRuntime(kind, session.id, (runtime) => beginSessionHistory(runtime, session.id));
     }
+    if (MOBILE_DEMO) return;
     const profile = currentProfileRef.current;
     if (!profile) return;
     try {
@@ -1470,6 +1538,18 @@ export const MobileApp = () => {
       updateProviderRuntime(kind, session.id, failSessionHistory);
       setProviderError(kind, String(reason));
     }
+  };
+
+  const selectUnifiedSession = async (entry: UnifiedSessionEntry): Promise<void> => {
+    setSessionSheetOpen(false);
+    setNewSessionSheetOpen(false);
+    const currentHostId = currentProfileRef.current?.id;
+    if (entry.profile.id !== currentHostId) {
+      await connectWorkbenchTarget(entry.profile, entry.provider, entry.session);
+      return;
+    }
+    await prepareProvider(entry.provider);
+    await selectSession(entry.session);
   };
 
   const newSession = async (): Promise<void> => {
@@ -1538,6 +1618,26 @@ export const MobileApp = () => {
     await openProvider(profile, nextProvider);
   };
 
+  const openNewSessionSheet = (): void => {
+    setSessionSheetOpen(false);
+    setNewSessionProfileId(currentProfileRef.current?.id ?? profiles[0]?.id ?? "");
+    setNewSessionProvider(providerRef.current);
+    setNewSessionSheetOpen(true);
+  };
+
+  const createUnifiedSession = async (): Promise<void> => {
+    const profile = profiles.find((candidate) => candidate.id === newSessionProfileId);
+    if (!profile) return;
+    setNewSessionSheetOpen(false);
+    if (profile.id !== currentProfileRef.current?.id) {
+      const connected = await connectWorkbenchTarget(profile, newSessionProvider, undefined, true);
+      if (!connected) return;
+    } else {
+      await changeProvider(newSessionProvider);
+    }
+    await newSession();
+  };
+
   const resolveApproval = async (approval: AgentApprovalRequest, accepted: boolean): Promise<void> => {
     const kind = providerRef.current;
     const sessionId = readProviderView(kind).activeSessionId;
@@ -1552,13 +1652,35 @@ export const MobileApp = () => {
     }
   };
 
+  const unifiedSessions = useMemo(() => buildUnifiedSessionIndex(profiles.map((profile) => ({
+    profile,
+    views: Object.fromEntries(MOBILE_PROVIDERS.flatMap((kind) => {
+      const view = profile.id === currentProfile?.id
+        ? kind === provider
+          ? { sessions, activeSessionId, runtimes }
+          : providerViews.current[kind] ?? loadCachedWorkbenchView(profile.id, kind)
+        : loadCachedWorkbenchView(profile.id, kind);
+      return view ? [[kind, view]] : [];
+    })),
+  }))), [
+    activeSessionId,
+    currentProfile?.id,
+    profiles,
+    provider,
+    providerViewRevision,
+    runtimes,
+    sessions,
+  ]);
+
   const filteredSessions = useMemo(() => {
     const search = sessionSearch.trim().toLowerCase();
     return search
-      ? sessions.filter((session) =>
-          `${session.title} ${session.cwd ?? ""}`.toLowerCase().includes(search))
-      : sessions;
-  }, [sessionSearch, sessions]);
+      ? unifiedSessions.filter((entry) =>
+          `${entry.session.title} ${entry.session.cwd ?? ""} ${entry.profile.name} ${entry.profile.host} ${entry.provider}`
+            .toLowerCase()
+            .includes(search))
+      : unifiedSessions;
+  }, [sessionSearch, unifiedSessions]);
 
   const applyExecutionSettings = async (settings: AgentExecutionSettings): Promise<void> => {
     const kind = providerRef.current;
@@ -1617,59 +1739,32 @@ export const MobileApp = () => {
     effortLabel,
     provider === "codex" ? serviceTierLabel : null,
   ].filter(Boolean).join(" · ");
-  const codexActivity = activeSessionCount(readProviderView("codex").runtimes);
-  const claudeActivity = activeSessionCount(readProviderView("claude").runtimes);
-
   return (
     <div className="mobile-app">
-      <header className="mobile-header">
-        <button
-          className="host-pill"
-          type="button"
-          onClick={() => setHostSheetOpen(true)}
-          aria-label={`Connected to ${currentProfile.name}, ${currentProfile.user}@${currentProfile.host}`}
-        >
-          <span className="online-dot" aria-hidden="true" />
-          <span className="host-pill-copy">
-            <strong>{currentProfile.name}</strong>
-          </span>
-          <ChevronDown />
-        </button>
-        <div className="provider-switch" aria-label="Agent provider">
-          <button
-            type="button"
-            className={provider === "codex" ? "active" : ""}
-            onClick={() => void changeProvider("codex")}
-          >Codex{codexActivity > 0 ? <span className="provider-count">{codexActivity}</span> : null}</button>
-          <button
-            type="button"
-            className={provider === "claude" ? "active" : ""}
-            onClick={() => void changeProvider("claude")}
-          >Claude{claudeActivity > 0 ? <span className="provider-count">{claudeActivity}</span> : null}</button>
-        </div>
-      </header>
-
       <nav className="session-strip" aria-label="Recent sessions">
-        <button className="new-session-button" type="button" onClick={() => void newSession()} aria-label="New session">+</button>
+        <button className="new-session-button" type="button" onClick={openNewSessionSheet} aria-label="New session">+</button>
         <div className="recent-sessions">
-          {sessions.slice(0, 5).map((session) => {
-            const sessionRuntime = readSessionRuntime(runtimes, session.id);
-            const sessionLabel = sessionRuntimeLabel(sessionRuntime);
-            const updated = relativeTime(session.updatedAt);
+          {unifiedSessions.slice(0, 8).map((entry) => {
+            const sessionLabel = sessionRuntimeLabel(entry.runtime);
+            const updated = relativeTime(entry.session.updatedAt);
+            const active = entry.profile.id === currentProfile.id
+              && entry.provider === provider
+              && entry.session.id === activeSessionId;
             return (
               <button
                 type="button"
-                key={session.id}
-                className={session.id === activeSessionId ? "session-chip active" : "session-chip"}
-                onClick={() => void selectSession(session)}
-                aria-label={`${session.title}, ${sessionLabel}${updated ? `, ${updated}` : ""}`}
+                key={unifiedSessionKey(entry)}
+                className={active ? "session-chip active" : "session-chip"}
+                onClick={() => void selectUnifiedSession(entry)}
+                aria-label={`${entry.session.title}, ${entry.profile.name}, ${entry.provider}, ${sessionLabel}${updated ? `, ${updated}` : ""}`}
               >
                 <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} aria-hidden="true" />
-                <span className="session-chip-title">{session.title}</span>
+                <span className="session-chip-title">{entry.session.title}</span>
+                <span className="session-chip-meta">{entry.profile.name} · {entry.provider}</span>
               </button>
             );
           })}
-          {sessions.length === 0 ? <span className="session-empty">No saved sessions</span> : null}
+          {unifiedSessions.length === 0 ? <span className="session-empty">No saved sessions</span> : null}
         </div>
         <button className="all-sessions-button" type="button" onClick={() => setSessionSheetOpen(true)} aria-label="All sessions">
           <MenuIcon />
@@ -1679,7 +1774,10 @@ export const MobileApp = () => {
       <main ref={timelineRef} className="activity-timeline" aria-live="polite">
         <section className="session-context">
           <div className="session-heading">
-            <h1>{activeSession?.title ?? "New session"}</h1>
+            <span className="session-heading-copy">
+              <h1>{activeSession?.title ?? "New session"}</h1>
+              <small>{currentProfile.name} · {provider}</small>
+            </span>
             <span className={running ? "run-state running" : "run-state"}>
               {sessionRuntimeLabel(runtime)}
             </span>
@@ -1713,7 +1811,6 @@ export const MobileApp = () => {
 
         {approvals.map((approval) => (
           <article className="approval-row" key={approval.requestId}>
-            <div className="timeline-rail approval" />
             <div className="timeline-content">
               <span className="timeline-label">Approval required</span>
               <strong>{approval.title}</strong>
@@ -1729,7 +1826,9 @@ export const MobileApp = () => {
         {running ? (
           <div className="working-indicator">
             <span /><span /><span />
-            <span>Agent is working</span>
+            <span>{runtime.connectionState === "disconnected"
+              ? "Connection paused · checking task"
+              : "Agent is working"}</span>
           </div>
         ) : null}
       </main>
@@ -1813,7 +1912,7 @@ export const MobileApp = () => {
       ) : null}
 
       {sessionSheetOpen ? (
-        <BottomSheet title={`${provider} sessions`} onClose={() => setSessionSheetOpen(false)}>
+        <BottomSheet title="Sessions" onClose={() => setSessionSheetOpen(false)}>
           <input
             className="session-search"
             type="search"
@@ -1822,21 +1921,51 @@ export const MobileApp = () => {
             placeholder="Search sessions"
             autoFocus
           />
-          <button type="button" className="sheet-secondary" onClick={() => void newSession()}>New session</button>
+          <div className="sheet-actions">
+            <button type="button" className="sheet-secondary" onClick={openNewSessionSheet}>New session</button>
+            <button
+              type="button"
+              className="sheet-secondary"
+              onClick={() => {
+                setSessionSheetOpen(false);
+                setHostSheetOpen(true);
+              }}
+            >Hosts</button>
+          </div>
           <div className="sheet-list session-list">
-            {filteredSessions.map((session) => {
-              const sessionRuntime = readSessionRuntime(runtimes, session.id);
-              const sessionLabel = sessionRuntimeLabel(sessionRuntime);
+            {filteredSessions.map((entry) => {
+              const sessionLabel = sessionRuntimeLabel(entry.runtime);
               return (
-                <button type="button" key={session.id} onClick={() => void selectSession(session)}>
+                <button type="button" key={unifiedSessionKey(entry)} onClick={() => void selectUnifiedSession(entry)}>
                   <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} />
                   <span>
-                    <strong>{session.title}</strong>
-                    <small>{session.cwd || session.id} · {sessionLabel} · {relativeTime(session.updatedAt)}</small>
+                    <strong>{entry.session.title}</strong>
+                    <small>{entry.profile.name} · {entry.provider} · {sessionLabel} · {relativeTime(entry.session.updatedAt)}</small>
                   </span>
                 </button>
               );
             })}
+          </div>
+        </BottomSheet>
+      ) : null}
+
+      {newSessionSheetOpen ? (
+        <BottomSheet title="New session" onClose={() => setNewSessionSheetOpen(false)}>
+          <div className="new-session-form">
+            <label>
+              <span>Host</span>
+              <select value={newSessionProfileId} onChange={(event) => setNewSessionProfileId(event.target.value)}>
+                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>AI</span>
+              <select value={newSessionProvider} onChange={(event) => setNewSessionProvider(event.target.value as Provider)}>
+                <option value="codex">Codex</option>
+                <option value="claude">Claude</option>
+              </select>
+            </label>
+            <button type="button" className="sheet-primary" onClick={() => void createUnifiedSession()}>Create session</button>
           </div>
         </BottomSheet>
       ) : null}
@@ -1970,7 +2099,6 @@ const appendUserMessage = (
 
 const TimelineRow = ({ item }: { item: MobileTimelineItem }) => (
   <article className={`timeline-row ${item.kind}`}>
-    <div className={`timeline-rail ${item.kind}`} />
     <div className="timeline-content">
       <span className="timeline-label">
         {item.kind === "user" ? "You" : item.kind === "assistant" ? "Agent" : item.title ?? "Status"}
@@ -2103,10 +2231,6 @@ const BottomSheet = ({
       {children}
     </section>
   </div>
-);
-
-const ChevronDown = () => (
-  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
 );
 
 const MenuIcon = () => (

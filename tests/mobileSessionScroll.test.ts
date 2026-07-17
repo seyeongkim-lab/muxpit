@@ -20,8 +20,8 @@ test("mobile follows streaming output and approves Codex requests", () => {
 });
 
 test("mobile exposes background activity and per-session execution settings", () => {
-  assert.match(component, /activeSessionCount/);
-  assert.match(component, /provider-count/);
+  assert.match(component, /unifiedSessions/);
+  assert.match(component, /session-chip-meta/);
   assert.match(component, /session-state-dot/);
   assert.match(component, /setSettingsSheetOpen\(true\)/);
   assert.match(component, /Model/);

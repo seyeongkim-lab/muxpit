@@ -46,6 +46,22 @@ test("foreground reconnect keeps the current workbench until the provider resume
   assert.doesNotMatch(connectProfile, /void openProvider\(/);
 });
 
+test("background channel interruption keeps the last active task visible until resume", () => {
+  const disconnectRuntimes = app.slice(
+    app.indexOf("const disconnectProviderRuntimes"),
+    app.indexOf("const setProviderError"),
+  );
+  const closedTransport = app.slice(
+    app.indexOf('if (event.kind === "closed")'),
+    app.indexOf('if (event.kind !== "stdout"'),
+  );
+
+  assert.doesNotMatch(disconnectRuntimes, /running: false/);
+  assert.doesNotMatch(disconnectRuntimes, /waiting: false/);
+  assert.doesNotMatch(closedTransport, /running: false/);
+  assert.match(app, /Connection paused · checking task/);
+});
+
 test("foreground resume verifies native provider channels", () => {
   const resumeConnection = app.slice(
     app.indexOf("const resumeConnection = async"),
