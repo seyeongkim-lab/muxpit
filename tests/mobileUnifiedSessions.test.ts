@@ -12,6 +12,22 @@ const mobileApp = readFileSync(
   new URL("../src/mobile/MobileApp.tsx", import.meta.url),
   "utf8",
 );
+const bridge = readFileSync(
+  new URL("../src/mobile/mobileBridge.ts", import.meta.url),
+  "utf8",
+);
+const nativeAgent = readFileSync(
+  new URL("../src-tauri/src/mobile_agent.rs", import.meta.url),
+  "utf8",
+);
+const build = readFileSync(
+  new URL("../src-tauri/build.rs", import.meta.url),
+  "utf8",
+);
+const capability = readFileSync(
+  new URL("../src-tauri/capabilities/mobile.json", import.meta.url),
+  "utf8",
+);
 
 const host = (id: string, name: string): HostProfile => ({
   id,
@@ -85,10 +101,55 @@ test("unified session keys include host and provider", () => {
     },
   ]);
 
-  assert.deepEqual(entries.map(unifiedSessionKey), [
+  assert.deepEqual(new Set(entries.map(unifiedSessionKey)), new Set([
     "alpha:codex:shared",
     "alpha:claude:shared",
-  ]);
+  ]));
+});
+
+test("unified mobile sessions include every desktop provider", () => {
+  const profile = host("alpha", "Alpha");
+  const providers = ["claude", "codex", "gemini", "copilot", "opencode"] as const;
+  const entries = buildUnifiedSessionIndex([{
+    profile,
+    views: Object.fromEntries(providers.map((provider) => [provider, {
+      sessions: [{ id: `${provider}-1`, title: provider, provider }],
+      activeSessionId: null,
+      runtimes: {},
+    }])),
+  }]);
+
+  assert.deepEqual(new Set(entries.map((entry) => entry.provider)), new Set(providers));
+});
+
+test("mobile refreshes every saved host without replacing active SSH channels", () => {
+  assert.match(mobileApp, /const SESSION_REFRESH_INTERVAL_MS = 5_000/);
+  assert.match(mobileApp, /const refreshAllProfiles = async/);
+  assert.match(mobileApp, /for \(const profile of profilesRef\.current\)/);
+  assert.match(mobileApp, /await listInstalledAgents\(profile\.id\)/);
+  assert.match(mobileApp, /window\.setInterval\(refresh, SESSION_REFRESH_INTERVAL_MS\)/);
+  assert.match(bridge, /listInstalledAgents = \(profileId: string\)[\s\S]*invoke<AgentProvider\[\]>\("mobile_agent_installed"/);
+  assert.match(nativeAgent, /sessions: RwLock<HashMap<String, MobileSshSession>>/);
+  assert.match(nativeAgent, /profile_id: String/);
+  assert.doesNotMatch(nativeAgent, /mobile_ssh_disconnect\(state\.clone\(\)\)\.await/);
+  assert.match(build, /"mobile_agent_installed"/);
+  assert.match(capability, /"allow-mobile-agent-installed"/);
+  assert.match(mobileApp, /sessions: mergeAgentSessions\(view\.sessions, event\.sessions\)/);
+});
+
+test("mobile opens and controls every desktop ACP provider", () => {
+  const openProvider = mobileApp.slice(
+    mobileApp.indexOf("const openProvider"),
+    mobileApp.indexOf("const connectProfile"),
+  );
+
+  assert.match(openProvider, /new AcpClient/);
+  assert.match(openProvider, /await client\.initialize\(\)/);
+  assert.match(openProvider, /await client\.loadSession\(/);
+  assert.match(mobileApp, /await client\.newSession\(/);
+  assert.match(mobileApp, /await client\.prompt\(/);
+  assert.match(mobileApp, /await client\.cancel\(/);
+  assert.match(mobileApp, /automaticPermissionOptionId/);
 });
 
 test("selecting a unified session changes host and provider before opening it", () => {

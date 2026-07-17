@@ -183,7 +183,7 @@ export class AcpClient {
     const result = await this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "wmux", title: "wmux", version: "0.2.15" },
+      clientInfo: { name: "wmux", title: "wmux", version: "0.2.16" },
     });
     this.capabilities = asObject(result.agentCapabilities) as AgentCapabilities ?? {};
     if (this.capabilities.sessionCapabilities?.list) {

@@ -46,15 +46,26 @@ impl client::Handler for SshClient {
 
 type AgentWriter = ChannelWriteHalf<client::Msg>;
 
+struct MobileSshSession {
+    handle: Handle<SshClient>,
+    fingerprint: String,
+}
+
+struct MobileAgentChannel {
+    profile_id: String,
+    writer: Arc<AgentWriter>,
+}
+
 #[derive(Default)]
 pub struct MobileSshManager {
-    session: RwLock<Option<Handle<SshClient>>>,
-    channels: Arc<RwLock<HashMap<String, Arc<AgentWriter>>>>,
+    sessions: RwLock<HashMap<String, MobileSshSession>>,
+    channels: Arc<RwLock<HashMap<String, MobileAgentChannel>>>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshConnectRequest {
+    profile_id: String,
     host: String,
     port: u16,
     user: String,
@@ -257,14 +268,20 @@ struct MobileAgentTransportEvent {
     exit_status: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MobileAgentProvider {
     Codex,
     Claude,
+    Gemini,
+    Copilot,
+    Opencode,
 }
 
 fn validate_connection(request: &SshConnectRequest) -> Result<(), String> {
+    if !valid_credential_profile_id(&request.profile_id) {
+        return Err("Invalid SSH profile id".into());
+    }
     if request.host.is_empty()
         || request.host.len() > 255
         || request.host.chars().any(char::is_control)
@@ -349,6 +366,9 @@ fn agent_command(
                 "{prefix}exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose{settings}{resume}"
             )
         }
+        MobileAgentProvider::Gemini => format!("{prefix}exec gemini --experimental-acp"),
+        MobileAgentProvider::Copilot => format!("{prefix}exec copilot --acp --stdio"),
+        MobileAgentProvider::Opencode => format!("{prefix}exec opencode acp"),
     };
     Ok(login_shell_command(&command))
 }
@@ -396,7 +416,19 @@ pub async fn mobile_ssh_connect(
     request: SshConnectRequest,
 ) -> Result<SshConnectResult, String> {
     validate_connection(&request)?;
-    mobile_ssh_disconnect(state.clone()).await?;
+    if let Some(expected) = request.trusted_fingerprint.as_ref() {
+        let sessions = state.sessions.read().await;
+        if let Some(existing) = sessions.get(&request.profile_id) {
+            if &existing.fingerprint == expected && probe_session(&existing.handle).await {
+                return Ok(SshConnectResult {
+                    connected: true,
+                    trust_required: false,
+                    fingerprint: existing.fingerprint.clone(),
+                });
+            }
+        }
+    }
+    disconnect_profile(state.inner(), Some(&request.profile_id)).await;
 
     let observed_fingerprint = Arc::new(Mutex::new(None));
     let client = SshClient {
@@ -436,7 +468,13 @@ pub async fn mobile_ssh_connect(
     }
 
     authenticate(&mut session, &request.user, request.auth).await?;
-    *state.session.write().await = Some(session);
+    state.sessions.write().await.insert(
+        request.profile_id,
+        MobileSshSession {
+            handle: session,
+            fingerprint: fingerprint.clone(),
+        },
+    );
     Ok(SshConnectResult {
         connected: true,
         trust_required: false,
@@ -444,43 +482,76 @@ pub async fn mobile_ssh_connect(
     })
 }
 
-#[tauri::command]
-pub async fn mobile_ssh_disconnect(state: State<'_, MobileSshManager>) -> Result<(), String> {
-    let writers = {
-        let mut channels = state.channels.write().await;
-        channels
-            .drain()
-            .map(|(_, writer)| writer)
-            .collect::<Vec<_>>()
+async fn probe_session(session: &Handle<SshClient>) -> bool {
+    let channel = match tokio::time::timeout(PROBE_TIMEOUT, session.channel_open_session()).await {
+        Ok(Ok(channel)) => channel,
+        Ok(Err(_)) | Err(_) => return false,
     };
-    for writer in writers {
-        let _ = writer.close().await;
+    let _ = channel.close().await;
+    true
+}
+
+async fn disconnect_profile(state: &MobileSshManager, profile_id: Option<&str>) {
+    let channels = {
+        let mut channels = state.channels.write().await;
+        match profile_id {
+            Some(profile_id) => {
+                let channel_ids = channels
+                    .iter()
+                    .filter(|(_, channel)| channel.profile_id == profile_id)
+                    .map(|(channel_id, _)| channel_id.clone())
+                    .collect::<Vec<_>>();
+                channel_ids
+                    .into_iter()
+                    .filter_map(|channel_id| channels.remove(&channel_id))
+                    .collect::<Vec<_>>()
+            }
+            None => channels.drain().map(|(_, channel)| channel).collect(),
+        }
+    };
+    for channel in channels {
+        let _ = channel.writer.close().await;
     }
-    if let Some(session) = state.session.write().await.take() {
+    let sessions = {
+        let mut sessions = state.sessions.write().await;
+        match profile_id {
+            Some(profile_id) => sessions.remove(profile_id).into_iter().collect::<Vec<_>>(),
+            None => sessions.drain().map(|(_, session)| session).collect(),
+        }
+    };
+    for session in sessions {
         let _ = session
+            .handle
             .disconnect(Disconnect::ByApplication, "Disconnected", "en")
             .await;
     }
+}
+
+#[tauri::command]
+pub async fn mobile_ssh_disconnect(
+    state: State<'_, MobileSshManager>,
+    profile_id: Option<String>,
+) -> Result<(), String> {
+    disconnect_profile(state.inner(), profile_id.as_deref()).await;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn mobile_ssh_probe(state: State<'_, MobileSshManager>) -> Result<bool, String> {
-    let session = state.session.read().await;
-    let Some(session) = session.as_ref() else {
+pub async fn mobile_ssh_probe(
+    state: State<'_, MobileSshManager>,
+    profile_id: String,
+) -> Result<bool, String> {
+    let sessions = state.sessions.read().await;
+    let Some(session) = sessions.get(&profile_id) else {
         return Ok(false);
     };
-    let channel = match tokio::time::timeout(PROBE_TIMEOUT, session.channel_open_session()).await {
-        Ok(Ok(channel)) => channel,
-        Ok(Err(_)) | Err(_) => return Ok(false),
-    };
-    let _ = channel.close().await;
-    Ok(true)
+    Ok(probe_session(&session.handle).await)
 }
 
 async fn open_channel(
     app: AppHandle,
     state: State<'_, MobileSshManager>,
+    profile_id: String,
     channel_id: String,
     command: String,
 ) -> Result<(), String> {
@@ -488,15 +559,16 @@ async fn open_channel(
         return Err("Invalid agent channel id".into());
     }
     if let Some(previous) = state.channels.write().await.remove(&channel_id) {
-        let _ = previous.close().await;
+        let _ = previous.writer.close().await;
     }
 
     let channel = {
-        let session = state.session.read().await;
-        let session = session
-            .as_ref()
-            .ok_or_else(|| "SSH is not connected".to_string())?;
+        let sessions = state.sessions.read().await;
+        let session = sessions
+            .get(&profile_id)
+            .ok_or_else(|| "SSH profile is not connected".to_string())?;
         session
+            .handle
             .channel_open_session()
             .await
             .map_err(|error| format!("Could not open SSH channel: {error}"))?
@@ -507,11 +579,13 @@ async fn open_channel(
         .map_err(|error| format!("Could not start remote agent: {error}"))?;
     let (mut reader, writer) = channel.split();
     let writer = Arc::new(writer);
-    state
-        .channels
-        .write()
-        .await
-        .insert(channel_id.clone(), Arc::clone(&writer));
+    state.channels.write().await.insert(
+        channel_id.clone(),
+        MobileAgentChannel {
+            profile_id,
+            writer: Arc::clone(&writer),
+        },
+    );
 
     let channels = Arc::clone(&state.channels);
     tauri::async_runtime::spawn(async move {
@@ -558,6 +632,7 @@ async fn open_channel(
 async fn open_claude_session_script(
     app: AppHandle,
     state: State<'_, MobileSshManager>,
+    profile_id: String,
     channel_id: String,
     arguments: &[&str],
 ) -> Result<(), String> {
@@ -568,13 +643,82 @@ async fn open_claude_session_script(
         command.push(' ');
         command.push_str(&quote_posix_shell_arg(argument));
     }
-    open_channel(app, state, channel_id, login_shell_command(&command)).await
+    open_channel(
+        app,
+        state,
+        profile_id,
+        channel_id,
+        login_shell_command(&command),
+    )
+    .await
+}
+
+async fn command_stdout(
+    state: &MobileSshManager,
+    profile_id: &str,
+    command: String,
+) -> Result<String, String> {
+    let channel = {
+        let sessions = state.sessions.read().await;
+        let session = sessions
+            .get(profile_id)
+            .ok_or_else(|| "SSH profile is not connected".to_string())?;
+        session
+            .handle
+            .channel_open_session()
+            .await
+            .map_err(|error| format!("Could not open SSH channel: {error}"))?
+    };
+    channel
+        .exec(true, command)
+        .await
+        .map_err(|error| format!("Could not start remote command: {error}"))?;
+    let (mut reader, _) = channel.split();
+    tokio::time::timeout(PROBE_TIMEOUT, async move {
+        let mut output = Vec::new();
+        while let Some(message) = reader.wait().await {
+            match message {
+                ChannelMsg::Data { data } => output.extend_from_slice(&data),
+                ChannelMsg::ExitStatus { exit_status } if exit_status != 0 => {
+                    return Err(format!("Remote command exited with status {exit_status}"));
+                }
+                ChannelMsg::ExitStatus { .. } => break,
+                _ => {}
+            }
+        }
+        String::from_utf8(output).map_err(|_| "Remote command returned invalid UTF-8".to_string())
+    })
+    .await
+    .map_err(|_| "Remote command timed out".to_string())?
+}
+
+#[tauri::command]
+pub async fn mobile_agent_installed(
+    state: State<'_, MobileSshManager>,
+    profile_id: String,
+) -> Result<Vec<MobileAgentProvider>, String> {
+    let command = login_shell_command(
+        "for name in claude codex gemini copilot opencode; do command -v \"$name\" >/dev/null 2>&1 && printf '%s\\n' \"$name\"; done",
+    );
+    let output = command_stdout(state.inner(), &profile_id, command).await?;
+    Ok(output
+        .lines()
+        .filter_map(|name| match name.trim() {
+            "claude" => Some(MobileAgentProvider::Claude),
+            "codex" => Some(MobileAgentProvider::Codex),
+            "gemini" => Some(MobileAgentProvider::Gemini),
+            "copilot" => Some(MobileAgentProvider::Copilot),
+            "opencode" => Some(MobileAgentProvider::Opencode),
+            _ => None,
+        })
+        .collect())
 }
 
 #[tauri::command]
 pub async fn mobile_agent_open(
     app: AppHandle,
     state: State<'_, MobileSshManager>,
+    profile_id: String,
     channel_id: String,
     provider: MobileAgentProvider,
     session_id: Option<String>,
@@ -582,29 +726,38 @@ pub async fn mobile_agent_open(
     settings: Option<AgentLaunchSettings>,
 ) -> Result<(), String> {
     let command = agent_command(provider, session_id, cwd, settings)?;
-    open_channel(app, state, channel_id, command).await
+    open_channel(app, state, profile_id, channel_id, command).await
 }
 
 #[tauri::command]
 pub async fn mobile_claude_sessions(
     app: AppHandle,
     state: State<'_, MobileSshManager>,
+    profile_id: String,
     channel_id: String,
 ) -> Result<(), String> {
-    open_claude_session_script(app, state, channel_id, &["list"]).await
+    open_claude_session_script(app, state, profile_id, channel_id, &["list"]).await
 }
 
 #[tauri::command]
 pub async fn mobile_claude_session(
     app: AppHandle,
     state: State<'_, MobileSshManager>,
+    profile_id: String,
     channel_id: String,
     session_id: String,
 ) -> Result<(), String> {
     if !valid_session_id(&session_id) {
         return Err("Invalid Claude session id".into());
     }
-    open_claude_session_script(app, state, channel_id, &["history", &session_id]).await
+    open_claude_session_script(
+        app,
+        state,
+        profile_id,
+        channel_id,
+        &["history", &session_id],
+    )
+    .await
 }
 
 #[tauri::command]
@@ -621,7 +774,7 @@ pub async fn mobile_agent_write(
         .read()
         .await
         .get(&channel_id)
-        .cloned()
+        .map(|channel| Arc::clone(&channel.writer))
         .ok_or_else(|| "Agent channel is not open".to_string())?;
     let data = format!("{line}\n");
     writer
@@ -650,6 +803,7 @@ pub async fn mobile_agent_close(
         .remove(&channel_id)
         .ok_or_else(|| "Agent channel is not open".to_string())?;
     writer
+        .writer
         .close()
         .await
         .map_err(|error| format!("Could not close remote agent: {error}"))
@@ -667,6 +821,7 @@ pub fn run() {
             mobile_credential_load,
             mobile_profiles_save,
             mobile_profiles_load,
+            mobile_agent_installed,
             mobile_agent_open,
             mobile_agent_probe,
             mobile_agent_write,
@@ -708,5 +863,14 @@ mod tests {
                 "exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose"
             ));
         assert!(claude.contains("--model 'sonnet' --effort 'high'"));
+
+        let gemini = agent_command(MobileAgentProvider::Gemini, None, None, None).unwrap();
+        assert!(gemini.contains("exec gemini --experimental-acp"));
+
+        let copilot = agent_command(MobileAgentProvider::Copilot, None, None, None).unwrap();
+        assert!(copilot.contains("exec copilot --acp --stdio"));
+
+        let opencode = agent_command(MobileAgentProvider::Opencode, None, None, None).unwrap();
+        assert!(opencode.contains("exec opencode acp"));
     }
 }

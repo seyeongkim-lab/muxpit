@@ -12,7 +12,7 @@ const hostProfiles = readFileSync(new URL("../src/mobile/hostProfiles.ts", impor
 
 test("mobile app checks and restores SSH when returning to the foreground", () => {
   assert.match(app, /document\.addEventListener\("visibilitychange"/);
-  assert.match(app, /await probeSsh\(\)/);
+  assert.match(app, /await probeSsh\(profile\.id\)/);
   assert.match(app, /openProvider\(profile, currentProvider, sessionId, true, sessionCwd\)/);
   assert.match(app, /event\.kind === "stderr"[^}]*activeChannel\.current === event\.channelId/s);
   assert.match(app, /event\.kind === "exit"[^}]*activeChannel\.current === event\.channelId/s);
@@ -42,6 +42,7 @@ test("foreground reconnect keeps the current workbench until the provider resume
   assert.match(connectProfile, /const preservingView = restore !== undefined/);
   assert.match(connectProfile, /const reconnecting = preservingView[\s\S]*connectionStatusRef\.current === "connected"[\s\S]*currentProfileRef\.current\?\.id === profile\.id/);
   assert.match(connectProfile, /if \(!reconnecting\) \{[\s\S]*setConnectionStatus\("connecting"\)/);
+  assert.match(connectProfile, /\[\.\.\.channels\.current\.keys\(\)\][\s\S]*closeAgent\(channelId\)/);
   assert.match(connectProfile, /await openProvider\([\s\S]*preservingView/);
   assert.doesNotMatch(connectProfile, /void openProvider\(/);
 });
@@ -67,7 +68,7 @@ test("foreground resume verifies native provider channels", () => {
     app.indexOf("const resumeConnection = async"),
     app.indexOf("resumeConnectionRef.current = resumeConnection"),
   );
-  const sshProbe = resumeConnection.indexOf("await probeSsh()");
+  const sshProbe = resumeConnection.indexOf("await probeSsh(profile.id)");
   const agentProbe = resumeConnection.indexOf("await probeAgent(channelId)");
 
   assert.notEqual(sshProbe, -1);
@@ -155,7 +156,7 @@ test("mobile workbench persists the selected session without credentials", () =>
 test("mobile workbench scopes cached views by host and provider", () => {
   assert.match(app, /mobileWorkbenchViewStorageKey/);
   assert.match(app, /views: providerViews\.current/);
-  assert.match(app, /saveAgentWorkbenchSnapshot\(mobileWorkbenchViewStorageKey\(profileId, kind\)/);
+  assert.match(app, /saveCachedWorkbenchView\(profileId, kind, view\)/);
   assert.match(app, /loadCachedWorkbenchView/);
   assert.match(app, /persistWorkbenchRef\.current\(\);[\s\S]*loadCachedWorkbenchView\(profileId, nextProvider\)/);
 });

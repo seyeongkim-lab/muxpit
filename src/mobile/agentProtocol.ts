@@ -44,6 +44,16 @@ export interface MobileSession {
   provider: AgentProvider;
 }
 
+export const mergeAgentSessions = (
+  cached: MobileSession[],
+  fresh: MobileSession[],
+): MobileSession[] => {
+  const sessions = new Map(cached.map((session) => [session.id, session]));
+  for (const session of fresh) sessions.set(session.id, session);
+  return [...sessions.values()].sort((left, right) =>
+    (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+};
+
 export interface MobileTimelineItem {
   id: string;
   kind: "user" | "assistant" | "tool" | "status";

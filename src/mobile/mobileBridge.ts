@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AgentExecutionSettings } from "./agentSessionRuntime.ts";
+import type { AgentProvider } from "./agentProtocol.ts";
 import type { HostProfile } from "./hostProfiles.ts";
 
 export type SshAuth =
@@ -8,6 +9,7 @@ export type SshAuth =
   | { type: "privateKey"; privateKey: string; passphrase?: string };
 
 export interface SshConnectRequest {
+  profileId: string;
   host: string;
   port: number;
   user: string;
@@ -31,9 +33,11 @@ export interface MobileAgentTransportEvent {
 export const connectSsh = (request: SshConnectRequest): Promise<SshConnectResult> =>
   invoke("mobile_ssh_connect", { request });
 
-export const disconnectSsh = (): Promise<void> => invoke("mobile_ssh_disconnect");
+export const disconnectSsh = (profileId?: string): Promise<void> =>
+  invoke("mobile_ssh_disconnect", { profileId });
 
-export const probeSsh = (): Promise<boolean> => invoke("mobile_ssh_probe");
+export const probeSsh = (profileId: string): Promise<boolean> =>
+  invoke("mobile_ssh_probe", { profileId });
 
 export const saveSshCredential = (profileId: string, auth: SshAuth): Promise<void> =>
   invoke("mobile_credential_save", { profileId, auth });
@@ -47,13 +51,18 @@ export const saveHostProfilesSecure = (profiles: HostProfile[]): Promise<void> =
 export const loadHostProfilesSecure = (): Promise<HostProfile[]> =>
   invoke<HostProfile[]>("mobile_profiles_load");
 
+export const listInstalledAgents = (profileId: string): Promise<AgentProvider[]> =>
+  invoke<AgentProvider[]>("mobile_agent_installed", { profileId });
+
 export const openAgent = (
+  profileId: string,
   channelId: string,
-  provider: "codex" | "claude",
+  provider: AgentProvider,
   sessionId?: string,
   cwd?: string,
   settings?: AgentExecutionSettings,
 ): Promise<void> => invoke("mobile_agent_open", {
+  profileId,
   channelId,
   provider,
   sessionId,
@@ -63,11 +72,14 @@ export const openAgent = (
     : null,
 });
 
-export const listClaudeSessions = (channelId: string): Promise<void> =>
-  invoke("mobile_claude_sessions", { channelId });
+export const listClaudeSessions = (profileId: string, channelId: string): Promise<void> =>
+  invoke("mobile_claude_sessions", { profileId, channelId });
 
-export const loadClaudeSession = (channelId: string, sessionId: string): Promise<void> =>
-  invoke("mobile_claude_session", { channelId, sessionId });
+export const loadClaudeSession = (
+  profileId: string,
+  channelId: string,
+  sessionId: string,
+): Promise<void> => invoke("mobile_claude_session", { profileId, channelId, sessionId });
 
 export const writeAgentLine = (channelId: string, line: string): Promise<void> =>
   invoke("mobile_agent_write", { channelId, line });

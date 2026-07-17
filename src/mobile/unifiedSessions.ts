@@ -3,7 +3,7 @@ import type { AgentWorkbenchViewSnapshot } from "./agentWorkbenchPersistence.ts"
 import { readSessionRuntime, type AgentSessionRuntime } from "./agentSessionRuntime.ts";
 import type { HostProfile } from "./hostProfiles.ts";
 
-export type MobileProvider = Extract<AgentProvider, "codex" | "claude">;
+export type MobileProvider = AgentProvider;
 
 export interface HostWorkbenchSource {
   profile: HostProfile;
@@ -17,7 +17,13 @@ export interface UnifiedSessionEntry {
   runtime: AgentSessionRuntime;
 }
 
-const MOBILE_PROVIDERS: readonly MobileProvider[] = ["codex", "claude"];
+const MOBILE_PROVIDERS: readonly MobileProvider[] = [
+  "claude",
+  "codex",
+  "gemini",
+  "copilot",
+  "opencode",
+];
 
 export const buildUnifiedSessionIndex = (
   sources: HostWorkbenchSource[],

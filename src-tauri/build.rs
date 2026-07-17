@@ -13,6 +13,7 @@ fn main() {
             "mobile_credential_load",
             "mobile_profiles_save",
             "mobile_profiles_load",
+            "mobile_agent_installed",
             "mobile_agent_open",
             "mobile_agent_probe",
             "mobile_agent_write",

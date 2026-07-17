@@ -5,6 +5,7 @@ import {
   imageBlobsFromClipboard,
   promptTimelineText,
 } from "../agent/agentImages.ts";
+import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import { AgentImageAttachments } from "../components/AgentImageAttachments.tsx";
 import {
   CodexMobileClient,
@@ -14,6 +15,7 @@ import {
   ClaudeStreamNormalizer,
   JsonLineDecoder,
   composerAction,
+  mergeAgentSessions,
   normalizeClaudeHistoryMessage,
   type MobileAgentEvent,
   type MobileSession,
@@ -45,6 +47,7 @@ import {
   connectSsh,
   disconnectSsh,
   listClaudeSessions,
+  listInstalledAgents,
   loadClaudeSession,
   loadHostProfilesSecure,
   loadSshCredential,
@@ -76,8 +79,17 @@ type Provider = MobileProvider;
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
 const MOBILE_WORKBENCH_STORAGE_KEY = "wmux-mobile-agent-workbench-v1";
-const MOBILE_PROVIDERS = ["codex", "claude"] as const;
+const MOBILE_PROVIDERS = ["claude", "codex", "gemini", "copilot", "opencode"] as const;
+const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const WORKBENCH_PERSIST_DELAY_MS = 200;
+
+const PROVIDER_NAMES: Record<Provider, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  gemini: "Gemini",
+  copilot: "Copilot",
+  opencode: "OpenCode",
+};
 
 const mobileWorkbenchViewStorageKey = (profileId: string, provider: Provider): string =>
   `${MOBILE_WORKBENCH_STORAGE_KEY}:${encodeURIComponent(profileId)}:${provider}`;
@@ -90,6 +102,16 @@ const loadCachedWorkbenchView = (
   MOBILE_PROVIDERS,
 )?.views[provider];
 
+const saveCachedWorkbenchView = (
+  profileId: string,
+  provider: Provider,
+  view: AgentWorkbenchViewSnapshot,
+): void => saveAgentWorkbenchSnapshot(mobileWorkbenchViewStorageKey(profileId, provider), {
+  provider,
+  profileId,
+  views: { [provider]: view },
+});
+
 const emptyWorkbenchView = (): AgentWorkbenchViewSnapshot => ({
   sessions: [],
   activeSessionId: null,
@@ -97,11 +119,19 @@ const emptyWorkbenchView = (): AgentWorkbenchViewSnapshot => ({
 });
 
 interface MobileChannelMeta {
+  profileId: string;
   provider: Provider;
   purpose: "provider" | "claude-list" | "claude-history";
   handledPayload: boolean;
   sessionId?: string;
   launchSettings?: AgentExecutionSettings;
+}
+
+interface DiscoveryChannelMeta {
+  profileId: string;
+  provider: Provider;
+  purpose: "provider" | "claude-list";
+  handledPayload: boolean;
 }
 
 const MOBILE_DEMO = import.meta.env.DEV
@@ -319,6 +349,13 @@ export const MobileApp = () => {
   const openingProviders = useRef(new Map<string, Promise<string | undefined>>());
   const helperTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const codexClient = useRef<CodexMobileClient | null>(null);
+  const acpClients = useRef(new Map<Provider, AcpClient>());
+  const discoveryChannels = useRef(new Map<string, DiscoveryChannelMeta>());
+  const discoveryDecoders = useRef(new Map<string, JsonLineDecoder>());
+  const discoveryCodexClients = useRef(new Map<string, CodexMobileClient>());
+  const discoveryAcpClients = useRef(new Map<string, AcpClient>());
+  const discoveryProviderChannels = useRef(new Map<string, string>());
+  const refreshingProfiles = useRef(new Set<string>());
   const activeChannel = useRef<string | null>(null);
   const currentProfileRef = useRef<HostProfile | null>(null);
   const connectionStatusRef = useRef<ConnectionStatus>(connectionStatus);
@@ -332,6 +369,7 @@ export const MobileApp = () => {
   const persistWorkbenchRef = useRef<() => void>(() => {});
   const normalizedHandlerRef = useRef<(provider: Provider, event: MobileAgentEvent) => void>(() => {});
   const transportHandlerRef = useRef<(event: MobileAgentTransportEvent) => void>(() => {});
+  const discoveryTransportHandlerRef = useRef<(event: MobileAgentTransportEvent) => boolean>(() => false);
   const resumeConnectionRef = useRef<() => Promise<void>>(async () => {});
   const resumeInFlightRef = useRef(false);
   const initialRestoreStarted = useRef(false);
@@ -429,6 +467,189 @@ export const MobileApp = () => {
     if (kind === providerRef.current) setError(message);
   };
 
+  const discoveryProviderKey = (profileId: string, kind: Provider): string =>
+    `${profileId}:${kind}`;
+
+  const updateDiscoveredSessions = (
+    profileId: string,
+    kind: Provider,
+    fresh: MobileSession[],
+  ): void => {
+    if (profileId === currentProfileRef.current?.id) {
+      updateProviderView(kind, (view) => ({
+        ...view,
+        sessions: mergeAgentSessions(view.sessions, fresh),
+      }));
+      return;
+    }
+    const cached = loadCachedWorkbenchView(profileId, kind) ?? emptyWorkbenchView();
+    saveCachedWorkbenchView(profileId, kind, {
+      ...cached,
+      sessions: mergeAgentSessions(cached.sessions, fresh),
+    });
+    setProviderViewRevision((revision) => revision + 1);
+  };
+
+  const applyDiscoveryEvent = (
+    profileId: string,
+    kind: Provider,
+    event: MobileAgentEvent,
+  ): void => {
+    if (event.type === "sessionsLoaded") {
+      updateDiscoveredSessions(profileId, kind, event.sessions);
+    }
+  };
+
+  const closeDiscoveryChannel = (channelId: string): void => {
+    const meta = discoveryChannels.current.get(channelId);
+    if (!meta) return;
+    const key = discoveryProviderKey(meta.profileId, meta.provider);
+    if (discoveryProviderChannels.current.get(key) === channelId) {
+      discoveryProviderChannels.current.delete(key);
+    }
+    discoveryCodexClients.current.get(key)?.close();
+    discoveryCodexClients.current.delete(key);
+    discoveryAcpClients.current.get(key)?.close();
+    discoveryAcpClients.current.delete(key);
+    discoveryChannels.current.delete(channelId);
+    discoveryDecoders.current.delete(channelId);
+  };
+
+  const handleDiscoveryTransport = (event: MobileAgentTransportEvent): boolean => {
+    const meta = discoveryChannels.current.get(event.channelId);
+    if (!meta) return false;
+    const key = discoveryProviderKey(meta.profileId, meta.provider);
+    if (event.kind === "closed") {
+      closeDiscoveryChannel(event.channelId);
+      return true;
+    }
+    if (event.kind !== "stdout" || !event.data) return true;
+    const decoder = discoveryDecoders.current.get(event.channelId) ?? new JsonLineDecoder();
+    discoveryDecoders.current.set(event.channelId, decoder);
+    for (const line of decoder.push(event.data)) {
+      if (meta.provider === "codex") {
+        discoveryCodexClients.current.get(key)?.receive(line);
+        continue;
+      }
+      if (meta.provider !== "claude") {
+        discoveryAcpClients.current.get(key)?.receive(line);
+        continue;
+      }
+      try {
+        const message = JSON.parse(line) as Record<string, unknown>;
+        if (message.type === "wmux_sessions" && Array.isArray(message.sessions)) {
+          meta.handledPayload = true;
+          updateDiscoveredSessions(meta.profileId, meta.provider, message.sessions as MobileSession[]);
+        }
+      } catch {
+        closeDiscoveryChannel(event.channelId);
+      }
+    }
+    return true;
+  };
+  discoveryTransportHandlerRef.current = handleDiscoveryTransport;
+
+  const openDiscoveryProvider = async (
+    profile: HostProfile,
+    kind: Exclude<Provider, "claude">,
+  ): Promise<void> => {
+    const key = discoveryProviderKey(profile.id, kind);
+    const existingChannel = discoveryProviderChannels.current.get(key);
+    if (existingChannel) {
+      if (kind === "codex") {
+        await discoveryCodexClients.current.get(key)?.listSessions();
+      } else {
+        await discoveryAcpClients.current.get(key)?.listSessions();
+      }
+      return;
+    }
+    channelSequence.current += 1;
+    const channelId = `discovery-${kind}-${Date.now()}-${channelSequence.current}`;
+    discoveryChannels.current.set(channelId, {
+      profileId: profile.id,
+      provider: kind,
+      purpose: "provider",
+      handledPayload: false,
+    });
+    discoveryDecoders.current.set(channelId, new JsonLineDecoder());
+    try {
+      await openAgent(profile.id, channelId, kind, undefined, profile.cwd || undefined);
+      discoveryProviderChannels.current.set(key, channelId);
+      if (kind === "codex") {
+        const client = new CodexMobileClient(
+          (line) => writeAgentLine(channelId, line),
+          (event) => applyDiscoveryEvent(profile.id, kind, event),
+        );
+        discoveryCodexClients.current.set(key, client);
+        await client.connect();
+        await client.listSessions();
+      } else {
+        const client = new AcpClient(
+          kind,
+          (line) => writeAgentLine(channelId, line),
+          (event) => applyDiscoveryEvent(profile.id, kind, event),
+        );
+        discoveryAcpClients.current.set(key, client);
+        await client.initialize();
+      }
+    } catch (reason) {
+      await closeAgent(channelId).catch(() => {});
+      closeDiscoveryChannel(channelId);
+      throw reason;
+    }
+  };
+
+  const requestDiscoveryClaude = async (profile: HostProfile): Promise<void> => {
+    const key = discoveryProviderKey(profile.id, "claude");
+    if (discoveryProviderChannels.current.has(key)) return;
+    channelSequence.current += 1;
+    const channelId = `discovery-claude-${Date.now()}-${channelSequence.current}`;
+    discoveryProviderChannels.current.set(key, channelId);
+    discoveryChannels.current.set(channelId, {
+      profileId: profile.id,
+      provider: "claude",
+      purpose: "claude-list",
+      handledPayload: false,
+    });
+    discoveryDecoders.current.set(channelId, new JsonLineDecoder());
+    try {
+      await listClaudeSessions(profile.id, channelId);
+    } catch (reason) {
+      closeDiscoveryChannel(channelId);
+      throw reason;
+    }
+  };
+
+  const refreshProfileSessions = async (profile: HostProfile): Promise<void> => {
+    if (refreshingProfiles.current.has(profile.id)) return;
+    refreshingProfiles.current.add(profile.id);
+    try {
+      const auth = await credentialForProfile(profile.id);
+      if (!auth) return;
+      const result = await connectSsh({
+        profileId: profile.id,
+        host: profile.host,
+        port: profile.port,
+        user: profile.user,
+        ...(profile.trustedFingerprint ? { trustedFingerprint: profile.trustedFingerprint } : {}),
+        auth,
+      });
+      if (!result.connected) return;
+      const installed = await listInstalledAgents(profile.id);
+      await Promise.all(installed.map((kind) => kind === "claude"
+        ? requestDiscoveryClaude(profile)
+        : openDiscoveryProvider(profile, kind)));
+    } finally {
+      refreshingProfiles.current.delete(profile.id);
+    }
+  };
+
+  const refreshAllProfiles = async (): Promise<void> => {
+    for (const profile of profilesRef.current) {
+      await refreshProfileSessions(profile).catch(() => {});
+    }
+  };
+
   persistWorkbenchRef.current = (): void => {
     const currentProvider = providerRef.current;
     providerViews.current = {
@@ -447,10 +668,7 @@ export const MobileApp = () => {
     for (const kind of MOBILE_PROVIDERS) {
       const view = providerViews.current[kind];
       if (!view) continue;
-      saveAgentWorkbenchSnapshot(mobileWorkbenchViewStorageKey(profileId, kind), {
-        ...snapshot,
-        views: { [kind]: view },
-      });
+      saveCachedWorkbenchView(profileId, kind, view);
     }
   };
 
@@ -481,7 +699,9 @@ export const MobileApp = () => {
     if (MOBILE_DEMO) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void onAgentTransport((event) => transportHandlerRef.current(event)).then((stop) => {
+    void onAgentTransport((event) => {
+      if (!discoveryTransportHandlerRef.current(event)) transportHandlerRef.current(event);
+    }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
     });
@@ -494,12 +714,26 @@ export const MobileApp = () => {
   useEffect(() => {
     if (MOBILE_DEMO) return;
     const handleVisibilityChange = (): void => {
-      if (document.visibilityState === "visible") void resumeConnectionRef.current();
-      else persistWorkbenchRef.current();
+      if (document.visibilityState === "visible") {
+        void resumeConnectionRef.current();
+        void refreshAllProfiles();
+      } else {
+        persistWorkbenchRef.current();
+      }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
+
+  useEffect(() => {
+    if (MOBILE_DEMO || connectionStatus !== "connected") return;
+    const refresh = (): void => {
+      if (document.visibilityState === "visible") void refreshAllProfiles();
+    };
+    refresh();
+    const timer = window.setInterval(refresh, SESSION_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [connectionStatus, profiles]);
 
   const rememberProfile = async (profile: HostProfile): Promise<void> => {
     const next = upsertHostProfile(profilesRef.current, profile);
@@ -531,6 +765,8 @@ export const MobileApp = () => {
     }
     codexClient.current?.close("Connection reset");
     codexClient.current = null;
+    for (const client of acpClients.current.values()) client.close("Connection reset");
+    acpClients.current.clear();
     activeChannel.current = null;
     channels.current.clear();
     providerChannels.current.clear();
@@ -571,11 +807,14 @@ export const MobileApp = () => {
   };
 
   const requestClaudeData = async (sessionId?: string): Promise<void> => {
+    const profile = currentProfileRef.current;
+    if (!profile) return;
     const purpose = sessionId ? "claude-history" : "claude-list";
     channelSequence.current += 1;
     const channelId = `${purpose}-${Date.now()}-${channelSequence.current}`;
     decoders.current.set(channelId, new JsonLineDecoder());
     channels.current.set(channelId, {
+      profileId: profile.id,
       provider: "claude",
       purpose,
       handledPayload: false,
@@ -593,8 +832,8 @@ export const MobileApp = () => {
       void closeAgent(channelId).catch(() => {});
     }, CLAUDE_HELPER_TIMEOUT_MS));
     try {
-      if (sessionId) await loadClaudeSession(channelId, sessionId);
-      else await listClaudeSessions(channelId);
+      if (sessionId) await loadClaudeSession(profile.id, channelId, sessionId);
+      else await listClaudeSessions(profile.id, channelId);
     } catch (reason) {
       channels.current.delete(channelId);
       decoders.current.delete(channelId);
@@ -685,6 +924,17 @@ export const MobileApp = () => {
           }));
         }
       }
+      if (
+        nextProvider !== "codex"
+        && nextProvider !== "claude"
+        && activeProviderSessionId
+        && (preserveView || sessionRuntime.connectionState === "disconnected")
+      ) {
+        await acpClients.current.get(nextProvider)?.loadSession(
+          activeProviderSessionId,
+          cwd || profile.cwd || ".",
+        );
+      }
       updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
         ...runtime,
         connectionState: "connected",
@@ -700,6 +950,7 @@ export const MobileApp = () => {
     if (nextProvider === providerRef.current) activeChannel.current = channelId;
     decoders.current.set(channelId, new JsonLineDecoder());
     channels.current.set(channelId, {
+      profileId: profile.id,
       provider: nextProvider,
       purpose: "provider",
       handledPayload: false,
@@ -714,6 +965,7 @@ export const MobileApp = () => {
       try {
         if (nextProvider === "claude") {
           await openAgent(
+            profile.id,
             channelId,
             nextProvider,
             activeProviderSessionId,
@@ -721,8 +973,8 @@ export const MobileApp = () => {
             sessionRuntime.executionSettings,
           );
           if (shouldRequestClaudeData) await requestClaudeData(activeProviderSessionId);
-        } else {
-          await openAgent(channelId, nextProvider, undefined, cwd || undefined);
+        } else if (nextProvider === "codex") {
+          await openAgent(profile.id, channelId, nextProvider, undefined, cwd || undefined);
           const client = new CodexMobileClient(
             (line) => writeAgentLine(channelId, line),
             (event) => normalizedHandlerRef.current("codex", event),
@@ -737,6 +989,18 @@ export const MobileApp = () => {
               ...runtime,
               executionSettings: settings,
             }));
+          }
+        } else {
+          await openAgent(profile.id, channelId, nextProvider, undefined, cwd || undefined);
+          const client = new AcpClient(
+            nextProvider,
+            (line) => writeAgentLine(channelId, line),
+            (event) => normalizedHandlerRef.current(nextProvider, event),
+          );
+          acpClients.current.set(nextProvider, client);
+          await client.initialize();
+          if (activeProviderSessionId) {
+            await client.loadSession(activeProviderSessionId, cwd || profile.cwd || ".");
           }
         }
         if (generation !== runtimeGeneration.current || !channels.current.has(channelId)) {
@@ -758,6 +1022,8 @@ export const MobileApp = () => {
         channels.current.delete(channelId);
         decoders.current.delete(channelId);
         claudeNormalizers.current.delete(channelId);
+        acpClients.current.get(nextProvider)?.close();
+        acpClients.current.delete(nextProvider);
         updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
           ...failSessionHistory(runtime),
           connectionState: "disconnected",
@@ -794,7 +1060,12 @@ export const MobileApp = () => {
     setPendingTrust(null);
     setError(null);
     try {
+      const previousProfileId = currentProfileRef.current?.id;
+      if (previousProfileId && previousProfileId !== profile.id) {
+        await disconnectSsh(previousProfileId).catch(() => {});
+      }
       const result = await connectSsh({
+        profileId: profile.id,
         host: profile.host,
         port: profile.port,
         user: profile.user,
@@ -821,7 +1092,12 @@ export const MobileApp = () => {
       setConnectionStatus("connected");
       connectionStatusRef.current = "connected";
       restoredProfileId.current = trustedProfile.id;
-      if (preservingView) resetAgentState(true);
+      if (preservingView) {
+        await Promise.all(
+          [...channels.current.keys()].map((channelId) => closeAgent(channelId).catch(() => {})),
+        );
+        resetAgentState(true);
+      }
       let credentialSaveError: string | null = null;
       try {
         await saveSshCredential(profile.id, auth);
@@ -909,7 +1185,7 @@ export const MobileApp = () => {
       const currentProvider = providerRef.current;
       const sessionId = activeSessionRef.current ?? undefined;
       const sessionCwd = sessionsRef.current.find((session) => session.id === sessionId)?.cwd;
-      if (await probeSsh()) {
+      if (await probeSsh(profile.id)) {
         const channelEntries = [...providerChannels.current.entries()];
         const channelHealth = await Promise.all(channelEntries.map(async ([key, channelId]) => ({
           key,
@@ -925,6 +1201,10 @@ export const MobileApp = () => {
             codexClient.current?.close();
             codexClient.current = null;
             disconnectProviderRuntimes("codex");
+          } else if (meta?.purpose === "provider" && meta.provider !== "claude") {
+            acpClients.current.get(meta.provider)?.close();
+            acpClients.current.delete(meta.provider);
+            disconnectProviderRuntimes(meta.provider);
           } else if (meta?.sessionId) {
             updateProviderRuntime(meta.provider, meta.sessionId, (runtime) => ({
               ...runtime,
@@ -1034,7 +1314,7 @@ export const MobileApp = () => {
     }
     const cachedView = loadCachedWorkbenchView(profile.id, providerRef.current);
     if (!auth) {
-      await disconnectSsh().catch(() => {});
+      await disconnectSsh(currentProfileRef.current?.id).catch(() => {});
       setConnectionStatus("disconnected");
       connectionStatusRef.current = "disconnected";
       setCurrentProfile(null);
@@ -1062,7 +1342,10 @@ export const MobileApp = () => {
   const applyNormalizedEvent = (kind: Provider, event: MobileAgentEvent): void => {
     switch (event.type) {
       case "sessionsLoaded":
-        updateProviderView(kind, (view) => ({ ...view, sessions: event.sessions }));
+        updateProviderView(kind, (view) => ({
+          ...view,
+          sessions: mergeAgentSessions(view.sessions, event.sessions),
+        }));
         return;
       case "sessionLoaded":
         if (kind === providerRef.current) {
@@ -1164,7 +1447,14 @@ export const MobileApp = () => {
       case "approvalRequested": {
         const request = kind === "codex"
           ? codexClient.current?.resolveApproval(event.requestId, true)
-          : undefined;
+          : kind !== "claude"
+            ? (() => {
+                const optionId = automaticPermissionOptionId(event.options);
+                return optionId
+                  ? acpClients.current.get(kind)?.resolvePermission(event.requestId, optionId)
+                  : undefined;
+              })()
+            : undefined;
         if (request) {
           void request.catch((reason) => setProviderError(kind, String(reason)));
           return;
@@ -1173,7 +1463,12 @@ export const MobileApp = () => {
           ...runtime,
           approvals: [
             ...runtime.approvals.filter((approval) => approval.requestId !== event.requestId),
-            { requestId: event.requestId, title: event.title, detail: event.detail },
+            {
+              requestId: event.requestId,
+              title: event.title,
+              detail: event.detail,
+              options: event.options,
+            },
           ],
         }));
         return;
@@ -1231,6 +1526,10 @@ export const MobileApp = () => {
         codexClient.current = null;
         disconnectProviderRuntimes("codex");
       } else if (meta.purpose === "provider" && ownsRuntime) {
+        if (meta.provider !== "claude") {
+          acpClients.current.get(meta.provider)?.close();
+          acpClients.current.delete(meta.provider);
+        }
         updateProviderRuntime(meta.provider, meta.sessionId, (runtime) => ({
           ...runtime,
           activeTurnId: null,
@@ -1246,6 +1545,10 @@ export const MobileApp = () => {
       if (!shouldProcessAgentChannelPayload(meta.purpose, meta.handledPayload)) break;
       if (meta.purpose === "provider" && meta.provider === "codex") {
         codexClient.current?.receive(line);
+        continue;
+      }
+      if (meta.purpose === "provider" && meta.provider !== "claude") {
+        acpClients.current.get(meta.provider)?.receive(line);
         continue;
       }
       try {
@@ -1420,6 +1723,53 @@ export const MobileApp = () => {
       return true;
     }
 
+    if (kind !== "claude") {
+      try {
+        await openProvider(profile, kind, sessionId ?? undefined);
+        const client = acpClients.current.get(kind);
+        if (!client) throw new Error(`${PROVIDER_NAMES[kind]} channel is not ready.`);
+        if (!sessionId) {
+          const createdSessionId = await client.newSession(profile.cwd || ".");
+          moveProviderRuntime(kind, null, createdSessionId);
+          sessionId = createdSessionId;
+          updateProviderView(kind, (view) => ({
+            ...view,
+            activeSessionId: view.activeSessionId === null ? createdSessionId : view.activeSessionId,
+            sessions: view.sessions.some((session) => session.id === createdSessionId)
+              ? view.sessions
+              : [{
+                  id: createdSessionId,
+                  title: timelineText.slice(0, 80),
+                  cwd: profile.cwd || undefined,
+                  updatedAt: Math.floor(Date.now() / 1000),
+                  provider: kind,
+                }, ...view.sessions],
+          }));
+        }
+        updateProviderRuntime(kind, sessionId, (runtime) => ({
+          ...runtime,
+          draft: "",
+          items: appendUserMessage(runtime.items, timelineText),
+          running: true,
+          waiting: false,
+          historyState: "loaded",
+        }));
+        if (action === "steer") await client.cancel(sessionId);
+        const stopReason = await client.prompt(sessionId, trimmed, attachments);
+        updateProviderRuntime(kind, sessionId, (runtime) => ({ ...runtime, attachments: [] }));
+        applyNormalizedEvent(kind, { type: "turnCompleted", sessionId, status: stopReason });
+        return true;
+      } catch (reason) {
+        updateProviderRuntime(kind, sessionId, (runtime) => ({
+          ...runtime,
+          running: false,
+          waiting: false,
+        }));
+        setProviderError(kind, String(reason));
+        return false;
+      }
+    }
+
     let channelId = providerChannels.current.get(providerChannelKey(kind, sessionId));
     const channelMeta = channelId ? channels.current.get(channelId) : undefined;
     if (
@@ -1500,7 +1850,7 @@ export const MobileApp = () => {
     if (kind === "codex") {
       const turnId = sessionRuntime.activeTurnId;
       if (sessionId && turnId) await codexClient.current?.interrupt(sessionId, turnId);
-    } else {
+    } else if (kind === "claude") {
       const key = providerChannelKey("claude", sessionId);
       const channelId = providerChannels.current.get(key);
       if (channelId) {
@@ -1508,6 +1858,8 @@ export const MobileApp = () => {
         await closeAgent(channelId).catch(() => {});
         if (activeChannel.current === channelId) activeChannel.current = null;
       }
+    } else if (sessionId) {
+      await acpClients.current.get(kind)?.cancel(sessionId);
     }
     updateProviderRuntime(kind, sessionId, (runtime) => ({
       ...runtime,
@@ -1538,7 +1890,7 @@ export const MobileApp = () => {
       activeSessionId: blank ? null : session?.id ?? cachedView.activeSessionId,
     };
     if (!auth) {
-      await disconnectSsh().catch(() => {});
+      await disconnectSsh(currentProfileRef.current?.id).catch(() => {});
       setConnectionStatus("disconnected");
       connectionStatusRef.current = "disconnected";
       setCurrentProfile(null);
@@ -1583,9 +1935,12 @@ export const MobileApp = () => {
     const profile = currentProfileRef.current;
     if (!profile) return;
     try {
+      const providerClientMissing = kind === "codex"
+        ? !codexClient.current
+        : kind !== "claude" && !acpClients.current.has(kind);
       if (
         shouldReconnect
-        || (kind === "codex" && !codexClient.current)
+        || providerClientMissing
       ) {
         await openProvider(profile, kind, session.id, true, session.cwd);
         return;
@@ -1602,7 +1957,14 @@ export const MobileApp = () => {
         }
         return;
       }
-      if (shouldLoadHistory) await requestClaudeData(session.id);
+      if (kind === "claude") {
+        if (shouldLoadHistory) await requestClaudeData(session.id);
+      } else if (shouldLoadHistory) {
+        await acpClients.current.get(kind)?.loadSession(
+          session.id,
+          session.cwd ?? profile.cwd ?? ".",
+        );
+      }
     } catch (reason) {
       updateProviderRuntime(kind, session.id, failSessionHistory);
       setProviderError(kind, String(reason));
@@ -1659,8 +2021,22 @@ export const MobileApp = () => {
       } catch (reason) {
         setProviderError(kind, String(reason));
       }
-    } else {
+    } else if (kind === "claude") {
       await openProvider(profile, kind);
+    } else {
+      try {
+        await openProvider(profile, kind);
+        const sessionId = await acpClients.current.get(kind)?.newSession(profile.cwd || ".");
+        if (sessionId) {
+          moveProviderRuntime(kind, null, sessionId);
+          updateProviderView(kind, (view) => ({
+            ...view,
+            activeSessionId: view.activeSessionId === null ? sessionId : view.activeSessionId,
+          }));
+        }
+      } catch (reason) {
+        setProviderError(kind, String(reason));
+      }
     }
   };
 
@@ -1711,7 +2087,12 @@ export const MobileApp = () => {
     const kind = providerRef.current;
     const sessionId = readProviderView(kind).activeSessionId;
     try {
-      await codexClient.current?.resolveApproval(approval.requestId, accepted);
+      if (kind === "codex") {
+        await codexClient.current?.resolveApproval(approval.requestId, accepted);
+      } else if (kind !== "claude") {
+        const optionId = accepted ? automaticPermissionOptionId(approval.options) : undefined;
+        await acpClients.current.get(kind)?.resolvePermission(approval.requestId, optionId);
+      }
       updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         approvals: runtime.approvals.filter((item) => item.requestId !== approval.requestId),
@@ -1793,9 +2174,12 @@ export const MobileApp = () => {
   const selectedCodexModel = codexModels.find((model) =>
     model.model === threadSettings.model || model.id === threadSettings.model)
     ?? codexModels.find((model) => model.isDefault);
+  const supportsExecutionSettings = provider === "codex" || provider === "claude";
   const effortOptions = provider === "codex"
     ? selectedCodexModel?.supportedReasoningEfforts ?? []
-    : [...CLAUDE_EFFORTS];
+    : provider === "claude"
+      ? [...CLAUDE_EFFORTS]
+      : [];
   const serviceTierOptions = selectedCodexModel?.serviceTiers ?? [];
   const modelLabel = provider === "codex"
     ? selectedCodexModel?.displayName ?? threadSettings.model ?? "Default"
@@ -1851,15 +2235,17 @@ export const MobileApp = () => {
               {sessionRuntimeLabel(runtime)}
             </span>
           </div>
-          <button
-            type="button"
-            className="execution-summary"
-            onClick={() => setSettingsSheetOpen(true)}
-            aria-label={`Execution settings, ${executionSummaryLabel}`}
-          >
-            <span className="execution-summary-value">{executionSummaryLabel}</span>
-            <span className="execution-summary-arrow" aria-hidden="true">›</span>
-          </button>
+          {supportsExecutionSettings ? (
+            <button
+              type="button"
+              className="execution-summary"
+              onClick={() => setSettingsSheetOpen(true)}
+              aria-label={`Execution settings, ${executionSummaryLabel}`}
+            >
+              <span className="execution-summary-value">{executionSummaryLabel}</span>
+              <span className="execution-summary-arrow" aria-hidden="true">›</span>
+            </button>
+          ) : null}
         </section>
 
         {error ? (
@@ -1983,7 +2369,7 @@ export const MobileApp = () => {
             className="sheet-secondary"
             onClick={() => {
               setHostSheetOpen(false);
-              void disconnectSsh();
+              void disconnectSsh(currentProfileRef.current?.id);
               setConnectionStatus("disconnected");
               connectionStatusRef.current = "disconnected";
               setCurrentProfile(null);
@@ -2042,18 +2428,19 @@ export const MobileApp = () => {
               </select>
             </label>
             <label>
-              <span>AI</span>
-              <select value={newSessionProvider} onChange={(event) => setNewSessionProvider(event.target.value as Provider)}>
-                <option value="codex">Codex</option>
-                <option value="claude">Claude</option>
-              </select>
+                  <span>AI</span>
+                  <select value={newSessionProvider} onChange={(event) => setNewSessionProvider(event.target.value as Provider)}>
+                    {MOBILE_PROVIDERS.map((kind) => (
+                      <option key={kind} value={kind}>{PROVIDER_NAMES[kind]}</option>
+                    ))}
+                  </select>
             </label>
             <button type="button" className="sheet-primary" onClick={() => void createUnifiedSession()}>Create session</button>
           </div>
         </BottomSheet>
       ) : null}
 
-      {settingsSheetOpen ? (
+      {settingsSheetOpen && supportsExecutionSettings ? (
         <BottomSheet title={`${provider} session settings`} onClose={() => setSettingsSheetOpen(false)}>
           <div className="execution-settings">
             <label>

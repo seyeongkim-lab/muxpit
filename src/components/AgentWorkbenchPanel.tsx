@@ -37,6 +37,7 @@ import {
   ClaudeStreamNormalizer,
   JsonLineDecoder,
   composerAction,
+  mergeAgentSessions,
   normalizeClaudeHistoryMessage,
   type MobileAgentEvent,
   type MobileSession,
@@ -242,16 +243,6 @@ const appendDelta = (
     : [...items, { id, kind, text }];
 };
 
-const mergeSessions = (
-  cached: MobileSession[],
-  fresh: MobileSession[],
-): MobileSession[] => {
-  const sessions = new Map(cached.map((session) => [session.id, session]));
-  for (const session of fresh) sessions.set(session.id, session);
-  return [...sessions.values()].sort((left, right) =>
-    (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
-};
-
 const providerChannelKey = (kind: AiKind, sessionId?: string | null): string =>
   kind === "claude" ? `${kind}:${sessionRuntimeKey(sessionId)}` : kind;
 
@@ -314,7 +305,7 @@ const loadTargetSnapshot = (
       for (const session of restored.sessions) sessions.set(session.id, session);
       views[kind] = {
         ...views[kind],
-        sessions: mergeSessions([], [...sessions.values()]),
+        sessions: mergeAgentSessions([], [...sessions.values()]),
         activeSessionId: restored.activeSessionId ?? views[kind].activeSessionId,
         closedSessionIds: [...new Set([
           ...views[kind].closedSessionIds,
@@ -448,7 +439,7 @@ const DesktopTargetRuntime = ({
       case "sessionsLoaded":
         updateView(kind, (current) => ({
           ...current,
-          sessions: mergeSessions(current.sessions, event.sessions),
+          sessions: mergeAgentSessions(current.sessions, event.sessions),
           status: "ready",
         }));
         return;
