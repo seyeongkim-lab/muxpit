@@ -1,8 +1,8 @@
-# wmux
+# muxpit
 
 A Windows-first terminal multiplexer built for working with AI coding agents over SSH.
 
-wmux is a desktop app (Tauri + React + xterm.js) that gives you tmux-style
+muxpit is a desktop app (Tauri + React + xterm.js) that gives you tmux-style
 workspaces, split panes, and prefix-key navigation on Windows — plus first-class
 support for driving remote sessions through `tmux -CC` (control mode) and for
 auto-launching AI CLIs (Claude Code, Codex, Gemini, Copilot, OpenCode) when you connect to
@@ -133,15 +133,15 @@ wmux-cli send-text --enter "npm test"
 wmux-cli read-screen --rows 40
 ```
 
-Pane control commands require the `WMUX_CONTROL_TOKEN` injected into wmux terminal processes. SSH panes receive a remote helper and connect to the same allowlisted control API through a per-pane loopback reverse forward. The relay does not bind to a public interface.
+Pane control commands require the `WMUX_CONTROL_TOKEN` injected into muxpit terminal processes. SSH panes receive a remote helper and connect to the same allowlisted control API through a per-pane loopback reverse forward. The relay does not bind to a public interface.
 
-`wmux-cli hooks setup --yes` installs wmux-owned hook entries for supported CLIs without replacing unrelated user hooks. Installed hooks do nothing outside a wmux pane. Run the setup command on a remote host too when its agent lifecycle events should use the SSH relay and appear in the inbox.
+`wmux-cli hooks setup --yes` installs muxpit-owned hook entries for supported CLIs without replacing unrelated user hooks. Installed hooks do nothing outside a muxpit pane. Run the setup command on a remote host too when its agent lifecycle events should use the SSH relay and appear in the inbox.
 
 Release bundles include the companion CLI:
 
 - Linux `.deb`/`.rpm`: `/usr/bin/wmux-cli`
 - Linux AppImage: bundled inside the AppImage under `usr/bin/wmux-cli`
-- Windows installer: `wmux-cli.exe` next to `wmux.exe` in the install directory
+- Windows installer: `wmux-cli.exe` next to `muxpit.exe` in the install directory
 - macOS `.app`: `Contents/MacOS/wmux-cli`; Settings can install
   `~/.local/bin/wmux-cli` as a symlink for terminal use
 
@@ -191,13 +191,13 @@ clipboard. In a remote pane running tmux with mouse mode on, the drag is
 captured by tmux instead of the local terminal, so hold `Shift` while dragging
 to force a local selection.
 
-wmux receives OSC 52 clipboard writes from the terminal, and for the remote tmux
+muxpit receives OSC 52 clipboard writes from the terminal, and for the remote tmux
 session it manages it sets `set-clipboard on` and the matching terminal feature
 automatically on connect — so a tmux copy (mouse drag or copy-mode) reaches the
 local clipboard without editing your remote `~/.tmux.conf`. Only writes are
 honored; OSC 52 read requests are ignored so a remote cannot read your clipboard.
 
-This auto-config applies to the wmux-managed session. For a tmux session you
+This auto-config applies to the muxpit-managed session. For a tmux session you
 start yourself (or a nested tmux), enable it in the remote `~/.tmux.conf`:
 
 ```tmux
