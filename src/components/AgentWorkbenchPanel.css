@@ -45,54 +45,6 @@
   background: color-mix(in srgb, var(--wmux-accent) 42%, transparent);
 }
 
-.agent-workbench-header {
-  flex: 0 0 auto;
-  min-height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 10px 6px 12px;
-  background: var(--wmux-bg-elev);
-  border-bottom: 1px solid var(--wmux-hairline);
-}
-
-.agent-workbench-header > div:first-child {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.agent-workbench-header strong {
-  font-size: 15px;
-  font-weight: 650;
-}
-
-.agent-workbench-header span {
-  overflow: hidden;
-  color: var(--wmux-subtext);
-  font-family: var(--wmux-font-mono);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-icon-button {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  background: transparent;
-  color: var(--wmux-subtext);
-  font-size: 20px !important;
-  cursor: pointer;
-}
-
-.agent-icon-button:hover {
-  color: var(--wmux-text);
-  background: var(--wmux-hover);
-}
-
 .agent-workbench-empty {
   flex: 1;
   display: grid;
@@ -162,6 +114,32 @@
 .agent-session-actions button.active {
   border-color: var(--wmux-accent);
   color: var(--wmux-accent);
+}
+
+.agent-session-actions .agent-workbench-close {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--wmux-subtext);
+}
+
+.agent-session-actions .agent-workbench-close svg,
+.agent-session-control.close svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.4;
+}
+
+.agent-session-actions .agent-workbench-close:hover {
+  color: var(--wmux-text);
+  background: var(--wmux-hover);
 }
 
 .agent-new-session {
@@ -287,6 +265,19 @@
   color: var(--wmux-accent);
 }
 
+.agent-session-control.close {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 3px;
+}
+
+.agent-session-control.close:hover {
+  background: var(--wmux-bg-elev);
+}
+
 .agent-session-cwd {
   color: var(--wmux-subtext);
   font-family: var(--wmux-font-mono);
@@ -311,12 +302,22 @@
 }
 
 .agent-session-provider-mark {
+  width: 20px;
+  height: 18px;
+  display: grid;
+  place-items: center;
   flex: 0 0 auto;
-  padding: 1px 3px;
+  padding: 1px;
   border: 1px solid var(--wmux-hairline-strong);
   color: var(--wmux-accent);
   font-family: var(--wmux-font-mono);
   font-size: 9px;
+}
+
+.agent-session-provider-mark img {
+  width: 13px;
+  height: 13px;
+  display: block;
 }
 
 .agent-session-list small {

@@ -112,7 +112,7 @@ export class CodexMobileClient {
       clientInfo: {
         name: "wmux_mobile",
         title: "wmux Mobile",
-        version: "0.2.11",
+        version: "0.2.12",
       },
     });
     await this.notify("initialized", {});

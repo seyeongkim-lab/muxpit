@@ -35,6 +35,20 @@ test("AI workbench uses readable type and a window-relative resize limit", () =>
   assert.match(styles, /\.agent-composer textarea \{[\s\S]*?font-size: 14px;/);
 });
 
+test("desktop workbench folds its close control into the session actions", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const styles = readSource("../src/components/AgentWorkbenchPanel.css");
+  const sessionActions = workbench.slice(
+    workbench.indexOf('<div className="agent-session-actions">'),
+    workbench.indexOf("{newSessionOpen"),
+  );
+
+  assert.doesNotMatch(workbench, /className="agent-workbench-header"/);
+  assert.match(sessionActions, /aria-label="Close AI workbench"/);
+  assert.match(sessionActions, /<svg viewBox="0 0 14 14" aria-hidden="true">/);
+  assert.doesNotMatch(styles, /\.agent-workbench-header/);
+});
+
 test("Claude helper close cannot leave session loading indefinitely", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 
@@ -90,8 +104,22 @@ test("desktop session rail can stop close and restore sessions", () => {
   assert.match(workbench, /action: "stop" \| "close" \| "restore"/);
   assert.match(workbench, /closedSessionIds/);
   assert.match(workbench, />Stop</);
-  assert.match(workbench, />Close</);
+  assert.match(workbench, /aria-label={`Close session \${entry\.session\.title}`}/);
+  assert.match(workbench, /className="agent-session-control close"/);
+  assert.doesNotMatch(workbench, />Close<\/button>/);
   assert.match(workbench, />Restore</);
+});
+
+test("desktop session rail uses service icons for Claude and Codex", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const styles = readSource("../src/components/AgentWorkbenchPanel.css");
+
+  assert.match(workbench, /const ProviderMark/);
+  assert.match(workbench, /provider-claude\.svg/);
+  assert.match(workbench, /provider-codex\.svg/);
+  assert.match(workbench, /className={`agent-provider-icon \${provider}`}/);
+  assert.match(workbench, /aria-label={PROVIDER_NAMES\[provider\]}/);
+  assert.match(styles, /\.agent-session-provider-mark img \{/);
 });
 
 test("AI workbench keeps the composer visible while session history loads", () => {
@@ -112,7 +140,7 @@ test("desktop workbench uses one host and provider session rail", () => {
 
   assert.match(workbench, /buildDesktopSessionIndex/);
   assert.match(workbench, /contextLabel/);
-  assert.match(workbench, /PROVIDER_MARKS\[entry\.provider\]/);
+  assert.match(workbench, /<ProviderMark provider={entry\.provider} \/>/);
   assert.match(workbench, /newSessionContext/);
   assert.match(workbench, /newSessionProvider/);
   assert.doesNotMatch(workbench, /<nav className="agent-provider-tabs"/);

@@ -14,7 +14,7 @@ test("Codex mobile client initializes before listing sessions", async () => {
   const initializing = client.initialize();
   await Promise.resolve();
   assert.equal(sent[0].method, "initialize");
-  assert.equal((sent[0].params as { clientInfo: { version: string } }).clientInfo.version, "0.2.11");
+  assert.equal((sent[0].params as { clientInfo: { version: string } }).clientInfo.version, "0.2.12");
   client.receive(JSON.stringify({ id: sent[0].id, result: { userAgent: "codex" } }));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(sent[1].method, "initialized");

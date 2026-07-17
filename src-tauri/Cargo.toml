@@ -1,6 +1,6 @@
 [package]
 name = "wmux"
-version = "0.2.11"
+version = "0.2.12"
 description = "Terminal multiplexer for AI agents"
 authors = ["you"]
 license = "MIT"

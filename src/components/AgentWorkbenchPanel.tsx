@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import claudeIconUrl from "../assets/provider-claude.svg";
+import codexIconUrl from "../assets/provider-codex.svg";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import {
   buildDesktopSessionIndex,
@@ -148,6 +150,22 @@ const PROVIDER_MARKS: Record<AiKind, string> = {
   gemini: "GM",
   copilot: "CP",
   opencode: "OC",
+};
+
+const PROVIDER_ICON_URLS: Partial<Record<AiKind, string>> = {
+  claude: claudeIconUrl,
+  codex: codexIconUrl,
+};
+
+const ProviderMark = ({ provider }: { provider: AiKind }) => {
+  const iconUrl = PROVIDER_ICON_URLS[provider];
+  return (
+    <span className="agent-session-provider-mark" aria-label={PROVIDER_NAMES[provider]}>
+      {iconUrl
+        ? <img src={iconUrl} className={`agent-provider-icon ${provider}`} alt="" />
+        : PROVIDER_MARKS[provider]}
+    </span>
+  );
 };
 
 const emptyView = (): ProviderView => ({
@@ -1993,14 +2011,6 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   return (
     <aside className="agent-workbench" style={{ width }} aria-label="AI workbench" hidden={!open}>
       <div className="agent-workbench-resizer" onMouseDown={startResize} />
-      <header className="agent-workbench-header">
-        <div>
-          <strong>AI workbench</strong>
-          <span>{openSessions.length} sessions across {targets.length} hosts</span>
-        </div>
-        <button type="button" className="agent-icon-button" onClick={onClose} aria-label="Close AI workbench">×</button>
-      </header>
-
       <div className="agent-workbench-body">
         <section className="agent-session-column">
           <div className="agent-session-actions">
@@ -2012,8 +2022,19 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   className={showClosed ? "active" : ""}
                   onClick={() => setShowClosed((current) => !current)}
                 >{showClosed ? "Open" : `Closed ${closedSessions.length}`}</button>
-              ) : null}
+                ) : null}
               <button type="button" onClick={showNewSession}>New</button>
+              <button
+                type="button"
+                className="agent-workbench-close"
+                onClick={onClose}
+                title="Close AI workbench"
+                aria-label="Close AI workbench"
+              >
+                <svg viewBox="0 0 14 14" aria-hidden="true">
+                  <path d="m3 3 8 8M11 3l-8 8" />
+                </svg>
+              </button>
             </div>
           </div>
           {newSessionOpen ? (
@@ -2063,7 +2084,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   onClick={() => selectUnifiedSession(entry)}
                 >
                   <span className="agent-session-context">
-                    <span className="agent-session-provider-mark">{PROVIDER_MARKS[entry.provider]}</span>
+                    <ProviderMark provider={entry.provider} />
                     <span>{entry.contextLabel}</span>
                   </span>
                   <strong>{entry.session.title}</strong>
@@ -2077,7 +2098,17 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                 ) : entry.closed ? (
                   <button type="button" className="agent-session-control" onClick={() => requestCommand(entry, "restore")}>Restore</button>
                 ) : (
-                  <button type="button" className="agent-session-control" onClick={() => requestCommand(entry, "close")}>Close</button>
+                  <button
+                    type="button"
+                    className="agent-session-control close"
+                    onClick={() => requestCommand(entry, "close")}
+                    title={`Close session ${entry.session.title}`}
+                    aria-label={`Close session ${entry.session.title}`}
+                  >
+                    <svg viewBox="0 0 14 14" aria-hidden="true">
+                      <path d="m3 3 8 8M11 3l-8 8" />
+                    </svg>
+                  </button>
                 )}
               </div>
             ))}
