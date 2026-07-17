@@ -169,6 +169,18 @@ test("unified desktop rail discovers sessions on every saved host and local mach
   assert.match(workbench, /openProvider\(kind\)/);
 });
 
+test("desktop workbench refreshes local and remote provider sessions while visible", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /const SESSION_REFRESH_INTERVAL_MS = 5_000/);
+  assert.match(workbench, /const refreshSessions = useCallback/);
+  assert.match(workbench, /codexClients\.current\.get\(kind\)\?\.listSessions\(\)/);
+  assert.match(workbench, /acpClients\.current\.get\(kind\)\?\.listSessions\(\)/);
+  assert.match(workbench, /openClaudeAux\("claude-list"\)/);
+  assert.match(workbench, /window\.setInterval\(refresh, SESSION_REFRESH_INTERVAL_MS\)/);
+  assert.match(workbench, /document\.visibilityState === "visible"[\s\S]*?void refreshSessions\(\)/);
+});
+
 test("desktop workbench restores the last host provider and session", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 

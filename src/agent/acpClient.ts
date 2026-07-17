@@ -194,6 +194,7 @@ export class AcpClient {
   }
 
   async listSessions(cwd?: string): Promise<void> {
+    if (!this.capabilities.sessionCapabilities?.list) return;
     await this.request("session/list", cwd ? { cwd } : {});
   }
 

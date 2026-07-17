@@ -144,6 +144,7 @@ const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
 const DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v2:";
 const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "wmux-desktop-agent-workbench-v1:";
 const WORKBENCH_PERSIST_DELAY_MS = 200;
+const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -381,6 +382,7 @@ const DesktopTargetRuntime = ({
   const expectedClose = useRef(new Set<string>());
   const stderr = useRef(new Map<string, string>());
   const helperTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const refreshingProviders = useRef(new Set<AiKind>());
   const channelNamespace = useRef(newDesktopAgentChannelNamespace());
   const channelSequence = useRef(0);
   const runtimeGeneration = useRef(0);
@@ -798,6 +800,29 @@ const DesktopTargetRuntime = ({
     return opening;
   }, [applyEvent, closeChannel, nextChannelId, openClaudeAux, target, updateRuntime, updateView]);
 
+  const refreshSessions = useCallback((): void => {
+    if (document.visibilityState !== "visible") return;
+    for (const kind of AI_KINDS) {
+      if (!installed.has(kind) || refreshingProviders.current.has(kind)) continue;
+      let request: Promise<void> | undefined;
+      if (kind === "claude") {
+        const alreadyListing = [...channels.current.values()].some(
+          (meta) => meta.purpose === "claude-list",
+        );
+        if (!alreadyListing) request = openClaudeAux("claude-list");
+      } else if (kind === "codex") {
+        request = codexClients.current.get(kind)?.listSessions();
+      } else {
+        request = acpClients.current.get(kind)?.listSessions();
+      }
+      if (!request) continue;
+      refreshingProviders.current.add(kind);
+      void request
+        .catch(() => {})
+        .finally(() => refreshingProviders.current.delete(kind));
+    }
+  }, [installed, openClaudeAux]);
+
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -1038,6 +1063,7 @@ const DesktopTargetRuntime = ({
         return;
       }
       if (document.visibilityState === "visible" && discover && probedTarget === targetKey) {
+        void refreshSessions();
         for (const kind of AI_KINDS) {
           if (!installed.has(kind)) continue;
           const sessionId = viewsRef.current[kind].activeSessionId ?? undefined;
@@ -1062,7 +1088,16 @@ const DesktopTargetRuntime = ({
       document.removeEventListener("visibilitychange", persistWhenHidden);
       window.removeEventListener("beforeunload", persistWorkbench);
     };
-  }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, targetKey]);
+  }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, refreshSessions, targetKey]);
+
+  useEffect(() => {
+    if (!discover || probedTarget !== targetKey) return;
+    const refresh = (): void => {
+      if (document.visibilityState === "visible") void refreshSessions();
+    };
+    const timer = window.setInterval(refresh, SESSION_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [discover, probedTarget, refreshSessions, targetKey]);
 
   useEffect(() => {
     if (!discover || probedTarget !== targetKey) return;
