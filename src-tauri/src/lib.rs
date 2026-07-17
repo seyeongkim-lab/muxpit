@@ -1,3 +1,4 @@
+mod agent_launch_settings;
 mod shell_quote;
 
 #[cfg(not(mobile))]

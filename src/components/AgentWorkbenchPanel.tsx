@@ -495,7 +495,17 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       }
       updateView(kind, (current) => ({ ...current, status: "connecting", error: null }));
       try {
-        await openDesktopAgent(channelId, kind, target, kind === "claude" ? sessionId : undefined);
+        const launchRuntime = readSessionRuntime(
+          viewsRef.current[kind].runtimes,
+          sessionId ?? viewsRef.current[kind].activeSessionId,
+        );
+        await openDesktopAgent(
+          channelId,
+          kind,
+          target,
+          kind === "claude" ? sessionId : undefined,
+          launchRuntime.executionSettings,
+        );
         if (generation !== runtimeGeneration.current || !channels.current.has(channelId)) {
           await closeChannel(channelId);
           return undefined;
@@ -511,7 +521,11 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
           const activeSessionId = sessionId ?? viewsRef.current[kind].activeSessionId ?? undefined;
           if (activeSessionId) {
             try {
-              await client.resumeSession(activeSessionId);
+              const settings = await client.resumeSession(activeSessionId);
+              updateRuntime(kind, activeSessionId, (runtime) => ({
+                ...runtime,
+                executionSettings: settings,
+              }));
             } catch (reason) {
               updateView(kind, (current) => ({ ...current, error: String(reason) }));
             }
@@ -897,7 +911,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         return;
       }
       if (provider === "codex") {
-        if (shouldLoadHistory) await codexClients.current.get(provider)?.resumeSession(session.id);
+        if (shouldLoadHistory) {
+          const settings = await codexClients.current.get(provider)?.resumeSession(session.id);
+          if (settings) updateRuntime(provider, session.id, (runtime) => ({
+            ...runtime,
+            executionSettings: settings,
+          }));
+        }
       } else if (provider === "claude") {
         if (shouldLoadHistory) await openClaudeAux("claude-history", session.id);
       } else {
@@ -924,7 +944,11 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     try {
       let sessionId: string | undefined;
       if (provider === "codex") {
-        sessionId = await codexClients.current.get(provider)?.startSession(target.cwd);
+        const started = await codexClients.current.get(provider)?.startSession(
+          target.cwd,
+          readSessionRuntime(viewsRef.current[provider].runtimes, null).executionSettings,
+        );
+        sessionId = started?.threadId;
       } else if (provider === "claude") {
         await openProvider(provider);
       } else {
@@ -979,7 +1003,11 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         const client = codexClients.current.get(kind);
         if (!client) throw new Error("Codex channel is not ready");
         if (!sessionId) {
-          const createdSessionId = await client.startSession(target.cwd);
+          const started = await client.startSession(
+            target.cwd,
+            currentRuntime.executionSettings,
+          );
+          const createdSessionId = started.threadId;
           sessionId = createdSessionId;
           updateView(kind, (state) => ({
             ...state,
@@ -990,7 +1018,12 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         if (currentRuntime.running && currentRuntime.activeTurnId && !queued) {
           await client.steer(sessionId, currentRuntime.activeTurnId, trimmed);
         } else {
-          await client.startTurn(sessionId, trimmed, target.cwd);
+          await client.startTurn(
+            sessionId,
+            trimmed,
+            target.cwd,
+            readSessionRuntime(viewsRef.current[kind].runtimes, sessionId).executionSettings,
+          );
         }
       } else if (kind === "claude") {
         if (!channelId) throw new Error("Claude channel is not ready");

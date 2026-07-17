@@ -41,6 +41,11 @@ test("workbench snapshot restores content without stale transport state", () => 
             queue: ["next instruction"],
             draft: "session draft",
             queueMode: true,
+            executionSettings: {
+              model: "session-model",
+              effort: "high",
+              serviceTier: "fast",
+            },
             historyState: "loading",
             historyBaseItems: [{ id: "old", kind: "assistant", text: "old" }],
           },
@@ -63,6 +68,11 @@ test("workbench snapshot restores content without stale transport state", () => 
   assert.deepEqual(runtime?.queue, ["next instruction"]);
   assert.equal(runtime?.draft, "session draft");
   assert.equal(runtime?.queueMode, true);
+  assert.deepEqual(runtime?.executionSettings, {
+    model: "session-model",
+    effort: "high",
+    serviceTier: "fast",
+  });
   assert.equal(runtime?.running, false);
   assert.equal(runtime?.waiting, false);
   assert.equal(runtime?.activeTurnId, null);

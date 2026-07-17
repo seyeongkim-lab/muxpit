@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AiKind } from "../stores/workspace.ts";
 import type { SshConnection } from "../utils/sshConnection.ts";
+import type { AgentExecutionSettings } from "../mobile/agentSessionRuntime.ts";
 
 export interface DesktopAgentTarget {
   cwd?: string;
@@ -27,10 +28,14 @@ export const openDesktopAgent = (
   provider: AiKind,
   target: DesktopAgentTarget,
   sessionId?: string,
+  settings?: AgentExecutionSettings,
 ): Promise<void> => invoke("desktop_agent_open", {
   channelId,
   provider,
   sessionId: sessionId ?? null,
+  settings: settings
+    ? { model: settings.model, effort: settings.effort }
+    : null,
   ...targetArgs(target),
 });
 

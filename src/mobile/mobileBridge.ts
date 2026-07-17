@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { AgentExecutionSettings } from "./agentSessionRuntime.ts";
 
 export type SshAuth =
   | { type: "password"; password: string }
@@ -44,11 +45,15 @@ export const openAgent = (
   provider: "codex" | "claude",
   sessionId?: string,
   cwd?: string,
+  settings?: AgentExecutionSettings,
 ): Promise<void> => invoke("mobile_agent_open", {
   channelId,
   provider,
   sessionId,
   cwd,
+  settings: settings
+    ? { model: settings.model, effort: settings.effort }
+    : null,
 });
 
 export const listClaudeSessions = (channelId: string): Promise<void> =>

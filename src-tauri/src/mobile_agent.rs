@@ -1,3 +1,4 @@
+use crate::agent_launch_settings::{claude_launch_args, AgentLaunchSettings};
 use crate::shell_quote::quote_posix_shell_arg;
 use base64::Engine;
 use russh::client::{self, Handle};
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, Webview};
 use tokio::sync::RwLock;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -87,6 +88,39 @@ fn valid_credential_profile_id(value: &str) -> bool {
 static CREDENTIAL_STORE: OnceLock<Result<(), String>> = OnceLock::new();
 
 #[cfg(target_os = "android")]
+async fn initialize_android_credential_context(webview: Webview) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    webview
+        .with_webview(move |platform_webview| {
+            platform_webview
+                .jni_handle()
+                .exec(move |env, activity, _webview| {
+                    let result = (|| {
+                        let context = env
+                            .call_method(
+                                activity,
+                                "getApplicationContext",
+                                "()Landroid/content/Context;",
+                                &[],
+                            )?
+                            .l()?;
+                        android_native_keyring_store::Java_io_crates_keyring_Keyring_00024Companion_initializeNdkContext(
+                            unsafe { env.unsafe_clone() },
+                            jni::objects::JObject::null(),
+                            context,
+                        );
+                        Ok::<(), jni::errors::Error>(())
+                    })()
+                    .map_err(|error| format!("Could not initialize secure credential storage: {error}"));
+                    let _ = tx.send(result);
+                });
+        })
+        .map_err(|error| format!("Could not access the Android webview: {error}"))?;
+    rx.await
+        .map_err(|_| "Could not initialize secure credential storage".to_string())?
+}
+
+#[cfg(target_os = "android")]
 fn credential_entry(profile_id: &str) -> Result<keyring_core::Entry, String> {
     if !valid_credential_profile_id(profile_id) {
         return Err("Invalid credential profile id".into());
@@ -106,7 +140,12 @@ fn credential_entry(profile_id: &str) -> Result<keyring_core::Entry, String> {
 
 #[cfg(target_os = "android")]
 #[tauri::command]
-pub fn mobile_credential_save(profile_id: String, auth: SshAuth) -> Result<(), String> {
+pub async fn mobile_credential_save(
+    webview: Webview,
+    profile_id: String,
+    auth: SshAuth,
+) -> Result<(), String> {
+    initialize_android_credential_context(webview).await?;
     let secret = serde_json::to_vec(&auth)
         .map_err(|error| format!("Could not encode SSH credential: {error}"))?;
     credential_entry(&profile_id)?
@@ -116,7 +155,11 @@ pub fn mobile_credential_save(profile_id: String, auth: SshAuth) -> Result<(), S
 
 #[cfg(target_os = "android")]
 #[tauri::command]
-pub fn mobile_credential_load(profile_id: String) -> Result<Option<SshAuth>, String> {
+pub async fn mobile_credential_load(
+    webview: Webview,
+    profile_id: String,
+) -> Result<Option<SshAuth>, String> {
+    initialize_android_credential_context(webview).await?;
     let secret = match credential_entry(&profile_id)?.get_secret() {
         Ok(secret) => secret,
         Err(keyring_core::Error::NoEntry) => return Ok(None),
@@ -219,6 +262,7 @@ fn agent_command(
     provider: MobileAgentProvider,
     session_id: Option<String>,
     cwd: Option<String>,
+    settings: Option<AgentLaunchSettings>,
 ) -> Result<String, String> {
     let cwd = checked_cwd(cwd)?;
     let prefix = cwd
@@ -235,6 +279,7 @@ fn agent_command(
             )
         }
         MobileAgentProvider::Claude => {
+            let settings = claude_launch_args(settings.as_ref())?;
             let resume = match session_id {
                 Some(id) if valid_session_id(&id) => {
                     format!(" --resume {}", quote_posix_shell_arg(&id))
@@ -243,7 +288,7 @@ fn agent_command(
                 None => String::new(),
             };
             format!(
-                "{prefix}exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose{resume}"
+                "{prefix}exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose{settings}{resume}"
             )
         }
     };
@@ -476,8 +521,9 @@ pub async fn mobile_agent_open(
     provider: MobileAgentProvider,
     session_id: Option<String>,
     cwd: Option<String>,
+    settings: Option<AgentLaunchSettings>,
 ) -> Result<(), String> {
-    let command = agent_command(provider, session_id, cwd)?;
+    let command = agent_command(provider, session_id, cwd, settings)?;
     open_channel(app, state, channel_id, command).await
 }
 
@@ -583,14 +629,24 @@ mod tests {
 
     #[test]
     fn agent_commands_bypass_permissions() {
-        let codex = agent_command(MobileAgentProvider::Codex, None, None).unwrap();
+        let codex = agent_command(MobileAgentProvider::Codex, None, None, None).unwrap();
         assert!(codex.contains(
             "exec codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio://"
         ));
 
-        let claude = agent_command(MobileAgentProvider::Claude, None, None).unwrap();
+        let claude = agent_command(
+            MobileAgentProvider::Claude,
+            None,
+            None,
+            Some(AgentLaunchSettings {
+                model: Some("sonnet".into()),
+                effort: Some("high".into()),
+            }),
+        )
+        .unwrap();
         assert!(claude.contains(
-            "exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose"
-        ));
+                "exec claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose"
+            ));
+        assert!(claude.contains("--model 'sonnet' --effort 'high'"));
     }
 }

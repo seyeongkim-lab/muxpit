@@ -76,7 +76,7 @@ test("failed Codex history resume restores the session input", () => {
     app.indexOf("const newSession"),
   );
 
-  assert.match(selectSession, /catch \(reason\) \{\s*updateRuntime\(session\.id, failSessionHistory\);/);
+  assert.match(selectSession, /catch \(reason\) \{\s*updateProviderRuntime\(kind, session\.id, failSessionHistory\);/);
 });
 
 test("opening a disconnected mobile session resumes its provider", () => {
@@ -86,7 +86,45 @@ test("opening a disconnected mobile session resumes its provider", () => {
   );
 
   assert.match(selectSession, /selectedRuntime\.connectionState === "disconnected"/);
-  assert.match(selectSession, /await openProvider\(profile, providerRef\.current, session\.id, true, session\.cwd\)/);
+  assert.match(selectSession, /const kind = providerRef\.current/);
+  assert.match(selectSession, /await openProvider\(profile, kind, session\.id, true, session\.cwd\)/);
+  assert.doesNotMatch(selectSession, /updateRuntime\(/);
+});
+
+test("async session operations stay scoped to their starting provider", () => {
+  const selectSession = app.slice(
+    app.indexOf("const selectSession"),
+    app.indexOf("const newSession"),
+  );
+  const newSession = app.slice(
+    app.indexOf("const newSession"),
+    app.indexOf("const changeProvider"),
+  );
+  const applySettings = app.slice(
+    app.indexOf("const applyExecutionSettings"),
+    app.indexOf("if (connectionStatus", app.indexOf("const applyExecutionSettings")),
+  );
+
+  assert.match(selectSession, /updateProviderRuntime\(kind, session\.id/);
+  assert.match(newSession, /const kind = providerRef\.current/);
+  assert.match(newSession, /moveProviderRuntime\(kind, null, started\.threadId\)/);
+  assert.doesNotMatch(newSession, /moveRuntime\(/);
+  assert.match(applySettings, /const kind = providerRef\.current/);
+  assert.match(applySettings, /updateProviderRuntime\(kind, sessionId/);
+  assert.doesNotMatch(applySettings, /updateRuntime\(/);
+});
+
+test("shared Codex channel resumes the selected thread", () => {
+  const openProvider = app.slice(
+    app.indexOf("const openProvider"),
+    app.indexOf("const connectProfile"),
+  );
+  const existingChannel = openProvider.slice(
+    openProvider.indexOf("if (existingChannel)"),
+    openProvider.indexOf("const existingOpening"),
+  );
+
+  assert.match(existingChannel, /await codexClient\.current\?\.resumeSession\(activeProviderSessionId\)/);
 });
 
 test("mobile workbench persists the selected session without credentials", () => {
@@ -160,6 +198,8 @@ test("authenticated SSH credentials use the Android secure store", () => {
   assert.match(bridge, /export const saveSshCredential[\s\S]*invoke\("mobile_credential_save"/);
   assert.match(bridge, /export const loadSshCredential[\s\S]*invoke<SshAuth \| null>\("mobile_credential_load"/);
   assert.match(rust, /android_native_keyring_store::Store/);
+  assert.match(rust, /fn initialize_android_credential_context/);
+  assert.match(rust, /Java_io_crates_keyring_Keyring_00024Companion_initializeNdkContext/);
   assert.match(rust, /keyring_core::Entry/);
   assert.match(rust, /pub fn mobile_credential_save/);
   assert.match(rust, /pub fn mobile_credential_load/);
@@ -169,6 +209,22 @@ test("authenticated SSH credentials use the Android secure store", () => {
   assert.match(capability, /"allow-mobile-credential-save"/);
   assert.match(capability, /"allow-mobile-credential-load"/);
   assert.doesNotMatch(hostProfiles, /password|privateKey|passphrase|SshAuth/);
+
+  const initializeCredential = rust.slice(
+    rust.indexOf("async fn initialize_android_credential_context"),
+    rust.indexOf("fn credential_entry"),
+  );
+  assert.match(initializeCredential, /jni_handle\(\)[\s\S]*\.exec/);
+  const saveCredential = rust.slice(
+    rust.indexOf("pub async fn mobile_credential_save"),
+    rust.indexOf("pub async fn mobile_credential_load"),
+  );
+  const loadCredential = rust.slice(
+    rust.indexOf("pub async fn mobile_credential_load"),
+    rust.indexOf("#[cfg(not(target_os = \"android\"))]"),
+  );
+  assert.match(saveCredential, /initialize_android_credential_context\(webview\)\.await[\s\S]*credential_entry/);
+  assert.match(loadCredential, /initialize_android_credential_context\(webview\)\.await[\s\S]*credential_entry/);
 });
 
 test("saved SSH credentials restore cold starts and host switches", () => {

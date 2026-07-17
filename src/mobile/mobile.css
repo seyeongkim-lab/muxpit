@@ -131,6 +131,10 @@ textarea:focus-visible {
 
 .provider-switch button,
 .auth-switch button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 44px;
   padding: 0 12px;
   border: 0;
@@ -138,6 +142,17 @@ textarea:focus-visible {
   color: var(--muted);
   font-size: 12px;
   font-weight: 650;
+}
+
+.provider-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #315f9d;
+  color: #ffffff;
+  font: 10px/16px "JetBrains Mono", "Roboto Mono", monospace;
+  text-align: center;
 }
 
 .provider-switch button.active,
@@ -190,12 +205,12 @@ textarea:focus-visible {
 
 .session-chip {
   display: grid;
-  min-width: 110px;
+  min-width: 126px;
   max-width: 160px;
   min-height: 44px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 4px;
   padding: 0 10px;
   border: 1px solid transparent;
   background: #181c23;
@@ -203,7 +218,7 @@ textarea:focus-visible {
   text-align: left;
 }
 
-.session-chip span {
+.session-chip > span {
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
@@ -212,13 +227,48 @@ textarea:focus-visible {
 }
 
 .session-chip small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: #6f7785;
-  font: 10px/1 monospace;
+  font: 9px/1 monospace;
+  white-space: nowrap;
 }
 
-.session-chip small.running {
+.session-chip small.running,
+.session-chip small.waiting {
   color: #66a3ff;
   font-weight: 700;
+}
+
+.session-chip small.disconnected {
+  color: #ef8b8b;
+}
+
+.session-state-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: #697282;
+}
+
+.session-state-dot.running {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(114, 167, 255, 0.12);
+  animation: mobile-status-pulse 1.6s ease-in-out infinite;
+}
+
+.session-state-dot.waiting {
+  background: var(--amber);
+}
+
+.session-state-dot.disconnected {
+  background: var(--red);
+}
+
+.session-state-dot.ready {
+  background: #59c78d;
 }
 
 .session-chip.active {
@@ -243,12 +293,59 @@ textarea:focus-visible {
   scroll-padding-bottom: 24px;
 }
 
+.session-context {
+  position: sticky;
+  z-index: 5;
+  top: -18px;
+  margin: -18px -14px 18px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid #242a33;
+  background: rgba(15, 17, 21, 0.97);
+}
+
 .session-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 22px;
+  margin-bottom: 9px;
+}
+
+.execution-summary {
+  display: grid;
+  width: 100%;
+  min-height: 38px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #2d3541;
+  background: #151a21;
+  color: #d8dde5;
+  text-align: left;
+}
+
+.execution-summary span:not(.execution-summary-arrow) {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution-summary b {
+  display: block;
+  margin-bottom: 2px;
+  color: #778292;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.execution-summary-arrow {
+  color: #82aeea;
+  font-size: 20px;
 }
 
 .eyebrow,
@@ -608,6 +705,75 @@ textarea:focus-visible {
   background: transparent;
   color: #9fc5ff;
   font-size: 12px;
+}
+
+.execution-settings {
+  display: grid;
+  gap: 14px;
+  padding: 8px 0;
+}
+
+.execution-settings label,
+.unsupported-setting {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+  color: #aeb6c2;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.execution-settings select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 36px 0 11px;
+  border: 1px solid #363e49;
+  border-radius: 0;
+  background: #0e1116;
+  color: #eef0f4;
+  font-size: 13px;
+}
+
+.execution-settings select:disabled {
+  color: #727b88;
+}
+
+.unsupported-setting small {
+  color: #747e8c;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.settings-note {
+  margin: 0;
+  padding: 10px 11px;
+  border-left: 3px solid var(--amber);
+  background: #242016;
+  color: #d8c098;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-note.neutral {
+  border-left-color: #5f87bd;
+  background: #171e28;
+  color: #a9bed9;
+}
+
+@keyframes mobile-status-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .working-indicator > span:not(:last-child),
+  .session-state-dot.running {
+    animation: none;
+  }
 }
 
 .sheet-list {

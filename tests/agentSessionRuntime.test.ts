@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   beginSessionHistory,
+  activeSessionCount,
   completeSessionHistory,
   createSessionRuntime,
   failSessionHistory,
@@ -82,6 +83,44 @@ test("composer state stays isolated by session", () => {
   assert.equal(readSessionRuntime(runtimes, "session-b").draft, "draft B");
   assert.equal(readSessionRuntime(runtimes, "session-b").queueMode, false);
   assert.equal(createSessionRuntime().draft, "");
+});
+
+test("execution settings stay isolated while sessions stream in the background", () => {
+  let runtimes = updateSessionRuntime({}, "session-a", (runtime) => ({
+    ...runtime,
+    running: true,
+    executionSettings: { model: "model-a", effort: "high", serviceTier: "fast" },
+  }));
+  runtimes = updateSessionRuntime(runtimes, "session-b", (runtime) => ({
+    ...runtime,
+    running: true,
+    executionSettings: { model: "model-b", effort: "low", serviceTier: null },
+  }));
+  for (let index = 0; index < 40; index += 1) {
+    const sessionId = index % 2 === 0 ? "session-a" : "session-b";
+    runtimes = updateSessionRuntime(runtimes, sessionId, (runtime) => ({
+      ...runtime,
+      items: [...runtime.items, {
+        id: `${sessionId}-${index}`,
+        kind: "assistant",
+        text: String(index),
+      }],
+    }));
+  }
+
+  assert.equal(activeSessionCount(runtimes), 2);
+  assert.deepEqual(readSessionRuntime(runtimes, "session-a").executionSettings, {
+    model: "model-a",
+    effort: "high",
+    serviceTier: "fast",
+  });
+  assert.deepEqual(readSessionRuntime(runtimes, "session-b").executionSettings, {
+    model: "model-b",
+    effort: "low",
+    serviceTier: null,
+  });
+  assert.equal(readSessionRuntime(runtimes, "session-a").items.length, 20);
+  assert.equal(readSessionRuntime(runtimes, "session-b").items.length, 20);
 });
 
 test("completed or timed out Claude helpers reject late stdout", () => {

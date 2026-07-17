@@ -10,6 +10,12 @@ export interface AgentApprovalRequest {
   options?: AgentPermissionOption[];
 }
 
+export interface AgentExecutionSettings {
+  model: string | null;
+  effort: string | null;
+  serviceTier: string | null;
+}
+
 export interface AgentSessionRuntime {
   items: MobileTimelineItem[];
   approvals: AgentApprovalRequest[];
@@ -20,6 +26,7 @@ export interface AgentSessionRuntime {
   queue: string[];
   draft: string;
   queueMode: boolean;
+  executionSettings: AgentExecutionSettings;
   historyState: "idle" | "loading" | "loaded";
   historyBaseItems: MobileTimelineItem[];
 }
@@ -41,6 +48,11 @@ export const createSessionRuntime = (): AgentSessionRuntime => ({
   queue: [],
   draft: "",
   queueMode: false,
+  executionSettings: {
+    model: null,
+    effort: null,
+    serviceTier: null,
+  },
   historyState: "idle",
   historyBaseItems: [],
 });
@@ -67,6 +79,9 @@ export const readSessionRuntime = (
   runtimes: AgentSessionRuntimes,
   sessionId: string | null | undefined,
 ): AgentSessionRuntime => runtimes[sessionRuntimeKey(sessionId)] ?? createSessionRuntime();
+
+export const activeSessionCount = (runtimes: AgentSessionRuntimes): number =>
+  Object.values(runtimes).filter((runtime) => runtime.running || runtime.waiting).length;
 
 export const updateSessionRuntime = (
   runtimes: AgentSessionRuntimes,

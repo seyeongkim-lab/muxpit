@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CodexMobileClient } from "./codexMobileClient.ts";
+import {
+  CodexMobileClient,
+  type CodexModelOption,
+} from "./codexMobileClient.ts";
 import {
   ClaudeStreamNormalizer,
   JsonLineDecoder,
@@ -11,6 +14,7 @@ import {
 } from "./agentProtocol.ts";
 import {
   beginSessionHistory,
+  activeSessionCount,
   completeSessionHistory,
   createSessionRuntime,
   failSessionHistory,
@@ -21,6 +25,7 @@ import {
   shouldProcessAgentChannelPayload,
   updateSessionRuntime,
   type AgentApprovalRequest,
+  type AgentExecutionSettings,
   type AgentSessionRuntime,
   type AgentSessionRuntimes,
 } from "./agentSessionRuntime.ts";
@@ -82,6 +87,7 @@ interface MobileChannelMeta {
   purpose: "provider" | "claude-list" | "claude-history";
   handledPayload: boolean;
   sessionId?: string;
+  launchSettings?: AgentExecutionSettings;
 }
 
 const MOBILE_DEMO = import.meta.env.DEV
@@ -107,6 +113,20 @@ const DEMO_ITEMS: MobileTimelineItem[] = [
   { id: "demo-agent", kind: "assistant", text: "빌드 환경을 확인했습니다. Android target을 추가한 뒤 release APK를 다시 만들고 있습니다." },
   { id: "demo-tool", kind: "tool", title: "Command", text: "pnpm tauri android build --apk" },
 ];
+
+const DEMO_MODELS: CodexModelOption[] = [{
+  id: "gpt-demo",
+  model: "gpt-demo",
+  displayName: "GPT Demo",
+  isDefault: true,
+  defaultReasoningEffort: "medium",
+  supportedReasoningEfforts: ["low", "medium", "high"],
+  defaultServiceTier: null,
+  serviceTiers: [{ id: "fast", name: "Fast" }],
+}];
+
+const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 interface ConnectionForm {
   id: string;
@@ -202,6 +222,20 @@ const relativeTime = (timestamp?: number): string => {
 const providerChannelKey = (provider: Provider, sessionId?: string | null): string =>
   provider === "claude" ? `${provider}:${sessionRuntimeKey(sessionId)}` : provider;
 
+const resolvedExecutionSettings = (
+  requested: AgentExecutionSettings,
+  effective: AgentExecutionSettings,
+): AgentExecutionSettings => ({
+  model: requested.model ?? effective.model,
+  effort: requested.effort ?? effective.effort,
+  serviceTier: requested.serviceTier ?? effective.serviceTier,
+});
+
+const sameClaudeLaunchSettings = (
+  left: AgentExecutionSettings | undefined,
+  right: AgentExecutionSettings,
+): boolean => left?.model === right.model && left.effort === right.effort;
+
 export const MobileApp = () => {
   const initialProfiles = useRef(MOBILE_DEMO ? [DEMO_PROFILE] : loadHostProfiles()).current;
   const initialWorkbench = useRef(MOBILE_DEMO
@@ -234,13 +268,17 @@ export const MobileApp = () => {
       items: DEMO_ITEMS,
       activeTurnId: "demo-turn",
       running: true,
+      executionSettings: { model: "gpt-demo", effort: "high", serviceTier: "fast" },
       approvals: [{ requestId: "demo-approval", title: "cargo test", detail: "Run the Rust test suite" }],
     },
   } : initialView?.runtimes ?? {});
   const [error, setError] = useState<string | null>(null);
   const [hostSheetOpen, setHostSheetOpen] = useState(false);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
+  const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
+  const [codexModels, setCodexModels] = useState<CodexModelOption[]>(MOBILE_DEMO ? DEMO_MODELS : []);
+  const [, setProviderViewRevision] = useState(0);
   const runtime = readSessionRuntime(runtimes, activeSessionId);
   const { approvals, items, queue, running } = runtime;
   const latestTimelineTextLength = items[items.length - 1]?.text.length ?? 0;
@@ -277,7 +315,8 @@ export const MobileApp = () => {
     sessionId: string | null,
     text: string,
     fromQueue?: boolean,
-  ) => Promise<void>>(async () => {});
+  ) => Promise<boolean>>(async () => false);
+  const queuedDispatches = useRef(new Set<string>());
 
   useEffect(() => { connectionStatusRef.current = connectionStatus; }, [connectionStatus]);
   useEffect(() => { providerRef.current = provider; }, [provider]);
@@ -310,7 +349,10 @@ export const MobileApp = () => {
     view: AgentWorkbenchViewSnapshot,
   ): void => {
     providerViews.current = { ...providerViews.current, [kind]: view };
-    if (kind !== providerRef.current) return;
+    if (kind !== providerRef.current) {
+      setProviderViewRevision((revision) => revision + 1);
+      return;
+    }
     sessionsRef.current = view.sessions;
     activeSessionRef.current = view.activeSessionId;
     runtimesRef.current = view.runtimes;
@@ -395,10 +437,6 @@ export const MobileApp = () => {
     sessionId: string | null | undefined,
     update: (current: AgentSessionRuntime) => AgentSessionRuntime,
   ): void => updateProviderRuntime(providerRef.current, sessionId, update);
-
-  const moveRuntime = (fromSessionId: string | null, toSessionId: string): void => {
-    moveProviderRuntime(providerRef.current, fromSessionId, toSessionId);
-  };
 
   useLayoutEffect(() => {
     const pending = pendingSessionScrollRef.current;
@@ -575,27 +613,30 @@ export const MobileApp = () => {
     sessionId?: string,
     preserveView = false,
     cwd = profile.cwd,
+    activate = true,
   ): Promise<string | undefined> => {
-    await prepareProvider(nextProvider);
-    const activeProviderSessionId = sessionId ?? activeSessionRef.current ?? undefined;
-    const sessionRuntime = activeProviderSessionId
-      ? readSessionRuntime(runtimesRef.current, activeProviderSessionId)
-      : undefined;
+    if (activate) await prepareProvider(nextProvider);
+    const providerView = readProviderView(nextProvider);
+    const activeProviderSessionId = sessionId ?? providerView.activeSessionId ?? undefined;
+    const sessionRuntime = readSessionRuntime(providerView.runtimes, activeProviderSessionId);
     const shouldRequestClaudeData = nextProvider === "claude"
       && (preserveView
         || (activeProviderSessionId
           ? sessionRuntime?.historyState !== "loaded"
           : sessionsRef.current.length === 0));
     if (activeProviderSessionId) {
-      setActiveSessionId(activeProviderSessionId);
-      activeSessionRef.current = activeProviderSessionId;
+      updateProviderView(nextProvider, (view) => ({
+        ...view,
+        activeSessionId: activeProviderSessionId,
+      }));
       const shouldBeginHistory = sessionRuntime?.historyState !== "loading"
         && (
           (!preserveView && sessionRuntime?.historyState !== "loaded")
           || preserveView
         );
       if (shouldBeginHistory) {
-        updateRuntime(
+        updateProviderRuntime(
+          nextProvider,
           activeProviderSessionId,
           (runtime) => beginSessionHistory(runtime, activeProviderSessionId),
         );
@@ -605,7 +646,23 @@ export const MobileApp = () => {
     const key = providerChannelKey(nextProvider, activeProviderSessionId);
     const existingChannel = providerChannels.current.get(key);
     if (existingChannel) {
-      activeChannel.current = existingChannel;
+      if (nextProvider === providerRef.current) activeChannel.current = existingChannel;
+      const needsCodexResume = nextProvider === "codex"
+        && activeProviderSessionId
+        && (
+          preserveView
+          || sessionRuntime.connectionState === "disconnected"
+          || sessionRuntime.historyState !== "loaded"
+        );
+      if (needsCodexResume) {
+        const settings = await codexClient.current?.resumeSession(activeProviderSessionId);
+        if (settings) {
+          updateProviderRuntime("codex", activeProviderSessionId, (runtime) => ({
+            ...runtime,
+            executionSettings: settings,
+          }));
+        }
+      }
       updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
         ...runtime,
         connectionState: "connected",
@@ -618,13 +675,14 @@ export const MobileApp = () => {
     const generation = runtimeGeneration.current;
     channelSequence.current += 1;
     const channelId = `${nextProvider}-${Date.now()}-${channelSequence.current}`;
-    activeChannel.current = channelId;
+    if (nextProvider === providerRef.current) activeChannel.current = channelId;
     decoders.current.set(channelId, new JsonLineDecoder());
     channels.current.set(channelId, {
       provider: nextProvider,
       purpose: "provider",
       handledPayload: false,
       ...(activeProviderSessionId ? { sessionId: activeProviderSessionId } : {}),
+      ...(nextProvider === "claude" ? { launchSettings: sessionRuntime.executionSettings } : {}),
     });
     if (nextProvider === "claude") {
       claudeNormalizers.current.set(channelId, new ClaudeStreamNormalizer());
@@ -633,7 +691,13 @@ export const MobileApp = () => {
     opening = (async (): Promise<string | undefined> => {
       try {
         if (nextProvider === "claude") {
-          await openAgent(channelId, nextProvider, activeProviderSessionId, cwd || undefined);
+          await openAgent(
+            channelId,
+            nextProvider,
+            activeProviderSessionId,
+            cwd || undefined,
+            sessionRuntime.executionSettings,
+          );
           if (shouldRequestClaudeData) await requestClaudeData(activeProviderSessionId);
         } else {
           await openAgent(channelId, nextProvider, undefined, cwd || undefined);
@@ -643,7 +707,14 @@ export const MobileApp = () => {
           );
           codexClient.current = client;
           await client.initialize();
-          if (activeProviderSessionId) await client.resumeSession(activeProviderSessionId);
+          setCodexModels(await client.listModels().catch(() => []));
+          if (activeProviderSessionId) {
+            const settings = await client.resumeSession(activeProviderSessionId);
+            updateProviderRuntime("codex", activeProviderSessionId, (runtime) => ({
+              ...runtime,
+              executionSettings: settings,
+            }));
+          }
         }
         if (generation !== runtimeGeneration.current || !channels.current.has(channelId)) {
           await closeAgent(channelId).catch(() => {});
@@ -976,10 +1047,27 @@ export const MobileApp = () => {
           activeTurnId: null,
           running: false,
           waiting: false,
-          queue: runtime.queue.slice(1),
         }));
         if (next) {
-          setTimeout(() => void submitRef.current(kind, event.sessionId, next, true), 0);
+          const dispatchKey = `${kind}:${event.sessionId}`;
+          if (!queuedDispatches.current.has(dispatchKey)) {
+            queuedDispatches.current.add(dispatchKey);
+            setTimeout(() => {
+              void (async () => {
+                try {
+                  const sent = await submitRef.current(kind, event.sessionId, next, true);
+                  if (sent) {
+                    updateProviderRuntime(kind, event.sessionId, (runtime) => ({
+                      ...runtime,
+                      queue: runtime.queue[0] === next ? runtime.queue.slice(1) : runtime.queue,
+                    }));
+                  }
+                } finally {
+                  queuedDispatches.current.delete(dispatchKey);
+                }
+              })();
+            }, 0);
+          }
         }
         return;
       }
@@ -1178,17 +1266,17 @@ export const MobileApp = () => {
     fromQueue = false,
     requestedSessionId?: string | null,
     requestedProvider = providerRef.current,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const trimmed = text.trim();
     const profile = currentProfileRef.current;
-    if (!trimmed || !profile) return;
+    if (!trimmed || !profile) return false;
     const kind = requestedProvider;
     const providerView = readProviderView(kind);
     let sessionId = requestedSessionId === undefined
       ? providerView.activeSessionId
       : requestedSessionId;
     let sessionRuntime = readSessionRuntime(providerView.runtimes, sessionId);
-    if (sessionRuntime.historyState === "loading") return;
+    if (sessionRuntime.historyState === "loading") return false;
     const action = fromQueue ? "send" : composerAction(sessionRuntime.running, sessionRuntime.queueMode);
     if (action === "queue") {
       updateProviderRuntime(kind, sessionId, (runtime) => ({
@@ -1196,7 +1284,7 @@ export const MobileApp = () => {
         queue: [...runtime.queue, trimmed],
         draft: "",
       }));
-      return;
+      return true;
     }
     setProviderError(kind, null);
 
@@ -1204,11 +1292,15 @@ export const MobileApp = () => {
       const client = codexClient.current;
       if (!client) {
         setProviderError(kind, "Codex channel is not ready.");
-        return;
+        return false;
       }
       if (!sessionId) {
         try {
-          const createdSessionId = await client.startSession(profile.cwd || undefined);
+          const started = await client.startSession(
+            profile.cwd || undefined,
+            sessionRuntime.executionSettings,
+          );
+          const createdSessionId = started.threadId;
           moveProviderRuntime(kind, null, createdSessionId);
           sessionId = createdSessionId;
           updateProviderView(kind, (view) => ({
@@ -1218,9 +1310,17 @@ export const MobileApp = () => {
               : view.activeSessionId,
           }));
           sessionRuntime = readSessionRuntime(readProviderView(kind).runtimes, createdSessionId);
+          updateProviderRuntime(kind, createdSessionId, (runtime) => ({
+            ...runtime,
+            executionSettings: resolvedExecutionSettings(
+              sessionRuntime.executionSettings,
+              started.settings,
+            ),
+          }));
+          sessionRuntime = readSessionRuntime(readProviderView(kind).runtimes, createdSessionId);
         } catch (reason) {
           setProviderError(kind, String(reason));
-          return;
+          return false;
         }
       }
       updateProviderRuntime(kind, sessionId, (runtime) => ({
@@ -1235,24 +1335,51 @@ export const MobileApp = () => {
         if (action === "steer" && sessionRuntime.activeTurnId) {
           await client.steer(sessionId, sessionRuntime.activeTurnId, trimmed);
         } else {
-          await client.startTurn(sessionId, trimmed, profile.cwd || undefined);
+          await client.startTurn(
+            sessionId,
+            trimmed,
+            profile.cwd || undefined,
+            sessionRuntime.executionSettings,
+          );
         }
       } catch (reason) {
-        updateProviderRuntime(kind, sessionId, (runtime) => ({
-          ...runtime,
-          running: false,
-          waiting: false,
-        }));
+        if (action !== "steer") {
+          updateProviderRuntime(kind, sessionId, (runtime) => ({
+            ...runtime,
+            running: false,
+            waiting: false,
+          }));
+        }
         setProviderError(kind, String(reason));
+        return false;
       }
-      return;
+      return true;
     }
 
     let channelId = providerChannels.current.get(providerChannelKey(kind, sessionId));
+    const channelMeta = channelId ? channels.current.get(channelId) : undefined;
+    if (
+      channelId
+      && action === "send"
+      && !sameClaudeLaunchSettings(channelMeta?.launchSettings, sessionRuntime.executionSettings)
+    ) {
+      providerChannels.current.delete(providerChannelKey(kind, sessionId));
+      await closeAgent(channelId).catch(() => {});
+      if (activeChannel.current === channelId) activeChannel.current = null;
+      const cwd = readProviderView(kind).sessions.find((session) => session.id === sessionId)?.cwd;
+      channelId = await openProvider(
+        profile,
+        "claude",
+        sessionId ?? undefined,
+        true,
+        cwd,
+        kind === providerRef.current,
+      ) ?? undefined;
+    }
     if (!channelId && kind === providerRef.current) {
       channelId = await openProvider(profile, "claude", sessionId ?? undefined) ?? undefined;
     }
-    if (!channelId) return;
+    if (!channelId) return false;
     updateProviderRuntime(kind, sessionId, (runtime) => ({
       ...runtime,
       draft: "",
@@ -1263,6 +1390,7 @@ export const MobileApp = () => {
     }));
     try {
       await writeAgentLine(channelId, claudeInput(trimmed));
+      return true;
     } catch (reason) {
       updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
@@ -1270,16 +1398,19 @@ export const MobileApp = () => {
         waiting: false,
       }));
       setProviderError(kind, String(reason));
+      return false;
     }
   };
   submitRef.current = (kind, sessionId, text, fromQueue) =>
     submitText(text, fromQueue, sessionId, kind);
 
   const stopTurn = async (): Promise<void> => {
-    const sessionId = activeSessionRef.current;
-    const sessionRuntime = readSessionRuntime(runtimesRef.current, sessionId);
+    const kind = providerRef.current;
+    const providerView = readProviderView(kind);
+    const sessionId = providerView.activeSessionId;
+    const sessionRuntime = readSessionRuntime(providerView.runtimes, sessionId);
     if (!sessionRuntime.running) return;
-    if (providerRef.current === "codex") {
+    if (kind === "codex") {
       const turnId = sessionRuntime.activeTurnId;
       if (sessionId && turnId) await codexClient.current?.interrupt(sessionId, turnId);
     } else {
@@ -1291,68 +1422,96 @@ export const MobileApp = () => {
         if (activeChannel.current === channelId) activeChannel.current = null;
       }
     }
-    updateRuntime(sessionId, (runtime) => ({
+    updateProviderRuntime(kind, sessionId, (runtime) => ({
       ...runtime,
       activeTurnId: null,
-      connectionState: providerRef.current === "claude" ? "idle" : runtime.connectionState,
+      connectionState: kind === "claude" ? "idle" : runtime.connectionState,
       running: false,
       waiting: false,
     }));
   };
 
   const selectSession = async (session: MobileSession): Promise<void> => {
+    const kind = providerRef.current;
+    const providerView = readProviderView(kind);
     setSessionSheetOpen(false);
-    const selectedRuntime = readSessionRuntime(runtimesRef.current, session.id);
+    setSettingsSheetOpen(false);
+    const selectedRuntime = readSessionRuntime(providerView.runtimes, session.id);
     const shouldReconnect = selectedRuntime.connectionState === "disconnected";
-    setActiveSessionId(session.id);
-    activeSessionRef.current = session.id;
+    updateProviderView(kind, (view) => ({ ...view, activeSessionId: session.id }));
     const shouldLoadHistory = selectedRuntime.historyState === "idle";
     if (shouldLoadHistory) {
-      updateRuntime(session.id, (runtime) => beginSessionHistory(runtime, session.id));
+      updateProviderRuntime(kind, session.id, (runtime) => beginSessionHistory(runtime, session.id));
     }
     const profile = currentProfileRef.current;
     if (!profile) return;
     try {
       if (
         shouldReconnect
-        || (providerRef.current === "codex" && !codexClient.current)
+        || (kind === "codex" && !codexClient.current)
       ) {
-        await openProvider(profile, providerRef.current, session.id, true, session.cwd);
+        await openProvider(profile, kind, session.id, true, session.cwd);
         return;
       }
-      if (providerRef.current === "codex") {
-        if (shouldLoadHistory) await codexClient.current?.resumeSession(session.id);
+      if (kind === "codex") {
+        if (shouldLoadHistory) {
+          const settings = await codexClient.current?.resumeSession(session.id);
+          if (settings) {
+            updateProviderRuntime(kind, session.id, (runtime) => ({
+              ...runtime,
+              executionSettings: settings,
+            }));
+          }
+        }
         return;
       }
       if (shouldLoadHistory) await requestClaudeData(session.id);
     } catch (reason) {
-      updateRuntime(session.id, failSessionHistory);
-      setError(String(reason));
+      updateProviderRuntime(kind, session.id, failSessionHistory);
+      setProviderError(kind, String(reason));
     }
   };
 
   const newSession = async (): Promise<void> => {
+    const kind = providerRef.current;
     const profile = currentProfileRef.current;
     if (!profile) return;
     setSessionSheetOpen(false);
-    setActiveSessionId(null);
-    activeSessionRef.current = null;
-    const next = { ...runtimesRef.current, [sessionRuntimeKey(null)]: createSessionRuntime() };
-    runtimesRef.current = next;
-    setRuntimes(next);
-    if (providerRef.current === "codex") {
+    setSettingsSheetOpen(false);
+    updateProviderView(kind, (view) => ({
+      ...view,
+      activeSessionId: null,
+      runtimes: {
+        ...view.runtimes,
+        [sessionRuntimeKey(null)]: createSessionRuntime(),
+      },
+    }));
+    if (kind === "codex") {
       try {
-        const id = await codexClient.current?.startSession(profile.cwd || undefined);
-        if (id) {
-          moveRuntime(null, id);
-          setActiveSessionId(id);
-          activeSessionRef.current = id;
+        const newRuntime = readSessionRuntime(readProviderView(kind).runtimes, null);
+        const started = await codexClient.current?.startSession(
+          profile.cwd || undefined,
+          newRuntime.executionSettings,
+        );
+        if (started) {
+          moveProviderRuntime(kind, null, started.threadId);
+          updateProviderRuntime(kind, started.threadId, (runtime) => ({
+            ...runtime,
+            executionSettings: resolvedExecutionSettings(
+              runtime.executionSettings,
+              started.settings,
+            ),
+          }));
+          updateProviderView(kind, (view) => ({
+            ...view,
+            activeSessionId: view.activeSessionId === null ? started.threadId : view.activeSessionId,
+          }));
         }
       } catch (reason) {
-        setError(String(reason));
+        setProviderError(kind, String(reason));
       }
     } else {
-      await openProvider(profile, "claude");
+      await openProvider(profile, kind);
     }
   };
 
@@ -1380,14 +1539,16 @@ export const MobileApp = () => {
   };
 
   const resolveApproval = async (approval: AgentApprovalRequest, accepted: boolean): Promise<void> => {
+    const kind = providerRef.current;
+    const sessionId = readProviderView(kind).activeSessionId;
     try {
       await codexClient.current?.resolveApproval(approval.requestId, accepted);
-      updateRuntime(activeSessionRef.current, (runtime) => ({
+      updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         approvals: runtime.approvals.filter((item) => item.requestId !== approval.requestId),
       }));
     } catch (reason) {
-      setError(String(reason));
+      setProviderError(kind, String(reason));
     }
   };
 
@@ -1398,6 +1559,25 @@ export const MobileApp = () => {
           `${session.title} ${session.cwd ?? ""}`.toLowerCase().includes(search))
       : sessions;
   }, [sessionSearch, sessions]);
+
+  const applyExecutionSettings = async (settings: AgentExecutionSettings): Promise<void> => {
+    const kind = providerRef.current;
+    const providerView = readProviderView(kind);
+    const sessionId = providerView.activeSessionId;
+    const previousSettings = readSessionRuntime(providerView.runtimes, sessionId).executionSettings;
+    updateProviderRuntime(kind, sessionId, (runtime) => ({ ...runtime, executionSettings: settings }));
+    try {
+      if (kind === "codex") {
+        if (sessionId) await codexClient.current?.updateSessionSettings(sessionId, settings);
+      }
+    } catch (reason) {
+      updateProviderRuntime(kind, sessionId, (runtime) => ({
+        ...runtime,
+        executionSettings: previousSettings,
+      }));
+      setProviderError(kind, reason instanceof Error ? reason.message : String(reason));
+    }
+  };
 
   if (connectionStatus !== "connected" || !currentProfile) {
     return (
@@ -1418,6 +1598,22 @@ export const MobileApp = () => {
 
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const action = composerAction(running, runtime.queueMode);
+  const threadSettings = runtime.executionSettings;
+  const selectedCodexModel = codexModels.find((model) =>
+    model.model === threadSettings.model || model.id === threadSettings.model)
+    ?? codexModels.find((model) => model.isDefault);
+  const effortOptions = provider === "codex"
+    ? selectedCodexModel?.supportedReasoningEfforts ?? []
+    : [...CLAUDE_EFFORTS];
+  const serviceTierOptions = selectedCodexModel?.serviceTiers ?? [];
+  const modelLabel = provider === "codex"
+    ? selectedCodexModel?.displayName ?? threadSettings.model ?? "Default"
+    : threadSettings.model ?? "Default";
+  const effortLabel = threadSettings.effort ?? selectedCodexModel?.defaultReasoningEffort ?? "Default";
+  const serviceTierLabel = serviceTierOptions.find((tier) => tier.id === threadSettings.serviceTier)?.name
+    ?? (threadSettings.serviceTier ? threadSettings.serviceTier : "Standard");
+  const codexActivity = activeSessionCount(readProviderView("codex").runtimes);
+  const claudeActivity = activeSessionCount(readProviderView("claude").runtimes);
 
   return (
     <div className="mobile-app">
@@ -1435,12 +1631,12 @@ export const MobileApp = () => {
             type="button"
             className={provider === "codex" ? "active" : ""}
             onClick={() => void changeProvider("codex")}
-          >Codex</button>
+          >Codex{codexActivity > 0 ? <span className="provider-count">{codexActivity}</span> : null}</button>
           <button
             type="button"
             className={provider === "claude" ? "active" : ""}
             onClick={() => void changeProvider("claude")}
-          >Claude</button>
+          >Claude{claudeActivity > 0 ? <span className="provider-count">{claudeActivity}</span> : null}</button>
         </div>
       </header>
 
@@ -1449,7 +1645,8 @@ export const MobileApp = () => {
         <div className="recent-sessions">
           {sessions.slice(0, 5).map((session) => {
             const sessionRuntime = readSessionRuntime(runtimes, session.id);
-            const sessionRunning = sessionRuntime.running;
+            const sessionLabel = sessionRuntimeLabel(sessionRuntime);
+            const updated = relativeTime(session.updatedAt);
             return (
               <button
                 type="button"
@@ -1458,8 +1655,9 @@ export const MobileApp = () => {
                 onClick={() => void selectSession(session)}
               >
                 <span>{session.title}</span>
-                <small className={sessionRunning ? "running" : ""}>
-                  {sessionRunning ? sessionRuntimeLabel(sessionRuntime) : relativeTime(session.updatedAt)}
+                <small className={sessionLabel.toLowerCase()}>
+                  <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} aria-hidden="true" />
+                  {sessionLabel}{updated ? ` · ${updated}` : ""}
                 </small>
               </button>
             );
@@ -1472,14 +1670,26 @@ export const MobileApp = () => {
       </nav>
 
       <main ref={timelineRef} className="activity-timeline" aria-live="polite">
-        <section className="session-heading">
-          <div>
-            <span className="eyebrow">{provider}</span>
-            <h1>{activeSession?.title ?? "New session"}</h1>
+        <section className="session-context">
+          <div className="session-heading">
+            <div>
+              <span className="eyebrow">{provider}</span>
+              <h1>{activeSession?.title ?? "New session"}</h1>
+            </div>
+            <span className={running ? "run-state running" : "run-state"}>
+              {sessionRuntimeLabel(runtime)}
+            </span>
           </div>
-          <span className={running ? "run-state running" : "run-state"}>
-            {sessionRuntimeLabel(runtime)}
-          </span>
+          <button
+            type="button"
+            className="execution-summary"
+            onClick={() => setSettingsSheetOpen(true)}
+          >
+            <span><b>Model</b>{modelLabel}</span>
+            <span><b>Effort</b>{effortLabel}</span>
+            {provider === "codex" ? <span><b>Speed</b>{serviceTierLabel}</span> : null}
+            <span className="execution-summary-arrow" aria-hidden="true">›</span>
+          </button>
         </section>
 
         {error ? (
@@ -1613,17 +1823,104 @@ export const MobileApp = () => {
           <div className="sheet-list session-list">
             {filteredSessions.map((session) => {
               const sessionRuntime = readSessionRuntime(runtimes, session.id);
-              const sessionRunning = sessionRuntime.running;
+              const sessionLabel = sessionRuntimeLabel(sessionRuntime);
               return (
                 <button type="button" key={session.id} onClick={() => void selectSession(session)}>
-                  <span className={sessionRunning ? "online-dot" : "host-dot"} />
+                  <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} />
                   <span>
                     <strong>{session.title}</strong>
-                    <small>{session.cwd || session.id} {sessionRunning ? sessionRuntimeLabel(sessionRuntime) : relativeTime(session.updatedAt)}</small>
+                    <small>{session.cwd || session.id} · {sessionLabel} · {relativeTime(session.updatedAt)}</small>
                   </span>
                 </button>
               );
             })}
+          </div>
+        </BottomSheet>
+      ) : null}
+
+      {settingsSheetOpen ? (
+        <BottomSheet title={`${provider} session settings`} onClose={() => setSettingsSheetOpen(false)}>
+          <div className="execution-settings">
+            <label>
+              <span>Model</span>
+              <select
+                value={threadSettings.model ?? ""}
+                disabled={provider === "claude" && running}
+                onChange={(event) => {
+                  const model = event.target.value || null;
+                  if (provider !== "codex") {
+                    void applyExecutionSettings({ ...threadSettings, model });
+                    return;
+                  }
+                  const option = codexModels.find((candidate) =>
+                    candidate.model === model || candidate.id === model);
+                  const effort = option?.supportedReasoningEfforts.includes(threadSettings.effort ?? "")
+                    ? threadSettings.effort
+                    : option?.defaultReasoningEffort ?? null;
+                  const serviceTier = option?.serviceTiers.some((tier) => tier.id === threadSettings.serviceTier)
+                    ? threadSettings.serviceTier
+                    : option?.defaultServiceTier ?? null;
+                  void applyExecutionSettings({ model, effort, serviceTier });
+                }}
+              >
+                <option value="">Default</option>
+                {provider === "codex"
+                  ? codexModels.map((model) => (
+                      <option key={model.id} value={model.model}>{model.displayName}</option>
+                    ))
+                  : <>
+                      {threadSettings.model && !CLAUDE_MODELS.includes(threadSettings.model as typeof CLAUDE_MODELS[number])
+                        ? <option value={threadSettings.model}>{threadSettings.model}</option>
+                        : null}
+                      {CLAUDE_MODELS.map((model) => <option key={model} value={model}>{model}</option>)}
+                    </>}
+              </select>
+            </label>
+            <label>
+              <span>Effort</span>
+              <select
+                value={threadSettings.effort ?? ""}
+                disabled={provider === "claude" && running}
+                onChange={(event) => void applyExecutionSettings({
+                  ...threadSettings,
+                  effort: event.target.value || null,
+                })}
+              >
+                <option value="">Default</option>
+                {threadSettings.effort && !effortOptions.includes(threadSettings.effort)
+                  ? <option value={threadSettings.effort}>{threadSettings.effort}</option>
+                  : null}
+                {effortOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
+              </select>
+            </label>
+            {provider === "codex" ? (
+              <label>
+                <span>Speed</span>
+                <select
+                  value={threadSettings.serviceTier ?? ""}
+                  onChange={(event) => void applyExecutionSettings({
+                    ...threadSettings,
+                    serviceTier: event.target.value || null,
+                  })}
+                >
+                  <option value="">Standard</option>
+                  {threadSettings.serviceTier && !serviceTierOptions.some((tier) => tier.id === threadSettings.serviceTier)
+                    ? <option value={threadSettings.serviceTier}>{threadSettings.serviceTier}</option>
+                    : null}
+                  {serviceTierOptions.map((tier) => <option key={tier.id} value={tier.id}>{tier.name}</option>)}
+                </select>
+              </label>
+            ) : (
+              <div className="unsupported-setting">
+                <span>Speed</span>
+                <small>Claude CLI does not expose a speed setting.</small>
+              </div>
+            )}
+            {provider === "claude" && running
+              ? <p className="settings-note">Stop or wait for this turn before changing Claude model or effort.</p>
+              : provider === "claude"
+                ? <p className="settings-note neutral">Model and effort apply when the next message starts.</p>
+                : null}
           </div>
         </BottomSheet>
       ) : null}

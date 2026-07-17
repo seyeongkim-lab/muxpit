@@ -1,6 +1,7 @@
 import type { MobileSession, MobileTimelineItem } from "./agentProtocol.ts";
 import {
   createSessionRuntime,
+  type AgentExecutionSettings,
   type AgentSessionRuntime,
   type AgentSessionRuntimes,
 } from "./agentSessionRuntime.ts";
@@ -29,6 +30,7 @@ interface StoredAgentSessionRuntime {
   queue: string[];
   draft: string;
   queueMode: boolean;
+  executionSettings: AgentExecutionSettings;
   connectionState: "idle" | "connected" | "disconnected";
   historyState: "idle" | "loaded";
 }
@@ -73,6 +75,15 @@ const sessionValue = (value: unknown): MobileSession | undefined => {
   };
 };
 
+const executionSettingsValue = (value: unknown): AgentExecutionSettings => {
+  const settings = objectValue(value);
+  return {
+    model: typeof settings?.model === "string" ? settings.model : null,
+    effort: typeof settings?.effort === "string" ? settings.effort : null,
+    serviceTier: typeof settings?.serviceTier === "string" ? settings.serviceTier : null,
+  };
+};
+
 const restoredRuntime = (value: unknown): AgentSessionRuntime | undefined => {
   const runtime = objectValue(value);
   if (!runtime) return undefined;
@@ -91,6 +102,7 @@ const restoredRuntime = (value: unknown): AgentSessionRuntime | undefined => {
     queue,
     draft: typeof runtime.draft === "string" ? runtime.draft : "",
     queueMode: runtime.queueMode === true,
+    executionSettings: executionSettingsValue(runtime.executionSettings),
     connectionState: runtime.connectionState === "idle" ? "idle" : "disconnected",
     historyState: runtime.historyState === "loaded" ? "loaded" : "idle",
   };
@@ -130,6 +142,7 @@ const storedRuntime = (runtime: AgentSessionRuntime): StoredAgentSessionRuntime 
   queue: runtime.queue,
   draft: runtime.draft,
   queueMode: runtime.queueMode,
+  executionSettings: runtime.executionSettings,
   connectionState: runtime.connectionState,
   historyState: runtime.historyState === "loaded" ? "loaded" : "idle",
 });

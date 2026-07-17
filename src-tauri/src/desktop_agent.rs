@@ -1,3 +1,4 @@
+use crate::agent_launch_settings::{claude_launch_args, AgentLaunchSettings};
 use crate::platform::command::silent_command;
 use crate::ssh_command::{
     quote_posix_shell_arg, resolve_ssh_command, split_command_line, SshCommand,
@@ -74,6 +75,7 @@ fn checked_cwd(value: Option<String>) -> Result<Option<String>, String> {
 fn provider_command(
     provider: DesktopAgentProvider,
     session_id: Option<String>,
+    settings: Option<AgentLaunchSettings>,
 ) -> Result<String, String> {
     match provider {
         DesktopAgentProvider::Codex => {
@@ -86,6 +88,7 @@ fn provider_command(
             )
         }
         DesktopAgentProvider::Claude => {
+            let settings = claude_launch_args(settings.as_ref())?;
             let resume = match session_id {
                 Some(id) if valid_session_id(&id) => {
                     format!(" --resume {}", quote_posix_shell_arg(&id))
@@ -94,7 +97,7 @@ fn provider_command(
                 None => String::new(),
             };
             Ok(format!(
-                "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose{resume}"
+                "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose{settings}{resume}"
             ))
         }
         DesktopAgentProvider::Copilot => Ok("copilot --acp --stdio".into()),
@@ -364,11 +367,12 @@ pub fn desktop_agent_open(
     channel_id: String,
     provider: DesktopAgentProvider,
     session_id: Option<String>,
+    settings: Option<AgentLaunchSettings>,
     cwd: Option<String>,
     ssh_command: Option<String>,
     ssh_connection: Option<SshCommand>,
 ) -> Result<(), String> {
-    let command = provider_command(provider, session_id)?;
+    let command = provider_command(provider, session_id, settings)?;
     open_command(
         app,
         state.inner().clone(),
@@ -541,31 +545,31 @@ mod tests {
     #[test]
     fn provider_commands_use_structured_protocols() {
         assert_eq!(
-            provider_command(DesktopAgentProvider::Codex, None).unwrap(),
+            provider_command(DesktopAgentProvider::Codex, None, None).unwrap(),
             "codex --dangerously-bypass-approvals-and-sandbox app-server --listen stdio://"
         );
         assert_eq!(
-            provider_command(DesktopAgentProvider::Claude, None).unwrap(),
+            provider_command(DesktopAgentProvider::Claude, None, None).unwrap(),
             "claude --dangerously-skip-permissions -p --input-format stream-json --output-format stream-json --include-partial-messages --verbose"
         );
         assert_eq!(
-            provider_command(DesktopAgentProvider::Copilot, None).unwrap(),
+            provider_command(DesktopAgentProvider::Copilot, None, None).unwrap(),
             "copilot --acp --stdio"
         );
         assert_eq!(
-            provider_command(DesktopAgentProvider::Opencode, None).unwrap(),
+            provider_command(DesktopAgentProvider::Opencode, None, None).unwrap(),
             "opencode acp"
         );
         assert_eq!(
-            provider_command(DesktopAgentProvider::Gemini, None).unwrap(),
+            provider_command(DesktopAgentProvider::Gemini, None, None).unwrap(),
             "gemini --experimental-acp"
         );
     }
 
     #[test]
     fn claude_resume_id_is_validated() {
-        assert!(provider_command(DesktopAgentProvider::Claude, Some("-bad".into())).is_err());
-        assert!(provider_command(DesktopAgentProvider::Claude, Some("session-1".into()))
+        assert!(provider_command(DesktopAgentProvider::Claude, Some("-bad".into()), None).is_err());
+        assert!(provider_command(DesktopAgentProvider::Claude, Some("session-1".into()), None)
             .unwrap()
             .contains("--resume 'session-1'"));
     }
