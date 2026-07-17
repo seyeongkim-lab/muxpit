@@ -27,3 +27,15 @@ test("mobile workbench keeps unified sessions and execution context to compact r
   assert.doesNotMatch(component, /<span className="eyebrow">\{provider\}<\/span>/);
   assert.match(component, /className="execution-summary-value"/);
 });
+
+test("mobile composer uses the full width without a steering rail", () => {
+  const steering = styles.slice(
+    styles.indexOf(".mobile-composer.steering"),
+    styles.indexOf(".mobile-composer textarea"),
+  );
+
+  assert.doesNotMatch(steering, /box-shadow|inset\s+\d+px\s+0/);
+  assert.match(styles, /\.mobile-composer\s*\{[^}]*padding:\s*6px 10px/s);
+  assert.match(styles, /\.mobile-composer textarea\s*\{[^}]*min-height:\s*40px/s);
+  assert.match(styles, /\.composer-actions\s*\{[^}]*min-height:\s*40px[^}]*margin-top:\s*4px/s);
+});

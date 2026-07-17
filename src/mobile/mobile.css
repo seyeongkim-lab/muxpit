@@ -534,23 +534,22 @@ textarea:focus-visible {
 }
 
 .mobile-composer {
-  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+  padding: 6px 10px max(6px, env(safe-area-inset-bottom));
   border-top: 1px solid #2b313b;
   background: #15181e;
 }
 
 .mobile-composer.steering {
   border-top-color: #8b642c;
-  box-shadow: inset 3px 0 0 var(--amber);
 }
 
 .mobile-composer textarea {
   box-sizing: border-box;
   width: 100%;
-  min-height: 46px;
-  max-height: 132px;
+  min-height: 40px;
+  max-height: 112px;
   resize: none;
-  padding: 12px;
+  padding: 9px 10px;
   border: 1px solid #363e49;
   border-radius: 0;
   background: #0e1116;
@@ -565,11 +564,11 @@ textarea:focus-visible {
 
 .composer-actions {
   display: flex;
-  min-height: 44px;
+  min-height: 40px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .composer-mode,
@@ -581,8 +580,8 @@ textarea:focus-visible {
 
 .composer-mode button,
 .composer-mode span {
-  min-height: 44px;
-  padding: 0 10px;
+  min-height: 40px;
+  padding: 0 8px;
   border: 0;
   background: transparent;
   color: #737d8c;
@@ -601,8 +600,8 @@ textarea:focus-visible {
 }
 
 .composer-buttons button {
-  min-height: 44px;
-  padding: 0 15px;
+  min-height: 40px;
+  padding: 0 12px;
   border: 1px solid #343c48;
   font-size: 12px;
   font-weight: 700;
