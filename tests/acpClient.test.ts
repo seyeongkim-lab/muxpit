@@ -34,7 +34,7 @@ test("ACP client initializes and lists sessions when supported", async () => {
     params: {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "wmux", title: "wmux", version: "0.2.14" },
+      clientInfo: { name: "wmux", title: "wmux", version: "0.2.15" },
     },
   });
   client.receive(JSON.stringify({
