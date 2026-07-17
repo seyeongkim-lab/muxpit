@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
-const MAX_LINE_BYTES: usize = 1024 * 1024;
+const MAX_LINE_BYTES: usize = 12 * 1024 * 1024;
 const TRANSPORT_CHUNK_BYTES: usize = 64 * 1024;
 const CLAUDE_SESSION_SCRIPT: &str = include_str!("../scripts/claude_sessions.py");
 

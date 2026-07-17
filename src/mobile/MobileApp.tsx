@@ -1,5 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  claudePromptLine,
+  createAgentImageAttachments,
+  imageBlobsFromClipboard,
+  promptTimelineText,
+} from "../agent/agentImages.ts";
+import { AgentImageAttachments } from "../components/AgentImageAttachments.tsx";
+import {
   CodexMobileClient,
   type CodexModelOption,
 } from "./codexMobileClient.ts";
@@ -223,14 +230,6 @@ const authFromForm = (form: ConnectionForm): SshAuth | undefined => {
       }
     : undefined;
 };
-
-const claudeInput = (text: string): string => JSON.stringify({
-  type: "user",
-  message: {
-    role: "user",
-    content: [{ type: "text", text }],
-  },
-});
 
 const relativeTime = (timestamp?: number): string => {
   if (!timestamp) return "";
@@ -1325,16 +1324,22 @@ export const MobileApp = () => {
   ): Promise<boolean> => {
     const trimmed = text.trim();
     const profile = currentProfileRef.current;
-    if (!trimmed || !profile) return false;
+    if (!profile) return false;
     const kind = requestedProvider;
     const providerView = readProviderView(kind);
     let sessionId = requestedSessionId === undefined
       ? providerView.activeSessionId
       : requestedSessionId;
     let sessionRuntime = readSessionRuntime(providerView.runtimes, sessionId);
+    const attachments = fromQueue ? [] : sessionRuntime.attachments;
+    if (!trimmed && attachments.length === 0) return false;
     if (sessionRuntime.historyState === "loading") return false;
     const action = fromQueue ? "send" : composerAction(sessionRuntime.running, sessionRuntime.queueMode);
     if (action === "queue") {
+      if (attachments.length > 0) {
+        setProviderError(kind, "Image attachments cannot be queued. Use Steer or wait for the current task.");
+        return false;
+      }
       updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         queue: [...runtime.queue, trimmed],
@@ -1343,6 +1348,7 @@ export const MobileApp = () => {
       return true;
     }
     setProviderError(kind, null);
+    const timelineText = promptTimelineText(trimmed, attachments);
 
     if (kind === "codex") {
       const client = codexClient.current;
@@ -1382,20 +1388,21 @@ export const MobileApp = () => {
       updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         draft: "",
-        items: appendUserMessage(runtime.items, trimmed),
+        items: appendUserMessage(runtime.items, timelineText),
         running: true,
         waiting: false,
         historyState: "loaded",
       }));
       try {
         if (action === "steer" && sessionRuntime.activeTurnId) {
-          await client.steer(sessionId, sessionRuntime.activeTurnId, trimmed);
+          await client.steer(sessionId, sessionRuntime.activeTurnId, trimmed, attachments);
         } else {
           await client.startTurn(
             sessionId,
             trimmed,
             profile.cwd || undefined,
             sessionRuntime.executionSettings,
+            attachments,
           );
         }
       } catch (reason) {
@@ -1409,6 +1416,7 @@ export const MobileApp = () => {
         setProviderError(kind, String(reason));
         return false;
       }
+      updateProviderRuntime(kind, sessionId, (runtime) => ({ ...runtime, attachments: [] }));
       return true;
     }
 
@@ -1439,13 +1447,14 @@ export const MobileApp = () => {
     updateProviderRuntime(kind, sessionId, (runtime) => ({
       ...runtime,
       draft: "",
-      items: appendUserMessage(runtime.items, trimmed),
+      items: appendUserMessage(runtime.items, timelineText),
       running: true,
       waiting: false,
       historyState: "loaded",
     }));
     try {
-      await writeAgentLine(channelId, claudeInput(trimmed));
+      await writeAgentLine(channelId, claudePromptLine(trimmed, attachments));
+      updateProviderRuntime(kind, sessionId, (runtime) => ({ ...runtime, attachments: [] }));
       return true;
     } catch (reason) {
       updateProviderRuntime(kind, sessionId, (runtime) => ({
@@ -1459,6 +1468,28 @@ export const MobileApp = () => {
   };
   submitRef.current = (kind, sessionId, text, fromQueue) =>
     submitText(text, fromQueue, sessionId, kind);
+
+  const addComposerImages = async (blobs: readonly Blob[]): Promise<void> => {
+    if (blobs.length === 0) return;
+    const kind = providerRef.current;
+    const providerView = readProviderView(kind);
+    const sessionId = providerView.activeSessionId;
+    const current = readSessionRuntime(providerView.runtimes, sessionId);
+    if (current.running && current.queueMode) {
+      setProviderError(kind, "Image attachments cannot be queued. Switch to Steer first.");
+      return;
+    }
+    try {
+      const added = await createAgentImageAttachments(blobs, current.attachments);
+      updateProviderRuntime(kind, sessionId, (runtime) => ({
+        ...runtime,
+        attachments: [...runtime.attachments, ...added],
+      }));
+      setProviderError(kind, null);
+    } catch (reason) {
+      setProviderError(kind, String(reason));
+    }
+  };
 
   const stopTurn = async (): Promise<void> => {
     const kind = providerRef.current;
@@ -1880,12 +1911,26 @@ export const MobileApp = () => {
       ) : null}
 
       <footer className={action === "steer" ? "mobile-composer steering" : "mobile-composer"}>
+        <AgentImageAttachments
+          attachments={runtime.attachments}
+          disabled={running && runtime.queueMode}
+          onFiles={addComposerImages}
+          onRemove={(id) => updateRuntime(activeSessionId, (current) => ({
+            ...current,
+            attachments: current.attachments.filter((attachment) => attachment.id !== id),
+          }))}
+        />
         <textarea
           value={runtime.draft}
           onChange={(event) => updateRuntime(activeSessionId, (current) => ({
             ...current,
             draft: event.target.value,
           }))}
+          onPaste={(event) => void addComposerImages((() => {
+            const images = imageBlobsFromClipboard(event.clipboardData);
+            if (images.length > 0) event.preventDefault();
+            return images;
+          })())}
           placeholder={action === "steer" ? "Redirect the active task…" : action === "queue" ? "Add the next instruction…" : "Message the agent…"}
           rows={1}
           aria-label="Agent instruction"
@@ -1913,7 +1958,7 @@ export const MobileApp = () => {
               type="button"
               className="send-button"
               disabled={
-                !runtime.draft.trim()
+                (!runtime.draft.trim() && runtime.attachments.length === 0)
                 || runtime.historyState === "loading"
                 || (provider === "codex" && running && !runtime.activeTurnId && !runtime.queueMode)
               }

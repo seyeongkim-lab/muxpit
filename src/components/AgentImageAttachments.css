@@ -1,0 +1,66 @@
+.agent-image-attachments {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  overflow-x: auto;
+}
+
+.agent-image-picker,
+.agent-image-chip {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 1px solid var(--wmux-hairline-strong, var(--line, #363e49));
+  background: var(--wmux-bg, #0e1116);
+}
+
+.agent-image-picker {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--wmux-subtext, var(--muted, #9199a8));
+  cursor: pointer;
+}
+
+.agent-image-picker:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.agent-image-picker svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+}
+
+.agent-image-chip {
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-image-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.agent-image-chip button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: rgb(0 0 0 / 75%);
+  color: white;
+  font-size: 12px;
+  line-height: 13px;
+  cursor: pointer;
+}

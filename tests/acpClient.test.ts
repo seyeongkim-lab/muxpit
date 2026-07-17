@@ -6,6 +6,15 @@ import {
   automaticPermissionOptionId,
   normalizeAcpMessage,
 } from "../src/agent/acpClient.ts";
+import type { AgentImageAttachment } from "../src/agent/agentImages.ts";
+
+const attachment: AgentImageAttachment = {
+  id: "image-1",
+  name: "clipboard.png",
+  mimeType: "image/png",
+  data: "AAAA",
+  size: 3,
+};
 
 test("ACP client initializes and lists sessions when supported", async () => {
   const sent: Record<string, unknown>[] = [];
@@ -25,7 +34,7 @@ test("ACP client initializes and lists sessions when supported", async () => {
     params: {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "wmux", title: "wmux", version: "0.2.13" },
+      clientInfo: { name: "wmux", title: "wmux", version: "0.2.14" },
     },
   });
   client.receive(JSON.stringify({
@@ -112,7 +121,10 @@ test("ACP client sends new, load, prompt, cancel, and permission shapes", async 
   client.receive(JSON.stringify({
     jsonrpc: "2.0",
     id: sent[0].id,
-    result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+    result: {
+      protocolVersion: 1,
+      agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+    },
   }));
   await initializing;
   sent.length = 0;
@@ -130,11 +142,14 @@ test("ACP client sends new, load, prompt, cancel, and permission shapes", async 
   await Promise.resolve();
   assert.equal(sent[1].method, "session/load");
 
-  void client.prompt("session-1", "테스트도 실행해");
+  void client.prompt("session-1", "테스트도 실행해", [attachment]);
   await Promise.resolve();
   assert.deepEqual(sent[2].params, {
     sessionId: "session-1",
-    prompt: [{ type: "text", text: "테스트도 실행해" }],
+    prompt: [
+      { type: "text", text: "테스트도 실행해" },
+      { type: "image", mimeType: "image/png", data: "AAAA" },
+    ],
   });
 
   await client.cancel("session-1");
@@ -150,6 +165,25 @@ test("ACP client sends new, load, prompt, cancel, and permission shapes", async 
     id: 12,
     result: { outcome: { outcome: "selected", optionId: "allow-once" } },
   });
+});
+
+test("ACP client rejects images when the provider does not advertise support", async () => {
+  const sent: Record<string, unknown>[] = [];
+  const client = new AcpClient(
+    "opencode",
+    async (line) => { sent.push(JSON.parse(line) as Record<string, unknown>); },
+    () => {},
+  );
+  const initializing = client.initialize();
+  await Promise.resolve();
+  client.receive(JSON.stringify({
+    jsonrpc: "2.0",
+    id: sent[0].id,
+    result: { protocolVersion: 1, agentCapabilities: {} },
+  }));
+  await initializing;
+
+  await assert.rejects(client.prompt("session-1", "Inspect", [attachment]), /does not support images/i);
 });
 
 test("automatic ACP permission prefers a persistent allow option", () => {

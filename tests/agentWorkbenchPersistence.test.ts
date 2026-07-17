@@ -41,6 +41,13 @@ test("workbench snapshot restores content without stale transport state", () => 
             waiting: true,
             queue: ["next instruction"],
             draft: "session draft",
+            attachments: [{
+              id: "image-private",
+              name: "clipboard.png",
+              mimeType: "image/png",
+              data: "private-base64",
+              size: 10,
+            }],
             queueMode: true,
             executionSettings: {
               model: "session-model",
@@ -69,6 +76,7 @@ test("workbench snapshot restores content without stale transport state", () => 
   ]);
   assert.deepEqual(runtime?.queue, ["next instruction"]);
   assert.equal(runtime?.draft, "session draft");
+  assert.deepEqual(runtime?.attachments, []);
   assert.equal(runtime?.queueMode, true);
   assert.deepEqual(runtime?.executionSettings, {
     model: "session-model",
@@ -83,7 +91,7 @@ test("workbench snapshot restores content without stale transport state", () => 
   assert.equal(runtime?.historyState, "idle");
   assert.deepEqual(runtime?.historyBaseItems, []);
   const stored = values.get("test-workbench") ?? "";
-  assert.doesNotMatch(stored, /Old request|old-turn|\"historyBaseItems\"/);
+  assert.doesNotMatch(stored, /Old request|old-turn|\"historyBaseItems\"|private-base64/);
 });
 
 test("workbench snapshot caps timeline items before writing", () => {

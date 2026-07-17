@@ -2,6 +2,7 @@ import type {
   AgentPermissionOption,
   MobileTimelineItem,
 } from "./agentProtocol.ts";
+import type { AgentImageAttachment } from "../agent/agentImages.ts";
 
 export interface AgentApprovalRequest {
   requestId: string | number;
@@ -25,6 +26,7 @@ export interface AgentSessionRuntime {
   waiting: boolean;
   queue: string[];
   draft: string;
+  attachments: AgentImageAttachment[];
   queueMode: boolean;
   executionSettings: AgentExecutionSettings;
   historyState: "idle" | "loading" | "loaded";
@@ -47,6 +49,7 @@ export const createSessionRuntime = (): AgentSessionRuntime => ({
   waiting: false,
   queue: [],
   draft: "",
+  attachments: [],
   queueMode: false,
   executionSettings: {
     model: null,

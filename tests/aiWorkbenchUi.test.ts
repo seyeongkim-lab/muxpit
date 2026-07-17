@@ -194,6 +194,15 @@ test("AI workbench stores composer state in each session runtime", () => {
   assert.match(workbench, /runtime\.queueMode/);
 });
 
+test("desktop workbench accepts pasted and picked image attachments", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /onPaste=\{\(event\) => void addComposerImages/);
+  assert.match(workbench, /<AgentImageAttachments/);
+  assert.match(workbench, /runtime\.attachments\.length/);
+  assert.match(workbench, /Image attachments cannot be queued/);
+});
+
 test("AI workbench reconnects the cached active session after provider startup", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
   const openProvider = workbench.slice(

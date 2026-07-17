@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_LINE_BYTES: usize = 1024 * 1024;
+const MAX_LINE_BYTES: usize = 12 * 1024 * 1024;
 const SSH_CREDENTIAL_SERVICE: &str = "com.wmux.terminal.ssh";
 const HOST_PROFILE_SERVICE: &str = "com.wmux.terminal.hosts";
 const HOST_PROFILE_ENTRY: &str = "profiles";

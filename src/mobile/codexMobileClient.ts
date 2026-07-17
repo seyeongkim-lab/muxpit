@@ -3,6 +3,10 @@ import {
   type MobileAgentEvent,
 } from "./agentProtocol.ts";
 import type { AgentExecutionSettings } from "./agentSessionRuntime.ts";
+import {
+  codexPromptInput,
+  type AgentImageAttachment,
+} from "../agent/agentImages.ts";
 
 type SendLine = (line: string) => Promise<void>;
 type EventHandler = (event: MobileAgentEvent) => void;
@@ -112,7 +116,7 @@ export class CodexMobileClient {
       clientInfo: {
         name: "wmux_mobile",
         title: "wmux Mobile",
-        version: "0.2.13",
+        version: "0.2.14",
       },
     });
     await this.notify("initialized", {});
@@ -183,20 +187,26 @@ export class CodexMobileClient {
     text: string,
     cwd?: string,
     settings?: AgentExecutionSettings,
+    attachments: readonly AgentImageAttachment[] = [],
   ): Promise<void> {
     await this.request("turn/start", {
       threadId,
-      input: [{ type: "text", text }],
+      input: codexPromptInput(text, attachments),
       ...(cwd ? { cwd } : {}),
       ...settingOverrides(settings),
     });
   }
 
-  async steer(threadId: string, turnId: string, text: string): Promise<void> {
+  async steer(
+    threadId: string,
+    turnId: string,
+    text: string,
+    attachments: readonly AgentImageAttachment[] = [],
+  ): Promise<void> {
     await this.request("turn/steer", {
       threadId,
       expectedTurnId: turnId,
-      input: [{ type: "text", text }],
+      input: codexPromptInput(text, attachments),
     });
   }
 

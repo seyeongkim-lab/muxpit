@@ -4,6 +4,10 @@ import type {
   MobileAgentEvent,
   MobileSession,
 } from "../mobile/agentProtocol.ts";
+import {
+  acpPromptBlocks,
+  type AgentImageAttachment,
+} from "./agentImages.ts";
 
 type AcpProvider = Exclude<AiKind, "codex" | "claude">;
 type SendLine = (line: string) => Promise<void>;
@@ -17,6 +21,9 @@ interface PendingRequest {
 
 interface AgentCapabilities {
   loadSession?: boolean;
+  promptCapabilities?: {
+    image?: boolean;
+  };
   sessionCapabilities?: {
     list?: JsonObject;
     resume?: JsonObject;
@@ -176,7 +183,7 @@ export class AcpClient {
     const result = await this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "wmux", title: "wmux", version: "0.2.13" },
+      clientInfo: { name: "wmux", title: "wmux", version: "0.2.14" },
     });
     this.capabilities = asObject(result.agentCapabilities) as AgentCapabilities ?? {};
     if (this.capabilities.sessionCapabilities?.list) {
@@ -204,10 +211,17 @@ export class AcpClient {
     await this.request("session/load", { sessionId, cwd, mcpServers: [] });
   }
 
-  async prompt(sessionId: string, text: string): Promise<string> {
+  async prompt(
+    sessionId: string,
+    text: string,
+    attachments: readonly AgentImageAttachment[] = [],
+  ): Promise<string> {
+    if (attachments.length > 0 && !this.capabilities.promptCapabilities?.image) {
+      throw new Error("This provider does not support images");
+    }
     const result = await this.request("session/prompt", {
       sessionId,
-      prompt: [{ type: "text", text }],
+      prompt: acpPromptBlocks(text, attachments),
     });
     return asString(result.stopReason) ?? "end_turn";
   }

@@ -3,6 +3,12 @@ import claudeIconUrl from "../assets/provider-claude.svg";
 import codexIconUrl from "../assets/provider-codex.svg";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import {
+  claudePromptLine,
+  createAgentImageAttachments,
+  imageBlobsFromClipboard,
+  promptTimelineText,
+} from "../agent/agentImages.ts";
+import {
   desktopAgentChannelId,
   newDesktopAgentChannelNamespace,
 } from "../agent/desktopAgentChannels.ts";
@@ -64,6 +70,7 @@ import { buildSshConnection, useSshHostsStore } from "../stores/sshHosts.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
 import { collectOrderedLeaves } from "../utils/layoutGeometry.ts";
 import { parseSshCommandLine } from "../utils/sshConnection.ts";
+import { AgentImageAttachments } from "./AgentImageAttachments.tsx";
 import "./AgentWorkbenchPanel.css";
 
 interface AgentWorkbenchPanelProps {
@@ -269,11 +276,6 @@ const stoppedRuntimes = (runtimes: AgentSessionRuntimes): AgentSessionRuntimes =
     running: false,
     waiting: false,
   }]));
-
-const claudeInput = (text: string): string => JSON.stringify({
-  type: "user",
-  message: { role: "user", content: [{ type: "text", text }] },
-});
 
 const targetContextKey = (target: DesktopAgentTarget): string => {
   const connection = target.sshConnection ?? parseSshCommandLine(target.sshCommand)?.connection;
@@ -1244,17 +1246,25 @@ const DesktopTargetRuntime = ({
     requestedSessionId?: string | null,
   ): Promise<boolean> => {
     const trimmed = text.trim();
-    if (!trimmed) return false;
     const current = viewsRef.current[kind];
     let sessionId = requestedSessionId === undefined
       ? current.activeSessionId
       : requestedSessionId;
     let currentRuntime = readSessionRuntime(current.runtimes, sessionId);
+    const attachments = queued ? [] : currentRuntime.attachments;
+    if (!trimmed && attachments.length === 0) return false;
     const sessionCwd = current.sessions.find((session) => session.id === sessionId)?.cwd
       ?? target.cwd;
     if (currentRuntime.historyState === "loading") return false;
     const action = queued ? "send" : composerAction(currentRuntime.running, currentRuntime.queueMode);
     if (action === "queue") {
+      if (attachments.length > 0) {
+        updateView(kind, (state) => ({
+          ...state,
+          error: "Image attachments cannot be queued. Use Steer or wait for the current task.",
+        }));
+        return false;
+      }
       updateRuntime(kind, sessionId, (runtime) => ({
         ...runtime,
         queue: [...runtime.queue, trimmed],
@@ -1263,6 +1273,7 @@ const DesktopTargetRuntime = ({
       return true;
     }
     updateView(kind, (state) => ({ ...state, error: null }));
+    const timelineText = promptTimelineText(trimmed, attachments);
 
     if (kind === "codex") {
       try {
@@ -1284,7 +1295,7 @@ const DesktopTargetRuntime = ({
               ? state.sessions
               : [{
                   id: createdSessionId,
-                  title: trimmed.slice(0, 80),
+                  title: timelineText.slice(0, 80),
                   cwd: target.cwd,
                   updatedAt: Math.floor(Date.now() / 1000),
                   provider: kind,
@@ -1306,18 +1317,20 @@ const DesktopTargetRuntime = ({
           running: true,
           waiting: false,
           historyState: "loaded",
-          items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
+          items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: timelineText }],
         }));
         if (action === "steer" && currentRuntime.activeTurnId) {
-          await client.steer(sessionId, currentRuntime.activeTurnId, trimmed);
+          await client.steer(sessionId, currentRuntime.activeTurnId, trimmed, attachments);
         } else {
           await client.startTurn(
             sessionId,
             trimmed,
             sessionCwd,
             readSessionRuntime(viewsRef.current[kind].runtimes, sessionId).executionSettings,
+            attachments,
           );
         }
+        updateRuntime(kind, sessionId, (runtime) => ({ ...runtime, attachments: [] }));
         return true;
       } catch (reason) {
         if (action !== "steer") {
@@ -1352,10 +1365,11 @@ const DesktopTargetRuntime = ({
         running: true,
         waiting: false,
         historyState: "loaded",
-        items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
+        items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: timelineText }],
       }));
       try {
-        await writeDesktopAgentLine(channelId, claudeInput(trimmed));
+        await writeDesktopAgentLine(channelId, claudePromptLine(trimmed, attachments));
+        updateRuntime(kind, sessionId, (runtime) => ({ ...runtime, attachments: [] }));
         return true;
       } catch (reason) {
         updateRuntime(kind, sessionId, (runtime) => ({
@@ -1383,7 +1397,7 @@ const DesktopTargetRuntime = ({
               ? state.sessions
               : [{
                   id: createdSessionId,
-                  title: trimmed.slice(0, 80),
+                  title: timelineText.slice(0, 80),
                   cwd: target.cwd,
                   updatedAt: Math.floor(Date.now() / 1000),
                   provider: kind,
@@ -1396,10 +1410,11 @@ const DesktopTargetRuntime = ({
           running: true,
           waiting: false,
           historyState: "loaded",
-          items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: trimmed }],
+          items: [...runtime.items, { id: `user-${Date.now()}`, kind: "user", text: timelineText }],
         }));
         if (action === "steer") await client.cancel(sessionId);
-        const stopReason = await client.prompt(sessionId, trimmed);
+        const stopReason = await client.prompt(sessionId, trimmed, attachments);
+        updateRuntime(kind, sessionId, (runtime) => ({ ...runtime, attachments: [] }));
         applyEvent(kind, { type: "turnCompleted", sessionId, status: stopReason });
         return true;
     } catch (reason) {
@@ -1410,6 +1425,32 @@ const DesktopTargetRuntime = ({
   };
   submitRef.current = (kind, sessionId, text, queued) =>
     sendText(kind, text, queued, sessionId);
+
+  const addComposerImages = async (
+    kind: AiKind,
+    sessionId: string | null,
+    blobs: readonly Blob[],
+  ): Promise<void> => {
+    if (blobs.length === 0) return;
+    const current = readSessionRuntime(viewsRef.current[kind].runtimes, sessionId);
+    if (current.running && current.queueMode) {
+      updateView(kind, (state) => ({
+        ...state,
+        error: "Image attachments cannot be queued. Switch to Steer first.",
+      }));
+      return;
+    }
+    try {
+      const added = await createAgentImageAttachments(blobs, current.attachments);
+      updateRuntime(kind, sessionId, (runtime) => ({
+        ...runtime,
+        attachments: [...runtime.attachments, ...added],
+      }));
+      updateView(kind, (state) => ({ ...state, error: null }));
+    } catch (reason) {
+      updateView(kind, (state) => ({ ...state, error: String(reason) }));
+    }
+  };
 
   const stopSession = useCallback(async (
     kind: AiKind,
@@ -1723,12 +1764,30 @@ const DesktopTargetRuntime = ({
             ) : null}
 
             <footer className={runtime.running && !runtime.queueMode ? "agent-composer steering" : "agent-composer"}>
+              <AgentImageAttachments
+                attachments={runtime.attachments}
+                disabled={runtime.running && runtime.queueMode}
+                onFiles={(files) => addComposerImages(provider, view.activeSessionId, files)}
+                onRemove={(id) => updateRuntime(provider, view.activeSessionId, (current) => ({
+                  ...current,
+                  attachments: current.attachments.filter((attachment) => attachment.id !== id),
+                }))}
+              />
               <textarea
                 value={runtime.draft}
                 onChange={(event) => updateRuntime(provider, view.activeSessionId, (current) => ({
                   ...current,
                   draft: event.target.value,
                 }))}
+                onPaste={(event) => void addComposerImages(
+                  provider,
+                  view.activeSessionId,
+                  (() => {
+                    const images = imageBlobsFromClipboard(event.clipboardData);
+                    if (images.length > 0) event.preventDefault();
+                    return images;
+                  })(),
+                )}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                     event.preventDefault();
@@ -1753,7 +1812,7 @@ const DesktopTargetRuntime = ({
                     type="button"
                     className="agent-send-button"
                     disabled={
-                      !runtime.draft.trim()
+                      (!runtime.draft.trim() && runtime.attachments.length === 0)
                       || runtime.historyState === "loading"
                       || (provider === "codex" && runtime.running && !runtime.activeTurnId && !runtime.queueMode)
                     }
