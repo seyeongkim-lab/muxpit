@@ -2,9 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ACTIVE_BADGE_TTL_MS,
   ClaudeStreamNormalizer,
   JsonLineDecoder,
   composerAction,
+  isSessionActive,
+  markSessionActivity,
   normalizeClaudeMessage,
   normalizeClaudeHistoryMessage,
   normalizeCodexMessage,
@@ -269,6 +272,19 @@ test("reconciled session lists keep active and running sessions the lister misse
     reconcileAgentSessions(fresh, current, ["active-new", "running-1"]).map((session) => session.id),
     ["active-new", "running-1", "listed-1"],
   );
+});
+
+test("host activity flags become client expiries and decay without refreshes", () => {
+  const marked = markSessionActivity([
+    { id: "busy", title: "Busy", provider: "claude" as const, active: true },
+    { id: "idle", title: "Idle", provider: "claude" as const, active: false },
+  ], 1_000_000);
+
+  assert.equal(marked[0].activeUntil, 1_000_000 + ACTIVE_BADGE_TTL_MS);
+  assert.equal(marked[1].activeUntil, undefined);
+  assert.equal(isSessionActive(marked[0], 1_000_000 + ACTIVE_BADGE_TTL_MS - 1), true);
+  assert.equal(isSessionActive(marked[0], 1_000_000 + ACTIVE_BADGE_TTL_MS), false);
+  assert.equal(isSessionActive(marked[1], 1_000_000), false);
 });
 
 test("reconciled session lists prefer the fresh entry for kept ids", () => {

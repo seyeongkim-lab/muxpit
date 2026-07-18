@@ -17,6 +17,8 @@ import {
   JsonLineDecoder,
   composerAction,
   encodeSessionGoal,
+  isSessionActive,
+  markSessionActivity,
   normalizeClaudeHistoryMessage,
   parseSessionGoalsMessage,
   sessionGoalKey,
@@ -511,8 +513,9 @@ export const MobileApp = () => {
   const updateDiscoveredSessions = (
     profileId: string,
     kind: Provider,
-    fresh: MobileSession[],
+    freshSessions: MobileSession[],
   ): void => {
+    const fresh = markSessionActivity(freshSessions, Date.now());
     if (profileId === currentProfileRef.current?.id) {
       updateProviderView(kind, (view) => ({
         ...view,
@@ -1441,7 +1444,7 @@ export const MobileApp = () => {
         updateProviderView(kind, (view) => ({
           ...view,
           sessions: reconcileAgentSessions(
-            event.sessions,
+            markSessionActivity(event.sessions, Date.now()),
             view.sessions,
             [view.activeSessionId, ...runningSessionIds(view.runtimes)],
           ),
@@ -1453,7 +1456,7 @@ export const MobileApp = () => {
         }
         updateProviderView(kind, (view) => ({
           ...view,
-          sessions: upsertSession(view.sessions, event.session),
+          sessions: upsertSession(view.sessions, markSessionActivity([event.session], Date.now())[0]),
           runtimes: updateSessionRuntime(
             view.runtimes,
             event.session.id,
@@ -1667,7 +1670,7 @@ export const MobileApp = () => {
           updateProviderView(meta.provider, (view) => ({
             ...view,
             sessions: reconcileAgentSessions(
-              message.sessions as MobileSession[],
+              markSessionActivity(message.sessions as MobileSession[], Date.now()),
               view.sessions,
               [view.activeSessionId, ...runningSessionIds(view.runtimes)],
             ),
@@ -2352,7 +2355,8 @@ export const MobileApp = () => {
         <button className="new-session-button" type="button" onClick={openNewSessionSheet} aria-label="New session">+</button>
         <div className="recent-sessions">
           {unifiedSessions.slice(0, 8).map((entry) => {
-            const sessionLabel = sessionRuntimeLabel(entry.runtime);
+            const remoteActive = !entry.runtime.running && isSessionActive(entry.session, Date.now());
+            const sessionLabel = remoteActive ? "Active" : sessionRuntimeLabel(entry.runtime);
             const updated = relativeTime(entry.session.updatedAt);
             const active = entry.profile.id === currentProfile.id
               && entry.provider === provider
@@ -2365,7 +2369,7 @@ export const MobileApp = () => {
                 onClick={() => void selectUnifiedSession(entry)}
                 aria-label={`${entry.session.title}, ${entry.profile.name}, ${entry.provider}, ${sessionLabel}${updated ? `, ${updated}` : ""}`}
               >
-                <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} aria-hidden="true" />
+                <span className={`session-state-dot ${remoteActive ? "running" : sessionLabel.toLowerCase()}`} aria-hidden="true" />
                 <span className="session-chip-title">{entry.session.title}</span>
                 <span className="session-chip-meta">{entry.profile.name} · {entry.provider}</span>
               </button>
@@ -2595,10 +2599,11 @@ export const MobileApp = () => {
           </div>
           <div className="sheet-list session-list">
             {filteredSessions.map((entry) => {
-              const sessionLabel = sessionRuntimeLabel(entry.runtime);
+              const remoteActive = !entry.runtime.running && isSessionActive(entry.session, Date.now());
+              const sessionLabel = remoteActive ? "Active" : sessionRuntimeLabel(entry.runtime);
               return (
                 <button type="button" key={unifiedSessionKey(entry)} onClick={() => void selectUnifiedSession(entry)}>
-                  <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} />
+                  <span className={`session-state-dot ${remoteActive ? "running" : sessionLabel.toLowerCase()}`} />
                   <span>
                     <strong>{entry.session.title}</strong>
                     {entry.profile.id === currentProfile.id && goals[sessionGoalKey(entry.provider, entry.session.id)] ? (

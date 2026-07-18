@@ -3,6 +3,7 @@ import glob
 import json
 import os
 import sys
+import time
 
 
 GOALS_PATH = os.path.expanduser(os.path.join("~", ".muxpit", "session-goals.json"))
@@ -13,6 +14,11 @@ LIST_TAIL_BYTES = 256 * 1024
 HISTORY_TAIL_BYTES = 1024 * 1024
 MAX_HISTORY_ITEMS = 200
 MAX_ITEM_CHARS = 12000
+
+# A running turn keeps appending to the session file, so a recent write means
+# the session is likely active right now. Computed against the host clock so
+# client clock skew cannot distort it.
+ACTIVE_WINDOW_SEC = 30
 
 
 def session_files(root):
@@ -93,6 +99,7 @@ def session_metadata(path, updated_at, entries):
         "cwd": cwd,
         "updatedAt": int(updated_at),
         "provider": "claude",
+        "active": time.time() - updated_at < ACTIVE_WINDOW_SEC,
     }
 
 

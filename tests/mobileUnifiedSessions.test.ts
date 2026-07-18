@@ -149,7 +149,18 @@ test("mobile refreshes every saved host without replacing active SSH channels", 
   assert.doesNotMatch(nativeAgent, /mobile_ssh_disconnect\(state\.clone\(\)\)\.await/);
   assert.match(build, /"mobile_agent_installed"/);
   assert.match(capability, /"allow-mobile-agent-installed"/);
-  assert.match(mobileApp, /sessions: reconcileAgentSessions\(\s*event\.sessions,/);
+  assert.match(mobileApp, /sessions: reconcileAgentSessions\(\s*markSessionActivity\(event\.sessions, Date\.now\(\)\),/);
+});
+
+test("mobile marks host-active sessions in the strip and the session sheet", () => {
+  const script = readFileSync(new URL("../src-tauri/scripts/claude_sessions.py", import.meta.url), "utf8");
+
+  assert.match(script, /ACTIVE_WINDOW_SEC = 30/);
+  assert.match(script, /"active": time\.time\(\) - updated_at < ACTIVE_WINDOW_SEC/);
+  assert.match(mobileApp, /markSessionActivity\(freshSessions, Date\.now\(\)\)/);
+  assert.match(mobileApp, /markSessionActivity\(event\.sessions, Date\.now\(\)\)/);
+  assert.match(mobileApp, /const remoteActive = !entry\.runtime\.running && isSessionActive\(entry\.session, Date\.now\(\)\)/);
+  assert.match(mobileApp, /remoteActive \? "Active" : sessionRuntimeLabel\(entry\.runtime\)/);
 });
 
 test("hung discovery list helpers release their slot after a timeout", () => {

@@ -194,7 +194,16 @@ test("fresh provider lists replace cached desktop sessions", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 
   assert.match(workbench, /reconcileAgentSessions/);
-  assert.match(workbench, /sessions: reconcileAgentSessions\(\s*event\.sessions,/);
+  assert.match(workbench, /sessions: reconcileAgentSessions\(\s*markSessionActivity\(event\.sessions, Date\.now\(\)\),/);
+});
+
+test("desktop shows host-active sessions without offering a Stop control", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /markSessionActivity\(event\.sessions, Date\.now\(\)\)/);
+  assert.match(workbench, /const remoteActive = !entry\.runtime\.running && isSessionActive\(entry\.session, Date\.now\(\)\)/);
+  assert.match(workbench, /remoteActive\s*\?\s*"Active"/);
+  assert.match(workbench, /\{entry\.runtime\.running \? \(\s*<button type="button" className="agent-session-control stop"/);
 });
 
 test("desktop retries failed probes and backs off failing session lists", () => {

@@ -42,6 +42,8 @@ import {
   claudeInterruptLine,
   composerAction,
   encodeSessionGoal,
+  isSessionActive,
+  markSessionActivity,
   mergeAgentSessions,
   normalizeClaudeHistoryMessage,
   parseSessionGoalsMessage,
@@ -499,7 +501,7 @@ const DesktopTargetRuntime = ({
         updateView(kind, (current) => ({
           ...current,
           sessions: reconcileAgentSessions(
-            event.sessions,
+            markSessionActivity(event.sessions, Date.now()),
             current.sessions,
             [current.activeSessionId, ...runningSessionIds(current.runtimes)],
           ),
@@ -514,7 +516,10 @@ const DesktopTargetRuntime = ({
             event.session.id,
             (runtime) => completeSessionHistory(runtime, event.items),
           ),
-          sessions: [event.session, ...current.sessions.filter((session) => session.id !== event.session.id)],
+          sessions: [
+            ...markSessionActivity([event.session], Date.now()),
+            ...current.sessions.filter((session) => session.id !== event.session.id),
+          ],
           status: "ready",
         }));
         return;
@@ -2483,6 +2488,9 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
             {filteredSessions.map((entry) => {
               const goal = targetSnapshots[entry.contextKey]
                 ?.goals[sessionGoalKey(entry.provider, entry.session.id)];
+              // Running on the host (another device or terminal) without a
+              // local stream; show activity but no Stop control to offer.
+              const remoteActive = !entry.runtime.running && isSessionActive(entry.session, Date.now());
               return (
               <div
                 key={desktopSessionKey(entry)}
@@ -2504,8 +2512,12 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                     <span className={`agent-session-goal ${goal.status}`}>{goal.text}</span>
                   ) : null}
                   <span className="agent-session-cwd">{entry.session.cwd ?? entry.session.id}</span>
-                  <small className={entry.runtime.running ? "running" : ""}>
-                    {entry.runtime.running ? sessionRuntimeLabel(entry.runtime) : relativeTime(entry.session.updatedAt)}
+                  <small className={entry.runtime.running || remoteActive ? "running" : ""}>
+                    {entry.runtime.running
+                      ? sessionRuntimeLabel(entry.runtime)
+                      : remoteActive
+                        ? "Active"
+                        : relativeTime(entry.session.updatedAt)}
                   </small>
                 </button>
                 {entry.runtime.running ? (

@@ -42,6 +42,10 @@ export interface MobileSession {
   cwd?: string;
   updatedAt?: number;
   provider: AgentProvider;
+  /** Host-computed: the session history was written to very recently. */
+  active?: boolean;
+  /** Client-side expiry for the host `active` flag (ms epoch); see markSessionActivity. */
+  activeUntil?: number;
 }
 
 // Session goals are stored on the host (~/.muxpit/session-goals.json) so
@@ -110,6 +114,24 @@ export const reconcileAgentSessions = (
     keepIds.includes(session.id) && !listed.has(session.id));
   return mergeAgentSessions(kept, fresh);
 };
+
+// How long a host `active` flag stays trusted on the client. Longer than the
+// worst healthy refresh cycle (5s interval + 30s helper timeout) so the badge
+// does not flap on slow links, but short enough that it decays instead of
+// lingering when refreshes stop delivering (failure backoff, dead link).
+export const ACTIVE_BADGE_TTL_MS = 60_000;
+
+/** Stamp the host `active` flag with a client-side expiry at list arrival. */
+export const markSessionActivity = (
+  sessions: MobileSession[],
+  nowMs: number,
+): MobileSession[] => sessions.map((session) => session.active
+  ? { ...session, activeUntil: nowMs + ACTIVE_BADGE_TTL_MS }
+  : session);
+
+/** Whether the session was recently active on the host and the flag is fresh. */
+export const isSessionActive = (session: MobileSession, nowMs: number): boolean =>
+  (session.activeUntil ?? 0) > nowMs;
 
 export interface MobileTimelineItem {
   id: string;
