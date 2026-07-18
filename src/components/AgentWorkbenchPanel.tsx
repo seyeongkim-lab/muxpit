@@ -72,6 +72,7 @@ import { buildSshConnection, useSshHostsStore } from "../stores/sshHosts.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
 import { collectOrderedLeaves } from "../utils/layoutGeometry.ts";
 import { parseSshCommandLine } from "../utils/sshConnection.ts";
+import { pickWorkbenchFocusLeaf, type WorkbenchLeafCandidate } from "../utils/workbenchFocus.ts";
 import { AgentImageAttachments } from "./AgentImageAttachments.tsx";
 import "./AgentWorkbenchPanel.css";
 
@@ -147,6 +148,7 @@ const DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v2:";
 const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v1:";
 const WORKBENCH_PERSIST_DELAY_MS = 200;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
+const TIMELINE_PIN_THRESHOLD_PX = 48;
 const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -362,6 +364,8 @@ const DesktopTargetRuntime = ({
     };
   });
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const timelinePinned = useRef(true);
+  const timelineSessionRef = useRef<string | null>(null);
   const viewsRef = useRef(views);
   const providerRef = useRef(provider);
   const channels = useRef(new Map<string, ChannelMeta>());
@@ -1135,13 +1139,30 @@ const DesktopTargetRuntime = ({
     targetKey,
   ]);
 
+  // Keep the timeline glued to the newest output only while the user is at
+  // (or near) the bottom. Scrolling up to read pauses auto-scroll; switching
+  // provider or session re-pins so a freshly opened chat starts at the end.
+  const timelineSessionKey = `${provider}:${sessionRuntimeKey(view.activeSessionId)}`;
+  const handleTimelineScroll = useCallback((): void => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    timelinePinned.current =
+      timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < TIMELINE_PIN_THRESHOLD_PX;
+  }, []);
+
   useLayoutEffect(() => {
     if (!active || !timelineRef.current) return;
-    timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    if (timelineSessionRef.current !== timelineSessionKey) {
+      timelineSessionRef.current = timelineSessionKey;
+      timelinePinned.current = true;
+    }
+    if (timelinePinned.current) {
+      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    }
   }, [
     latestTimelineTextLength,
     active,
-    provider,
+    timelineSessionKey,
     runtime.approvals.length,
     runtime.items.length,
     runtime.running,
@@ -1731,7 +1752,7 @@ const DesktopTargetRuntime = ({
               ) : null}
             </header>
 
-            <div ref={timelineRef} className="agent-timeline" aria-live="polite">
+            <div ref={timelineRef} className="agent-timeline" aria-live="polite" onScroll={handleTimelineScroll}>
               {view.error ? (
                 <div className="agent-inline-error" role="alert">
                   <span>{view.error}</span>
@@ -1739,10 +1760,16 @@ const DesktopTargetRuntime = ({
                 </div>
               ) : null}
               {runtime.items.length === 0 && runtime.approvals.length === 0 ? (
-                <div className="agent-timeline-empty">
-                  <strong>Send the next instruction</strong>
-                  <p>Messages and tool activity appear here. The provider terminal stays hidden.</p>
-                </div>
+                runtime.historyState === "loading" ? (
+                  <div className="agent-timeline-empty">
+                    <strong>Loading session history…</strong>
+                  </div>
+                ) : (
+                  <div className="agent-timeline-empty">
+                    <strong>Send the next instruction</strong>
+                    <p>Messages and tool activity appear here. The provider terminal stays hidden.</p>
+                  </div>
+                )
               ) : null}
               {runtime.items.map((item) => (
                 <article key={item.id} className={`agent-timeline-row ${item.kind}`}>
@@ -1881,8 +1908,9 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   const selectionSequence = useRef(initialSelection.current ? 1 : 0);
   const commandSequence = useRef(0);
 
-  const targets = useMemo<DesktopTargetDescriptor[]>(() => {
+  const { targets, focusLeaves } = useMemo(() => {
     const contexts = new Map<string, DesktopTargetDescriptor>();
+    const leaves: WorkbenchLeafCandidate[] = [];
     const savedHostNames = new Map(
       sshHosts.map((host) => [buildSshConnection(host).target, host.name]),
     );
@@ -1908,6 +1936,13 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         const legacyKey = `${connectionTarget ?? target.sshCommand ?? "local"}|${cwd ?? ""}`;
         const legacyPrefix = `${connectionTarget ?? target.sshCommand ?? "local"}|`;
         const focused = workspace.id === activeId && workspace.focusedLeafId === node.id;
+        leaves.push({
+          workspaceId: workspace.id,
+          leafId: node.id,
+          contextKey: key,
+          cwd,
+          focused,
+        });
         const current = contexts.get(key);
         if (!current) {
           contexts.set(key, {
@@ -1970,7 +2005,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         legacyStoragePrefixes: ["local|"],
       });
     }
-    return [...contexts.values()];
+    return { targets: [...contexts.values()], focusLeaves: leaves };
   }, [activeId, leafCwds, sshHosts, workspaceInfo, workspaces]);
 
   const focusedTarget = targets.find((target) => {
@@ -2031,19 +2066,23 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     });
   }, [activeProvider, activeSessionId, activeSnapshot?.probed, activeTargetKey]);
 
-  const focusTarget = useCallback((targetKey: string): void => {
+  const focusTarget = useCallback((targetKey: string, sessionCwd?: string): void => {
+    const leaf = pickWorkbenchFocusLeaf(focusLeaves, targetKey, sessionCwd);
     const target = targets.find((candidate) => candidate.key === targetKey);
-    if (!target?.workspaceId || !target.leafId) return;
+    const workspaceId = leaf?.workspaceId ?? target?.workspaceId;
+    const leafId = leaf?.leafId ?? target?.leafId;
+    if (!workspaceId || !leafId) return;
     const store = useWorkspaceStore.getState();
-    store.setActive(target.workspaceId);
-    store.setFocusedLeaf(target.workspaceId, target.leafId);
-  }, [targets]);
+    store.setActive(workspaceId);
+    store.setFocusedLeaf(workspaceId, leafId);
+  }, [focusLeaves, targets]);
 
   const requestSelection = useCallback((
     targetKey: string,
     provider: AiKind,
     sessionId: string | null,
     create: boolean,
+    sessionCwd?: string,
   ): void => {
     selectionSequence.current += 1;
     setSelectedTargetKey(targetKey);
@@ -2054,7 +2093,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
       sessionId,
       create,
     });
-    focusTarget(targetKey);
+    focusTarget(targetKey, sessionCwd);
   }, [focusTarget]);
 
   const requestCommand = useCallback((
@@ -2074,7 +2113,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
 
   const selectUnifiedSession = useCallback((entry: DesktopSessionEntry): void => {
     if (entry.closed) requestCommand(entry, "restore");
-    requestSelection(entry.contextKey, entry.provider, entry.session.id, false);
+    requestSelection(entry.contextKey, entry.provider, entry.session.id, false, entry.session.cwd);
   }, [requestCommand, requestSelection]);
 
   const showNewSession = (): void => {
