@@ -401,7 +401,20 @@ export const MobileApp = () => {
   const currentProfileId = currentProfile?.id ?? null;
   useEffect(() => {
     setGoals({});
-    if (currentProfileId) void requestGoals();
+    if (!currentProfileId) return;
+    // The profile may still be connecting when this fires; retry until the
+    // SSH channel accepts the goals request so stored goals always load.
+    let cancelled = false;
+    let attempt = 0;
+    const tryFetch = (): void => {
+      if (cancelled) return;
+      attempt += 1;
+      void requestGoals().then((started) => {
+        if (!started && attempt < 8 && !cancelled) setTimeout(tryFetch, 2_000);
+      });
+    };
+    tryFetch();
+    return () => { cancelled = true; };
     // requestGoals reads the profile from currentProfileRef, synced above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProfileId]);
@@ -828,9 +841,9 @@ export const MobileApp = () => {
   // every read or mutation, so state always mirrors the host file.
   const openGoalsChannel = async (
     start: (profileId: string, channelId: string) => Promise<void>,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const profile = currentProfileRef.current;
-    if (!profile) return;
+    if (!profile) return false;
     channelSequence.current += 1;
     const channelId = `goals-${Date.now()}-${channelSequence.current}`;
     decoders.current.set(channelId, new JsonLineDecoder());
@@ -842,16 +855,18 @@ export const MobileApp = () => {
     });
     try {
       await start(profile.id, channelId);
+      return true;
     } catch {
       channels.current.delete(channelId);
       decoders.current.delete(channelId);
+      return false;
     }
   };
 
-  const requestGoals = (): Promise<void> =>
+  const requestGoals = (): Promise<boolean> =>
     openGoalsChannel((profileId, channelId) => listSessionGoals(profileId, channelId));
 
-  const requestGoalChange = (key: string, goal: SessionGoal | null): Promise<void> =>
+  const requestGoalChange = (key: string, goal: SessionGoal | null): Promise<boolean> =>
     openGoalsChannel((profileId, channelId) => goal
       ? setSessionGoal(profileId, channelId, key, encodeSessionGoal(goal))
       : deleteSessionGoal(profileId, channelId, key));
@@ -883,7 +898,10 @@ export const MobileApp = () => {
     }, CLAUDE_HELPER_TIMEOUT_MS));
     try {
       if (sessionId) await loadClaudeSession(profile.id, channelId, sessionId);
-      else await listClaudeSessions(profile.id, channelId);
+      else {
+        await listClaudeSessions(profile.id, channelId);
+        void requestGoals();
+      }
     } catch (reason) {
       channels.current.delete(channelId);
       decoders.current.delete(channelId);

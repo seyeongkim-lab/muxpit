@@ -1149,6 +1149,8 @@ const DesktopTargetRuntime = ({
       }
       if (document.visibilityState === "visible" && discover && probedTarget === targetKey) {
         void refreshSessions();
+        // Pick up goal changes made from other devices while we were hidden.
+        void refreshGoals();
         for (const kind of AI_KINDS) {
           if (!installed.has(kind)) continue;
           const sessionId = viewsRef.current[kind].activeSessionId ?? undefined;
@@ -1173,7 +1175,7 @@ const DesktopTargetRuntime = ({
       document.removeEventListener("visibilitychange", persistWhenHidden);
       window.removeEventListener("beforeunload", persistWorkbench);
     };
-  }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, refreshSessions, targetKey]);
+  }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, refreshGoals, refreshSessions, targetKey]);
 
   useEffect(() => {
     if (!discover || probedTarget !== targetKey) return;
