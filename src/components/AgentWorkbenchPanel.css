@@ -513,7 +513,7 @@
   }
 }
 
-.agent-timeline-row.assistant.streaming p::after {
+.agent-timeline-row.assistant.streaming .agent-md > :last-child::after {
   content: "▍";
   margin-left: 2px;
   color: var(--muxpit-accent);
@@ -531,7 +531,7 @@
     animation: none;
   }
 
-  .agent-timeline-row.assistant.streaming p::after {
+  .agent-timeline-row.assistant.streaming .agent-md > :last-child::after {
     animation: none;
   }
 }
@@ -586,6 +586,85 @@
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+/* Markdown rendering inside assistant messages. Declared after the generic
+   timeline p/pre rules so the spacing overrides win by order. */
+.agent-md p,
+.agent-md pre,
+.agent-md ul,
+.agent-md ol {
+  margin: 0 0 8px;
+}
+
+.agent-md p:last-child,
+.agent-md pre:last-child,
+.agent-md ul:last-child,
+.agent-md ol:last-child {
+  margin-bottom: 0;
+}
+
+.agent-md ul,
+.agent-md ol {
+  padding-left: 20px;
+  color: var(--muxpit-text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.agent-md li {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-md code {
+  padding: 1px 4px;
+  border: 1px solid var(--muxpit-hairline);
+  background: var(--muxpit-bg-elev);
+  font-family: var(--muxpit-font-mono);
+  font-size: 12.5px;
+}
+
+.agent-md pre code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: inherit;
+}
+
+.agent-md-heading {
+  font-weight: 600;
+}
+
+.agent-md-h1,
+.agent-md-h2 {
+  font-size: 15px;
+}
+
+.agent-md-h3,
+.agent-md-h4 {
+  font-size: 14px;
+}
+
+.agent-md-link {
+  color: var(--muxpit-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.agent-tool-details summary {
+  overflow: hidden;
+  color: var(--muxpit-subtext);
+  font-family: var(--muxpit-font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.agent-tool-details[open] summary {
+  margin-bottom: 6px;
 }
 
 .agent-inline-error {

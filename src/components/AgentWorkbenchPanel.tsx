@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import claudeIconUrl from "../assets/provider-claude.svg";
 import codexIconUrl from "../assets/provider-codex.svg";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
@@ -36,6 +36,7 @@ import { useWorkspaceInfoStore } from "../hooks/useWorkspaceInfo.ts";
 import {
   ClaudeStreamNormalizer,
   JsonLineDecoder,
+  claudeInterruptLine,
   composerAction,
   mergeAgentSessions,
   normalizeClaudeHistoryMessage,
@@ -71,6 +72,7 @@ import { AI_KINDS } from "../stores/aiCli.ts";
 import { buildSshConnection, useSshHostsStore } from "../stores/sshHosts.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
 import { collectOrderedLeaves } from "../utils/layoutGeometry.ts";
+import { parseMarkdown, type MarkdownInline } from "../utils/markdown.ts";
 import { parseSshCommandLine } from "../utils/sshConnection.ts";
 import {
   buildWorkbenchPaneSpec,
@@ -153,6 +155,9 @@ const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-
 const WORKBENCH_PERSIST_DELAY_MS = 200;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const TIMELINE_PIN_THRESHOLD_PX = 48;
+const CLAUDE_INTERRUPT_FALLBACK_MS = 2_500;
+const TOOL_COLLAPSE_LINES = 5;
+const TOOL_COLLAPSE_CHARS = 400;
 const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -192,6 +197,67 @@ let workbenchPaneCounter = 0;
 const nextWorkbenchPaneId = (): string =>
   `agent-pane-${Date.now()}-${workbenchPaneCounter++}`;
 
+const renderMarkdownInline = (nodes: MarkdownInline[], keyPrefix: string): ReactNode[] =>
+  nodes.map((node, index) => {
+    const key = `${keyPrefix}-${index}`;
+    switch (node.type) {
+      case "code":
+        return <code key={key}>{node.text}</code>;
+      case "strong":
+        return <strong key={key}>{renderMarkdownInline(node.children, key)}</strong>;
+      case "em":
+        return <em key={key}>{renderMarkdownInline(node.children, key)}</em>;
+      case "link":
+        // Rendered inert on purpose: navigating the app webview away to an
+        // arbitrary URL from model output would replace the whole UI.
+        return <span key={key} className="agent-md-link" title={node.href}>{node.text}</span>;
+      default:
+        return <span key={key}>{node.text}</span>;
+    }
+  });
+
+const MarkdownContent = memo(({ text }: { text: string }) => {
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
+  return (
+    <div className="agent-md">
+      {blocks.map((block, index) => {
+        switch (block.type) {
+          case "codeBlock":
+            return <pre key={index}><code>{block.text}</code></pre>;
+          case "heading":
+            return (
+              <p key={index} className={`agent-md-heading agent-md-h${Math.min(block.level, 4)}`}>
+                {renderMarkdownInline(block.children, `${index}`)}
+              </p>
+            );
+          case "list": {
+            const items = block.items.map((item, itemIndex) => (
+              <li key={itemIndex}>{renderMarkdownInline(item, `${index}-${itemIndex}`)}</li>
+            ));
+            return block.ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>;
+          }
+          default:
+            return <p key={index}>{renderMarkdownInline(block.children, `${index}`)}</p>;
+        }
+      })}
+    </div>
+  );
+});
+
+const ToolOutput = ({ text }: { text: string }) => {
+  const lines = text.split("\n");
+  if (lines.length <= TOOL_COLLAPSE_LINES && text.length <= TOOL_COLLAPSE_CHARS) {
+    return <pre>{text}</pre>;
+  }
+  const preview = lines.find((line) => line.trim())?.slice(0, 120) ?? "output";
+  return (
+    <details className="agent-tool-details">
+      <summary>{`${preview} · ${lines.length} lines`}</summary>
+      <pre>{text}</pre>
+    </details>
+  );
+};
+
 // Memoized so streaming deltas only re-render the row that changed, keeping
 // long conversations smooth while text pours in.
 const TimelineRow = memo(({ item, providerName, streaming }: {
@@ -202,7 +268,11 @@ const TimelineRow = memo(({ item, providerName, streaming }: {
   <article className={`agent-timeline-row ${item.kind}${streaming ? " streaming" : ""}`}>
     <div>
       <small>{item.kind === "user" ? "You" : item.kind === "assistant" ? providerName : item.title ?? "Status"}</small>
-      {item.kind === "tool" ? <pre>{item.text}</pre> : <p>{item.text}</p>}
+      {item.kind === "tool"
+        ? <ToolOutput text={item.text} />
+        : item.kind === "assistant"
+          ? <MarkdownContent text={item.text} />
+          : <p>{item.text}</p>}
     </div>
   </article>
 ));
@@ -401,6 +471,7 @@ const DesktopTargetRuntime = ({
   const expectedClose = useRef(new Set<string>());
   const stderr = useRef(new Map<string, string>());
   const helperTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const pendingInterrupts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const refreshingProviders = useRef(new Set<AiKind>());
   const channelNamespace = useRef(newDesktopAgentChannelNamespace());
   const channelSequence = useRef(0);
@@ -455,6 +526,9 @@ const DesktopTargetRuntime = ({
     const timeout = helperTimeouts.current.get(channelId);
     if (timeout) clearTimeout(timeout);
     helperTimeouts.current.delete(channelId);
+    const interruptFallback = pendingInterrupts.current.get(channelId);
+    if (interruptFallback) clearTimeout(interruptFallback);
+    pendingInterrupts.current.delete(channelId);
     expectedClose.current.add(channelId);
     await closeDesktopAgent(channelId).catch(() => {});
     channels.current.delete(channelId);
@@ -966,6 +1040,12 @@ const DesktopTargetRuntime = ({
           const normalized = historyEvents.length > 0
             ? historyEvents
             : normalizer?.receive(message) ?? [];
+          if (normalized.some((item) => item.type === "turnCompleted")) {
+            // The interrupt was honored; keep the channel open for reuse.
+            const interruptFallback = pendingInterrupts.current.get(event.channelId);
+            if (interruptFallback) clearTimeout(interruptFallback);
+            pendingInterrupts.current.delete(event.channelId);
+          }
           if (normalized.length > 0) meta.handledPayload = true;
           if (normalized.length > 0 && meta.purpose !== "provider") {
             const timeout = helperTimeouts.current.get(event.channelId);
@@ -1531,14 +1611,37 @@ const DesktopTargetRuntime = ({
     const currentRuntime = readSessionRuntime(current.runtimes, sessionId);
     if (!currentRuntime.running && !currentRuntime.waiting) return;
     try {
+      let claudeChannelClosed = false;
       if (kind === "codex" && sessionId && currentRuntime.activeTurnId) {
         await codexClients.current.get(kind)?.interrupt(sessionId, currentRuntime.activeTurnId);
       } else if (kind === "claude") {
         const key = providerChannelKey(kind, sessionId);
         const channelId = providerChannels.current.get(key);
         if (channelId) {
-          providerChannels.current.delete(key);
-          await closeChannel(channelId);
+          // Ask the CLI to stop the turn in place so the session stays warm.
+          // If the interrupt goes unanswered, fall back to closing the
+          // channel like before; the next send reopens it with --resume.
+          let interrupted = false;
+          try {
+            await writeDesktopAgentLine(channelId, claudeInterruptLine(`interrupt-${Date.now()}`));
+            interrupted = true;
+          } catch {}
+          if (interrupted) {
+            pendingInterrupts.current.set(channelId, setTimeout(() => {
+              pendingInterrupts.current.delete(channelId);
+              if (providerChannels.current.get(key) !== channelId) return;
+              providerChannels.current.delete(key);
+              void closeChannel(channelId);
+              updateRuntime("claude", sessionId, (runtime) => ({
+                ...runtime,
+                connectionState: "idle",
+              }));
+            }, CLAUDE_INTERRUPT_FALLBACK_MS));
+          } else {
+            providerChannels.current.delete(key);
+            await closeChannel(channelId);
+            claudeChannelClosed = true;
+          }
         }
       } else if (sessionId) {
         await acpClients.current.get(kind)?.cancel(sessionId);
@@ -1548,7 +1651,7 @@ const DesktopTargetRuntime = ({
         running: false,
         waiting: false,
         activeTurnId: null,
-        connectionState: kind === "claude" ? "idle" : runtime.connectionState,
+        connectionState: kind === "claude" && claudeChannelClosed ? "idle" : runtime.connectionState,
       }));
     } catch (reason) {
       updateView(kind, (state) => ({ ...state, error: String(reason) }));
