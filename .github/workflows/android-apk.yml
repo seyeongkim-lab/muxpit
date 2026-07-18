@@ -1,9 +1,15 @@
 name: android-apk
 
-# Manually dispatched arm64 APK build. Signs with a throwaway keystore (fine
-# for sideloading; installing over a build signed with a different key needs
-# an uninstall first) and publishes the APK two ways: a workflow artifact and
-# a force-pushed orphan `apk-drop` branch for git-based retrieval.
+# Manually dispatched arm64 APK build. Publishes the APK two ways: a workflow
+# artifact and a force-pushed orphan `apk-drop` branch for git-based retrieval.
+#
+# Signing: if the ANDROID_KEYSTORE_B64 secret is set (base64 of a JKS keystore
+# with alias `muxpit`, password in ANDROID_KEYSTORE_PASS), every build signs
+# with that key so updates install in place over previous builds. Without the
+# secrets a throwaway keystore is generated per build — installable, but
+# updating over a build signed with a different key needs an uninstall first.
+# Create the secret from an existing keystore with:
+#   base64 -w0 my-release.jks   # -> ANDROID_KEYSTORE_B64
 
 on:
   workflow_dispatch:
@@ -60,15 +66,26 @@ jobs:
         run: pnpm tauri android build --apk --target aarch64
 
       - name: Sign APK
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
         run: |
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           UNSIGNED=$(find src-tauri/gen/android -name '*-release-unsigned.apk' | head -1)
           test -n "$UNSIGNED"
-          keytool -genkeypair -keystore /tmp/muxpit.jks -alias muxpit -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass muxpit-throwaway -keypass muxpit-throwaway -dname "CN=muxpit"
+          if [ -n "$ANDROID_KEYSTORE_B64" ]; then
+            echo "Signing with the persistent keystore from secrets"
+            printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > /tmp/muxpit.jks
+            KS_PASS="$ANDROID_KEYSTORE_PASS"
+          else
+            echo "No keystore secret; signing with a per-build throwaway key"
+            keytool -genkeypair -keystore /tmp/muxpit.jks -alias muxpit -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass muxpit-throwaway -keypass muxpit-throwaway -dname "CN=muxpit"
+            KS_PASS=muxpit-throwaway
+          fi
           "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED" /tmp/muxpit-aligned.apk
-          "$BUILD_TOOLS/apksigner" sign --ks /tmp/muxpit.jks --ks-pass pass:muxpit-throwaway \
-            --key-pass pass:muxpit-throwaway --out muxpit-arm64.apk /tmp/muxpit-aligned.apk
+          "$BUILD_TOOLS/apksigner" sign --ks /tmp/muxpit.jks --ks-pass "pass:$KS_PASS" \
+            --key-pass "pass:$KS_PASS" --out muxpit-arm64.apk /tmp/muxpit-aligned.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
