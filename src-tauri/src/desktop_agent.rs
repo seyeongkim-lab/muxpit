@@ -442,6 +442,93 @@ pub fn desktop_claude_session(
     )
 }
 
+fn valid_goal_key(value: &str) -> bool {
+    valid_session_id(value) && value.contains(':')
+}
+
+fn valid_goal_payload(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 8192
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '='))
+}
+
+#[tauri::command]
+pub fn desktop_session_goals(
+    app: AppHandle,
+    state: State<'_, DesktopAgentManager>,
+    channel_id: String,
+    cwd: Option<String>,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<(), String> {
+    let remote = ssh_connection.is_some() || ssh_command.is_some();
+    open_command(
+        app,
+        state.inner().clone(),
+        channel_id,
+        claude_script_command(&["goals"], remote),
+        cwd,
+        ssh_command,
+        ssh_connection,
+    )
+}
+
+#[tauri::command]
+pub fn desktop_session_goal_set(
+    app: AppHandle,
+    state: State<'_, DesktopAgentManager>,
+    channel_id: String,
+    key: String,
+    payload: String,
+    cwd: Option<String>,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<(), String> {
+    if !valid_goal_key(&key) {
+        return Err("Invalid session goal key".into());
+    }
+    if !valid_goal_payload(&payload) {
+        return Err("Invalid session goal payload".into());
+    }
+    let remote = ssh_connection.is_some() || ssh_command.is_some();
+    open_command(
+        app,
+        state.inner().clone(),
+        channel_id,
+        claude_script_command(&["goal-set", &key, &payload], remote),
+        cwd,
+        ssh_command,
+        ssh_connection,
+    )
+}
+
+#[tauri::command]
+pub fn desktop_session_goal_delete(
+    app: AppHandle,
+    state: State<'_, DesktopAgentManager>,
+    channel_id: String,
+    key: String,
+    cwd: Option<String>,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<(), String> {
+    if !valid_goal_key(&key) {
+        return Err("Invalid session goal key".into());
+    }
+    let remote = ssh_connection.is_some() || ssh_command.is_some();
+    open_command(
+        app,
+        state.inner().clone(),
+        channel_id,
+        claude_script_command(&["goal-delete", &key], remote),
+        cwd,
+        ssh_command,
+        ssh_connection,
+    )
+}
+
 #[tauri::command]
 pub fn desktop_agent_write(
     state: State<'_, DesktopAgentManager>,

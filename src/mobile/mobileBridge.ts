@@ -81,6 +81,22 @@ export const loadClaudeSession = (
   sessionId: string,
 ): Promise<void> => invoke("mobile_claude_session", { profileId, channelId, sessionId });
 
+export const listSessionGoals = (profileId: string, channelId: string): Promise<void> =>
+  invoke("mobile_session_goals", { profileId, channelId });
+
+export const setSessionGoal = (
+  profileId: string,
+  channelId: string,
+  key: string,
+  payload: string,
+): Promise<void> => invoke("mobile_session_goal_set", { profileId, channelId, key, payload });
+
+export const deleteSessionGoal = (
+  profileId: string,
+  channelId: string,
+  key: string,
+): Promise<void> => invoke("mobile_session_goal_delete", { profileId, channelId, key });
+
 export const writeAgentLine = (channelId: string, line: string): Promise<void> =>
   invoke("mobile_agent_write", { channelId, line });
 

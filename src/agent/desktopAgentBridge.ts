@@ -53,6 +53,36 @@ export const listDesktopClaudeSessions = (
   ...targetArgs(target),
 });
 
+export const listDesktopSessionGoals = (
+  channelId: string,
+  target: DesktopAgentTarget,
+): Promise<void> => invoke("desktop_session_goals", {
+  channelId,
+  ...targetArgs(target),
+});
+
+export const setDesktopSessionGoal = (
+  channelId: string,
+  key: string,
+  payload: string,
+  target: DesktopAgentTarget,
+): Promise<void> => invoke("desktop_session_goal_set", {
+  channelId,
+  key,
+  payload,
+  ...targetArgs(target),
+});
+
+export const deleteDesktopSessionGoal = (
+  channelId: string,
+  key: string,
+  target: DesktopAgentTarget,
+): Promise<void> => invoke("desktop_session_goal_delete", {
+  channelId,
+  key,
+  ...targetArgs(target),
+});
+
 export const loadDesktopClaudeSession = (
   channelId: string,
   sessionId: string,

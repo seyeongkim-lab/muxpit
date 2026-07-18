@@ -16,11 +16,15 @@ import {
   ClaudeStreamNormalizer,
   JsonLineDecoder,
   composerAction,
+  encodeSessionGoal,
   normalizeClaudeHistoryMessage,
+  parseSessionGoalsMessage,
+  sessionGoalKey,
   replaceAgentSessions,
   type MobileAgentEvent,
   type MobileSession,
   type MobileTimelineItem,
+  type SessionGoal,
 } from "./agentProtocol.ts";
 import {
   beginSessionHistory,
@@ -47,7 +51,10 @@ import {
   closeAgent,
   connectSsh,
   disconnectSsh,
+  deleteSessionGoal,
   listClaudeSessions,
+  listSessionGoals,
+  setSessionGoal,
   listInstalledAgents,
   loadClaudeSession,
   loadHostProfilesSecure,
@@ -122,7 +129,7 @@ const emptyWorkbenchView = (): AgentWorkbenchViewSnapshot => ({
 interface MobileChannelMeta {
   profileId: string;
   provider: Provider;
-  purpose: "provider" | "claude-list" | "claude-history";
+  purpose: "provider" | "claude-list" | "claude-history" | "goals";
   handledPayload: boolean;
   sessionId?: string;
   launchSettings?: AgentExecutionSettings;
@@ -316,6 +323,8 @@ export const MobileApp = () => {
   const [provider, setProvider] = useState<Provider>(MOBILE_DEMO ? "codex" : initialProvider);
   const [sessions, setSessions] = useState<MobileSession[]>(MOBILE_DEMO ? DEMO_SESSIONS : initialView?.sessions ?? []);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(MOBILE_DEMO ? "demo-1" : initialView?.activeSessionId ?? null);
+  const [goals, setGoals] = useState<Record<string, SessionGoal>>({});
+  const [goalDraft, setGoalDraft] = useState<string | null>(null);
   const [runtimes, setRuntimes] = useState<AgentSessionRuntimes>(() => MOBILE_DEMO ? {
     [sessionRuntimeKey("demo-1")]: {
       ...createSessionRuntime(),
@@ -388,6 +397,14 @@ export const MobileApp = () => {
   useEffect(() => { providerRef.current = provider; }, [provider]);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   useEffect(() => { currentProfileRef.current = currentProfile; }, [currentProfile]);
+
+  const currentProfileId = currentProfile?.id ?? null;
+  useEffect(() => {
+    setGoals({});
+    if (currentProfileId) void requestGoals();
+    // requestGoals reads the profile from currentProfileRef, synced above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProfileId]);
   useEffect(() => { activeSessionRef.current = activeSessionId; }, [activeSessionId]);
   useEffect(() => { profilesRef.current = profiles; }, [profiles]);
 
@@ -806,6 +823,38 @@ export const MobileApp = () => {
   const replaceWorkbenchView = (view?: AgentWorkbenchViewSnapshot): void => {
     replaceProviderView(providerRef.current, view ?? emptyWorkbenchView());
   };
+
+  // Session goals live on the host; the helper echoes the full map back on
+  // every read or mutation, so state always mirrors the host file.
+  const openGoalsChannel = async (
+    start: (profileId: string, channelId: string) => Promise<void>,
+  ): Promise<void> => {
+    const profile = currentProfileRef.current;
+    if (!profile) return;
+    channelSequence.current += 1;
+    const channelId = `goals-${Date.now()}-${channelSequence.current}`;
+    decoders.current.set(channelId, new JsonLineDecoder());
+    channels.current.set(channelId, {
+      profileId: profile.id,
+      provider: "claude",
+      purpose: "goals",
+      handledPayload: false,
+    });
+    try {
+      await start(profile.id, channelId);
+    } catch {
+      channels.current.delete(channelId);
+      decoders.current.delete(channelId);
+    }
+  };
+
+  const requestGoals = (): Promise<void> =>
+    openGoalsChannel((profileId, channelId) => listSessionGoals(profileId, channelId));
+
+  const requestGoalChange = (key: string, goal: SessionGoal | null): Promise<void> =>
+    openGoalsChannel((profileId, channelId) => goal
+      ? setSessionGoal(profileId, channelId, key, encodeSessionGoal(goal))
+      : deleteSessionGoal(profileId, channelId, key));
 
   const requestClaudeData = async (sessionId?: string): Promise<void> => {
     const profile = currentProfileRef.current;
@@ -1554,6 +1603,12 @@ export const MobileApp = () => {
       }
       try {
         const message = JSON.parse(line) as Record<string, unknown>;
+        const goalsUpdate = parseSessionGoalsMessage(message);
+        if (goalsUpdate) {
+          meta.handledPayload = true;
+          if (meta.profileId === currentProfileRef.current?.id) setGoals(goalsUpdate);
+          continue;
+        }
         if (message.type === "muxpit_sessions" && Array.isArray(message.sessions)) {
           meta.handledPayload = true;
           const timeout = helperTimeouts.current.get(event.channelId);
@@ -2193,6 +2248,20 @@ export const MobileApp = () => {
     effortLabel,
     provider === "codex" ? serviceTierLabel : null,
   ].filter(Boolean).join(" · ");
+  const activeGoalKey = activeSessionId ? sessionGoalKey(provider, activeSessionId) : null;
+  const activeGoal = activeGoalKey ? goals[activeGoalKey] : undefined;
+  const saveGoal = (): void => {
+    if (goalDraft === null || !activeGoalKey) return;
+    const text = goalDraft.trim();
+    setGoalDraft(null);
+    if (!text) return;
+    void requestGoalChange(activeGoalKey, {
+      text,
+      status: activeGoal?.status ?? "active",
+      updatedAt: Math.floor(Date.now() / 1000),
+    });
+  };
+
   return (
     <div className="mobile-app">
       <nav className="session-strip" aria-label="Recent sessions">
@@ -2236,6 +2305,44 @@ export const MobileApp = () => {
               {sessionRuntimeLabel(runtime)}
             </span>
           </div>
+          {activeGoalKey ? (
+            <div className="session-goal-bar">
+              {goalDraft !== null ? (
+                <>
+                  <input
+                    value={goalDraft}
+                    onChange={(event) => setGoalDraft(event.target.value)}
+                    placeholder="Session goal"
+                    aria-label="Session goal"
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) return;
+                      if (event.key === "Enter") saveGoal();
+                      if (event.key === "Escape") setGoalDraft(null);
+                    }}
+                  />
+                  <button type="button" onClick={saveGoal}>Save</button>
+                  <button type="button" onClick={() => setGoalDraft(null)}>Cancel</button>
+                </>
+              ) : activeGoal ? (
+                <>
+                  <button
+                    type="button"
+                    className={`session-goal-status ${activeGoal.status}`}
+                    onClick={() => activeGoalKey && void requestGoalChange(activeGoalKey, {
+                      ...activeGoal,
+                      status: activeGoal.status === "done" ? "active" : "done",
+                      updatedAt: Math.floor(Date.now() / 1000),
+                    })}
+                  >{activeGoal.status === "done" ? "Done" : "In progress"}</button>
+                  <span className="session-goal-text">{activeGoal.text}</span>
+                  <button type="button" onClick={() => setGoalDraft(activeGoal.text)}>Edit</button>
+                  <button type="button" onClick={() => activeGoalKey && void requestGoalChange(activeGoalKey, null)}>Delete</button>
+                </>
+              ) : (
+                <button type="button" onClick={() => setGoalDraft("")}>Set goal</button>
+              )}
+            </div>
+          ) : null}
           {supportsExecutionSettings ? (
             <button
               type="button"
@@ -2410,6 +2517,11 @@ export const MobileApp = () => {
                   <span className={`session-state-dot ${sessionLabel.toLowerCase()}`} />
                   <span>
                     <strong>{entry.session.title}</strong>
+                    {entry.profile.id === currentProfile.id && goals[sessionGoalKey(entry.provider, entry.session.id)] ? (
+                      <em className={`session-goal ${goals[sessionGoalKey(entry.provider, entry.session.id)].status}`}>
+                        {goals[sessionGoalKey(entry.provider, entry.session.id)].text}
+                      </em>
+                    ) : null}
                     <small>{entry.profile.name} · {entry.provider} · {sessionLabel} · {relativeTime(entry.session.updatedAt)}</small>
                   </span>
                 </button>

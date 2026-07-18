@@ -588,6 +588,70 @@
   white-space: pre-wrap;
 }
 
+/* Host-synced session goals: list badge and conversation header bar. */
+.agent-session-goal {
+  display: block;
+  overflow: hidden;
+  color: var(--muxpit-accent);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-session-goal.done {
+  color: var(--muxpit-subtext);
+  text-decoration: line-through;
+}
+
+.agent-goal-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 6px;
+}
+
+.agent-goal-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--muxpit-hairline);
+  background: var(--muxpit-bg-elev);
+  color: var(--muxpit-text);
+  font-size: 12px;
+}
+
+.agent-goal-bar button {
+  padding: 2px 8px;
+  border: 1px solid var(--muxpit-hairline);
+  background: transparent;
+  color: var(--muxpit-subtext);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-goal-bar button:hover {
+  color: var(--muxpit-text);
+}
+
+.agent-goal-status.active {
+  border-color: var(--muxpit-accent);
+  color: var(--muxpit-accent);
+}
+
+.agent-goal-status.done {
+  text-decoration: line-through;
+}
+
+.agent-goal-text {
+  overflow: hidden;
+  flex: 1;
+  color: var(--muxpit-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Markdown rendering inside assistant messages. Declared after the generic
    timeline p/pre rules so the spacing overrides win by order. */
 .agent-md p,

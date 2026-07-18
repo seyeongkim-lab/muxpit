@@ -24,11 +24,14 @@ import {
 } from "../agent/desktopWorkbenchPersistence.ts";
 import {
   closeDesktopAgent,
+  deleteDesktopSessionGoal,
   listDesktopClaudeSessions,
+  listDesktopSessionGoals,
   loadDesktopClaudeSession,
   onDesktopAgentTransport,
   openDesktopAgent,
   probeDesktopAgents,
+  setDesktopSessionGoal,
   writeDesktopAgentLine,
   type DesktopAgentTarget,
 } from "../agent/desktopAgentBridge.ts";
@@ -38,12 +41,16 @@ import {
   JsonLineDecoder,
   claudeInterruptLine,
   composerAction,
+  encodeSessionGoal,
   mergeAgentSessions,
   normalizeClaudeHistoryMessage,
+  parseSessionGoalsMessage,
   replaceAgentSessions,
+  sessionGoalKey,
   type MobileAgentEvent,
   type MobileSession,
   type MobileTimelineItem,
+  type SessionGoal,
 } from "../mobile/agentProtocol.ts";
 import {
   beginSessionHistory,
@@ -120,6 +127,7 @@ interface DesktopTargetSnapshot {
   probed: boolean;
   probing: boolean;
   provider: AiKind;
+  goals: Record<string, SessionGoal>;
 }
 
 interface DesktopTargetSelection {
@@ -383,6 +391,8 @@ const DesktopTargetRuntime = ({
   const [probing, setProbing] = useState(false);
   const [codexModels, setCodexModels] = useState<CodexModelOption[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [goals, setGoals] = useState<Record<string, SessionGoal>>({});
+  const [goalDraft, setGoalDraft] = useState<string | null>(null);
   const [views, setViews] = useState<Record<AiKind, ProviderView>>(() => {
     if (!restoredSelection?.sessionId) return initialSnapshot.current.views;
     return {
@@ -688,6 +698,33 @@ const DesktopTargetRuntime = ({
     }
   }, [closeChannel, nextChannelId, target, updateView]);
 
+  // Session goals live on the host, so a lightweight helper channel fetches
+  // and mutates them; the helper echoes the full goal map back on every call.
+  const openGoalsChannel = useCallback(async (
+    start: (channelId: string) => Promise<void>,
+  ): Promise<void> => {
+    const channelId = nextChannelId("claude", "goals");
+    channels.current.set(channelId, { provider: "claude", purpose: "goals", handledPayload: false });
+    decoders.current.set(channelId, new JsonLineDecoder());
+    try {
+      await start(channelId);
+    } catch (reason) {
+      channels.current.delete(channelId);
+      decoders.current.delete(channelId);
+      updateView("claude", (current) => ({ ...current, error: String(reason) }));
+    }
+  }, [nextChannelId, updateView]);
+
+  const refreshGoals = useCallback((): Promise<void> =>
+    openGoalsChannel((channelId) => listDesktopSessionGoals(channelId, target)),
+  [openGoalsChannel, target]);
+
+  const requestGoalChange = useCallback((key: string, goal: SessionGoal | null): Promise<void> =>
+    openGoalsChannel((channelId) => goal
+      ? setDesktopSessionGoal(channelId, key, encodeSessionGoal(goal), target)
+      : deleteDesktopSessionGoal(channelId, key, target)),
+  [openGoalsChannel, target]);
+
   const openProvider = useCallback((kind: AiKind, sessionId?: string): Promise<string | undefined> => {
     const key = providerChannelKey(kind, sessionId);
     const currentChannel = providerChannels.current.get(key);
@@ -867,6 +904,12 @@ const DesktopTargetRuntime = ({
         const expected = expectedClose.current.delete(event.channelId);
         if (!expected && event.exitStatus && event.exitStatus !== 0) {
           const detail = stderr.current.get(event.channelId);
+          if (meta.purpose === "goals") {
+            // Goal sync is best-effort; a failed helper never surfaces as a
+            // conversation error.
+            meta.handledPayload = true;
+            return;
+          }
           if (meta.purpose !== "provider") {
             meta.handledPayload = true;
             updateView("claude", (current) => ({
@@ -900,7 +943,7 @@ const DesktopTargetRuntime = ({
         const timeout = helperTimeouts.current.get(event.channelId);
         if (timeout) clearTimeout(timeout);
         helperTimeouts.current.delete(event.channelId);
-        if (meta.purpose !== "provider" && !meta.handledPayload) {
+        if (meta.purpose !== "provider" && meta.purpose !== "goals" && !meta.handledPayload) {
           const detail = stderr.current.get(event.channelId);
           updateView("claude", (current) => ({
             ...current,
@@ -961,6 +1004,12 @@ const DesktopTargetRuntime = ({
         }
         try {
           const message = JSON.parse(line) as Record<string, unknown>;
+          const goalsUpdate = parseSessionGoalsMessage(message);
+          if (goalsUpdate) {
+            meta.handledPayload = true;
+            setGoals(goalsUpdate);
+            continue;
+          }
           if (message.type === "muxpit_sessions" && Array.isArray(message.sessions)) {
             meta.handledPayload = true;
             const timeout = helperTimeouts.current.get(event.channelId);
@@ -1125,6 +1174,11 @@ const DesktopTargetRuntime = ({
       window.removeEventListener("beforeunload", persistWorkbench);
     };
   }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, refreshSessions, targetKey]);
+
+  useEffect(() => {
+    if (!discover || probedTarget !== targetKey) return;
+    void refreshGoals();
+  }, [discover, probedTarget, refreshGoals, targetKey]);
 
   useEffect(() => {
     if (!discover || probedTarget !== targetKey) return;
@@ -1676,10 +1730,25 @@ const DesktopTargetRuntime = ({
       probed: probedTarget === targetKey,
       probing,
       provider,
+      goals,
     });
-  }, [installed, onSnapshot, probedTarget, probing, provider, targetKey, views]);
+  }, [goals, installed, onSnapshot, probedTarget, probing, provider, targetKey, views]);
 
   const activeSession = view.sessions.find((session) => session.id === view.activeSessionId);
+  const activeGoalKey = activeSession ? sessionGoalKey(provider, activeSession.id) : null;
+  const activeGoal = activeGoalKey ? goals[activeGoalKey] : undefined;
+
+  const saveGoal = (): void => {
+    if (goalDraft === null || !activeGoalKey) return;
+    const text = goalDraft.trim();
+    setGoalDraft(null);
+    if (!text) return;
+    void requestGoalChange(activeGoalKey, {
+      text,
+      status: activeGoal?.status ?? "active",
+      updatedAt: Math.floor(Date.now() / 1000),
+    });
+  };
   const supportsExecutionSettings = provider === "codex" || provider === "claude";
   const threadSettings = runtime.executionSettings;
   const selectedCodexModel = codexModels.find((model) =>
@@ -1737,6 +1806,48 @@ const DesktopTargetRuntime = ({
                   </span>
                 </div>
               </div>
+              {activeSession ? (
+                <div className="agent-goal-bar">
+                  {goalDraft !== null ? (
+                    <>
+                      <input
+                        value={goalDraft}
+                        onChange={(event) => setGoalDraft(event.target.value)}
+                        placeholder="Session goal"
+                        aria-label="Session goal"
+                        onKeyDown={(event) => {
+                          if (event.nativeEvent.isComposing) return;
+                          if (event.key === "Enter") saveGoal();
+                          if (event.key === "Escape") setGoalDraft(null);
+                        }}
+                      />
+                      <button type="button" onClick={saveGoal}>Save</button>
+                      <button type="button" onClick={() => setGoalDraft(null)}>Cancel</button>
+                    </>
+                  ) : activeGoal ? (
+                    <>
+                      <button
+                        type="button"
+                        className={`agent-goal-status ${activeGoal.status}`}
+                        title={activeGoal.status === "done" ? "Mark goal in progress" : "Mark goal done"}
+                        onClick={() => activeGoalKey && void requestGoalChange(activeGoalKey, {
+                          ...activeGoal,
+                          status: activeGoal.status === "done" ? "active" : "done",
+                          updatedAt: Math.floor(Date.now() / 1000),
+                        })}
+                      >{activeGoal.status === "done" ? "Done" : "In progress"}</button>
+                      <span className="agent-goal-text">{activeGoal.text}</span>
+                      <button type="button" onClick={() => setGoalDraft(activeGoal.text)}>Edit</button>
+                      <button
+                        type="button"
+                        onClick={() => activeGoalKey && void requestGoalChange(activeGoalKey, null)}
+                      >Delete</button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => setGoalDraft("")}>Set goal</button>
+                  )}
+                </div>
+              ) : null}
               {settingsOpen && supportsExecutionSettings ? (
                 <div className="agent-execution-settings">
                   <label>
@@ -2101,6 +2212,7 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
         && previous.probed === snapshot.probed
         && previous.probing === snapshot.probing
         && previous.provider === snapshot.provider
+        && previous.goals === snapshot.goals
       ) return current;
       return { ...current, [targetKey]: snapshot };
     });
@@ -2296,7 +2408,10 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
             aria-label="Search sessions"
           />
           <div className="agent-session-list">
-            {filteredSessions.map((entry) => (
+            {filteredSessions.map((entry) => {
+              const goal = targetSnapshots[entry.contextKey]
+                ?.goals[sessionGoalKey(entry.provider, entry.session.id)];
+              return (
               <div
                 key={desktopSessionKey(entry)}
                 className={desktopSessionKey(entry) === activeSessionKey
@@ -2313,6 +2428,9 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                     <span>{entry.contextLabel}</span>
                   </span>
                   <strong>{entry.session.title}</strong>
+                  {goal ? (
+                    <span className={`agent-session-goal ${goal.status}`}>{goal.text}</span>
+                  ) : null}
                   <span className="agent-session-cwd">{entry.session.cwd ?? entry.session.id}</span>
                   <small className={entry.runtime.running ? "running" : ""}>
                     {entry.runtime.running ? sessionRuntimeLabel(entry.runtime) : relativeTime(entry.session.updatedAt)}
@@ -2336,7 +2454,8 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
                   </button>
                 )}
               </div>
-            ))}
+              );
+            })}
             {filteredSessions.length === 0 ? <p>No saved sessions</p> : null}
           </div>
         </section>
