@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles/linear.css";
 import { logError, logInfo } from "./utils/appLog";
 import { installNavigatorLocaleFallback } from "./utils/locale";
+import { migrateLegacyStorage } from "./utils/migrateLegacyStorage";
 import { isAndroidPlatform } from "./utils/runtimePlatform";
 
 type BootErrorBoundaryProps = {
@@ -41,6 +42,11 @@ class BootErrorBoundary extends Component<BootErrorBoundaryProps, BootErrorBound
 
     return this.props.children;
   }
+}
+
+// Carry over pre-rename (wmux-*) localStorage before any store module reads it.
+if (typeof localStorage !== "undefined") {
+  migrateLegacyStorage(localStorage);
 }
 
 installNavigatorLocaleFallback();
