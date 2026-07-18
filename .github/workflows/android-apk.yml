@@ -1,0 +1,91 @@
+name: android-apk
+
+# Manually dispatched arm64 APK build. Signs with a throwaway keystore (fine
+# for sideloading; installing over a build signed with a different key needs
+# an uninstall first) and publishes the APK two ways: a workflow artifact and
+# a force-pushed orphan `apk-drop` branch for git-based retrieval.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Android project
+        run: pnpm tauri android init
+
+      - name: Build arm64 APK
+        env:
+          # Keep the desktop CLI sidecar building for the runner host; the
+          # Android bundle never ships it (build.rs skips it for mobile).
+          MUXPIT_CLI_TARGETS: x86_64-unknown-linux-gnu
+        run: pnpm tauri android build --apk --target aarch64
+
+      - name: Sign APK
+        run: |
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          UNSIGNED=$(find src-tauri/gen/android -name '*-release-unsigned.apk' | head -1)
+          test -n "$UNSIGNED"
+          keytool -genkeypair -keystore /tmp/muxpit.jks -alias muxpit -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass muxpit-throwaway -keypass muxpit-throwaway -dname "CN=muxpit"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED" /tmp/muxpit-aligned.apk
+          "$BUILD_TOOLS/apksigner" sign --ks /tmp/muxpit.jks --ks-pass pass:muxpit-throwaway \
+            --key-pass pass:muxpit-throwaway --out muxpit-arm64.apk /tmp/muxpit-aligned.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: muxpit-arm64-apk
+          path: muxpit-arm64.apk
+
+      - name: Push APK to apk-drop branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir /tmp/apk-drop
+          cp muxpit-arm64.apk /tmp/apk-drop/
+          cd /tmp/apk-drop
+          git init -b apk-drop
+          git config user.name github-actions
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git commit -m "Android arm64 APK from $GITHUB_SHA"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apk-drop
