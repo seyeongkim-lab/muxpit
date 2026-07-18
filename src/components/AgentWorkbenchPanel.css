@@ -499,6 +499,41 @@
 .agent-timeline-row {
   position: relative;
   padding-bottom: 16px;
+  animation: agent-row-in 0.16s ease-out;
+}
+
+@keyframes agent-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.agent-timeline-row.assistant.streaming p::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--muxpit-accent);
+  animation: agent-caret 1s steps(1) infinite;
+}
+
+@keyframes agent-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-timeline-row {
+    animation: none;
+  }
+
+  .agent-timeline-row.assistant.streaming p::after {
+    animation: none;
+  }
 }
 
 .agent-timeline-row small,
