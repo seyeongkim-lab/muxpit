@@ -91,6 +91,10 @@ export const runningSessionIds = (runtimes: AgentSessionRuntimes): string[] =>
     .filter(([key, runtime]) => key !== NEW_SESSION_KEY && (runtime.running || runtime.waiting))
     .map(([key]) => key);
 
+/** Capped exponential backoff delay for the nth consecutive failure (n >= 1). */
+export const retryBackoffMs = (failures: number, baseMs: number, maxMs: number): number =>
+  Math.min(baseMs * 2 ** Math.max(failures - 1, 0), maxMs);
+
 export const updateSessionRuntime = (
   runtimes: AgentSessionRuntimes,
   sessionId: string | null | undefined,

@@ -91,6 +91,10 @@ const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
 const MOBILE_WORKBENCH_STORAGE_KEY = "muxpit-mobile-agent-workbench-v1";
 const MOBILE_PROVIDERS = ["claude", "codex", "gemini", "copilot", "opencode"] as const;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
+// A discovery claude-list helper that produces neither output nor a close
+// event (slow or dead link) would hold its provider slot forever and freeze
+// session-list refreshes; force-close it after this long.
+const DISCOVERY_LIST_TIMEOUT_MS = 30_000;
 const WORKBENCH_PERSIST_DELAY_MS = 200;
 
 const PROVIDER_NAMES: Record<Provider, string> = {
@@ -364,6 +368,7 @@ export const MobileApp = () => {
   const acpClients = useRef(new Map<Provider, AcpClient>());
   const discoveryChannels = useRef(new Map<string, DiscoveryChannelMeta>());
   const discoveryDecoders = useRef(new Map<string, JsonLineDecoder>());
+  const discoveryTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const discoveryCodexClients = useRef(new Map<string, CodexMobileClient>());
   const discoveryAcpClients = useRef(new Map<string, AcpClient>());
   const discoveryProviderChannels = useRef(new Map<string, string>());
@@ -540,6 +545,9 @@ export const MobileApp = () => {
   const closeDiscoveryChannel = (channelId: string): void => {
     const meta = discoveryChannels.current.get(channelId);
     if (!meta) return;
+    const timeout = discoveryTimeouts.current.get(channelId);
+    if (timeout) clearTimeout(timeout);
+    discoveryTimeouts.current.delete(channelId);
     const key = discoveryProviderKey(meta.profileId, meta.provider);
     if (discoveryProviderChannels.current.get(key) === channelId) {
       discoveryProviderChannels.current.delete(key);
@@ -649,6 +657,10 @@ export const MobileApp = () => {
       handledPayload: false,
     });
     discoveryDecoders.current.set(channelId, new JsonLineDecoder());
+    discoveryTimeouts.current.set(channelId, setTimeout(() => {
+      closeDiscoveryChannel(channelId);
+      void closeAgent(channelId).catch(() => {});
+    }, DISCOVERY_LIST_TIMEOUT_MS));
     try {
       await listClaudeSessions(profile.id, channelId);
     } catch (reason) {

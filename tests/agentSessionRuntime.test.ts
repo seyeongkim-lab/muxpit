@@ -9,6 +9,7 @@ import {
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
+  retryBackoffMs,
   runningSessionIds,
   shouldProcessAgentChannelPayload,
   updateSessionRuntime,
@@ -217,4 +218,13 @@ test("running session ids skip idle runtimes and the draft session", () => {
   runtimes = updateSessionRuntime(runtimes, null, (runtime) => ({ ...runtime, running: true }));
 
   assert.deepEqual(runningSessionIds(runtimes).sort(), ["session-1", "session-2"]);
+});
+
+test("retry backoff doubles per failure and stays capped", () => {
+  assert.equal(retryBackoffMs(1, 5_000, 60_000), 5_000);
+  assert.equal(retryBackoffMs(2, 5_000, 60_000), 10_000);
+  assert.equal(retryBackoffMs(4, 5_000, 60_000), 40_000);
+  assert.equal(retryBackoffMs(5, 5_000, 60_000), 60_000);
+  assert.equal(retryBackoffMs(50, 5_000, 60_000), 60_000);
+  assert.equal(retryBackoffMs(0, 5_000, 60_000), 5_000);
 });

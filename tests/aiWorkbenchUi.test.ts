@@ -197,6 +197,16 @@ test("fresh provider lists replace cached desktop sessions", () => {
   assert.match(workbench, /sessions: reconcileAgentSessions\(\s*event\.sessions,/);
 });
 
+test("desktop retries failed probes and backs off failing session lists", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+
+  assert.match(workbench, /setProbeAttempt\(\(attempt\) => attempt \+ 1\)/);
+  assert.match(workbench, /retryBackoffMs\(probeAttempt \+ 1, PROBE_RETRY_BASE_MS, PROBE_RETRY_MAX_MS\)/);
+  assert.match(workbench, /Date\.now\(\) < \(nextListRefresh\.current\.get\(kind\) \?\? 0\)/);
+  assert.match(workbench, /recordListFailure\("claude"\)/);
+  assert.match(workbench, /clearListFailures\("claude"\)/);
+});
+
 test("AI workbench stores composer state in each session runtime", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 

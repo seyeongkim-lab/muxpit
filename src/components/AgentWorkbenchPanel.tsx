@@ -59,6 +59,7 @@ import {
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
+  retryBackoffMs,
   runningSessionIds,
   sessionRuntimeLabel,
   sessionRuntimeKey,
@@ -163,6 +164,9 @@ const DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v2:";
 const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v1:";
 const WORKBENCH_PERSIST_DELAY_MS = 200;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
+const PROBE_RETRY_BASE_MS = 5_000;
+const PROBE_RETRY_MAX_MS = 60_000;
+const LIST_RETRY_MAX_MS = 60_000;
 const TIMELINE_PIN_THRESHOLD_PX = 48;
 const CLAUDE_INTERRUPT_FALLBACK_MS = 2_500;
 const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
@@ -390,6 +394,7 @@ const DesktopTargetRuntime = ({
   const [installed, setInstalled] = useState<Set<AiKind>>(new Set());
   const [probedTarget, setProbedTarget] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
+  const [probeAttempt, setProbeAttempt] = useState(0);
   const [codexModels, setCodexModels] = useState<CodexModelOption[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [goals, setGoals] = useState<Record<string, SessionGoal>>({});
@@ -421,6 +426,10 @@ const DesktopTargetRuntime = ({
   const helperTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const pendingInterrupts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const refreshingProviders = useRef(new Set<AiKind>());
+  // Consecutive session-list failures per provider. Drives capped exponential
+  // backoff so a slow host isn't hammered with a fresh ssh exec every 5s.
+  const listFailures = useRef(new Map<AiKind, number>());
+  const nextListRefresh = useRef(new Map<AiKind, number>());
   const channelNamespace = useRef(newDesktopAgentChannelNamespace());
   const channelSequence = useRef(0);
   const runtimeGeneration = useRef(0);
@@ -646,6 +655,20 @@ const DesktopTargetRuntime = ({
     }
   }, [updateRuntime, updateView]);
 
+  const recordListFailure = useCallback((kind: AiKind): void => {
+    const failures = (listFailures.current.get(kind) ?? 0) + 1;
+    listFailures.current.set(kind, failures);
+    nextListRefresh.current.set(
+      kind,
+      Date.now() + retryBackoffMs(failures, SESSION_REFRESH_INTERVAL_MS, LIST_RETRY_MAX_MS),
+    );
+  }, []);
+
+  const clearListFailures = useCallback((kind: AiKind): void => {
+    listFailures.current.delete(kind);
+    nextListRefresh.current.delete(kind);
+  }, []);
+
   const openClaudeAux = useCallback(async (
     purpose: "claude-list" | "claude-history",
     sessionId?: string,
@@ -665,6 +688,7 @@ const DesktopTargetRuntime = ({
       const meta = channels.current.get(channelId);
       if (!meta || meta.handledPayload) return;
       meta.handledPayload = true;
+      if (purpose === "claude-list") recordListFailure("claude");
       updateView("claude", (current) => ({
         ...current,
         runtimes: purpose === "claude-history"
@@ -690,6 +714,7 @@ const DesktopTargetRuntime = ({
       const timeout = helperTimeouts.current.get(channelId);
       if (timeout) clearTimeout(timeout);
       helperTimeouts.current.delete(channelId);
+      if (purpose === "claude-list") recordListFailure("claude");
       updateView("claude", (current) => ({
         ...current,
         runtimes: updateSessionRuntime(
@@ -701,7 +726,7 @@ const DesktopTargetRuntime = ({
         error: String(reason),
       }));
     }
-  }, [closeChannel, nextChannelId, target, updateView]);
+  }, [closeChannel, nextChannelId, recordListFailure, target, updateView]);
 
   // Session goals live on the host, so a lightweight helper channel fetches
   // and mutates them; the helper echoes the full goal map back on every call.
@@ -884,6 +909,7 @@ const DesktopTargetRuntime = ({
     if (document.visibilityState !== "visible") return;
     for (const kind of AI_KINDS) {
       if (!installed.has(kind) || refreshingProviders.current.has(kind)) continue;
+      if (Date.now() < (nextListRefresh.current.get(kind) ?? 0)) continue;
       let request: Promise<void> | undefined;
       if (kind === "claude") {
         const alreadyListing = [...channels.current.values()].some(
@@ -898,10 +924,10 @@ const DesktopTargetRuntime = ({
       if (!request) continue;
       refreshingProviders.current.add(kind);
       void request
-        .catch(() => {})
+        .then(() => clearListFailures(kind), () => recordListFailure(kind))
         .finally(() => refreshingProviders.current.delete(kind));
     }
-  }, [installed, openClaudeAux]);
+  }, [clearListFailures, installed, openClaudeAux, recordListFailure]);
 
   useEffect(() => {
     let disposed = false;
@@ -1028,6 +1054,7 @@ const DesktopTargetRuntime = ({
             const timeout = helperTimeouts.current.get(event.channelId);
             if (timeout) clearTimeout(timeout);
             helperTimeouts.current.delete(event.channelId);
+            clearListFailures("claude");
             applyEvent("claude", {
               type: "sessionsLoaded",
               sessions: message.sessions as MobileSession[],
@@ -1124,7 +1151,7 @@ const DesktopTargetRuntime = ({
       disposed = true;
       unlisten?.();
     };
-  }, [applyEvent, updateRuntime, updateView]);
+  }, [applyEvent, clearListFailures, updateRuntime, updateView]);
 
   useEffect(() => () => {
     runtimeGeneration.current += 1;
@@ -1136,6 +1163,7 @@ const DesktopTargetRuntime = ({
   useEffect(() => {
     if (!discover || probedTarget === targetKey) return;
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setProbing(true);
     void probeDesktopAgents(AI_KINDS, target)
       .then((found) => {
@@ -1147,15 +1175,23 @@ const DesktopTargetRuntime = ({
         }
       })
       .catch((reason) => {
-        if (!cancelled) {
-          updateView(providerRef.current, (current) => ({ ...current, error: String(reason) }));
-        }
+        if (cancelled) return;
+        updateView(providerRef.current, (current) => ({ ...current, error: String(reason) }));
+        // A slow or flaky link must not disable the target until restart:
+        // schedule another probe with capped exponential backoff.
+        retryTimer = setTimeout(
+          () => setProbeAttempt((attempt) => attempt + 1),
+          retryBackoffMs(probeAttempt + 1, PROBE_RETRY_BASE_MS, PROBE_RETRY_MAX_MS),
+        );
       })
       .finally(() => {
         if (!cancelled) setProbing(false);
       });
-    return () => { cancelled = true; };
-  }, [discover, probedTarget, target, targetKey, updateView]);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [discover, probeAttempt, probedTarget, target, targetKey, updateView]);
 
   const persistWorkbench = useCallback((): void => {
     if (probedTarget !== targetKey) return;

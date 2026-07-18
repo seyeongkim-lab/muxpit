@@ -3173,7 +3173,7 @@ dependencies = [
 
 [[package]]
 name = "muxpit"
-version = "0.2.19"
+version = "0.2.20"
 dependencies = [
  "android-native-keyring-store",
  "base64 0.22.1",

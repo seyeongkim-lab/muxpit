@@ -152,6 +152,17 @@ test("mobile refreshes every saved host without replacing active SSH channels", 
   assert.match(mobileApp, /sessions: reconcileAgentSessions\(\s*event\.sessions,/);
 });
 
+test("hung discovery list helpers release their slot after a timeout", () => {
+  assert.match(mobileApp, /DISCOVERY_LIST_TIMEOUT_MS = 30_000/);
+  assert.match(mobileApp, /discoveryTimeouts\.current\.set\(channelId, setTimeout\(/);
+  const closeDiscovery = mobileApp.slice(
+    mobileApp.indexOf("const closeDiscoveryChannel"),
+    mobileApp.indexOf("const handleDiscoveryTransport"),
+  );
+  assert.match(closeDiscovery, /discoveryTimeouts\.current\.get\(channelId\)/);
+  assert.match(closeDiscovery, /discoveryTimeouts\.current\.delete\(channelId\)/);
+});
+
 test("mobile opens and controls every desktop ACP provider", () => {
   const openProvider = mobileApp.slice(
     mobileApp.indexOf("const openProvider"),
