@@ -72,7 +72,11 @@ import { buildSshConnection, useSshHostsStore } from "../stores/sshHosts.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
 import { collectOrderedLeaves } from "../utils/layoutGeometry.ts";
 import { parseSshCommandLine } from "../utils/sshConnection.ts";
-import { pickWorkbenchFocusLeaf, type WorkbenchLeafCandidate } from "../utils/workbenchFocus.ts";
+import {
+  buildWorkbenchPaneSpec,
+  pickWorkbenchFocusLeaf,
+  type WorkbenchLeafCandidate,
+} from "../utils/workbenchFocus.ts";
 import { AgentImageAttachments } from "./AgentImageAttachments.tsx";
 import "./AgentWorkbenchPanel.css";
 
@@ -183,6 +187,10 @@ const ProviderMark = ({ provider }: { provider: AiKind }) => {
     </span>
   );
 };
+
+let workbenchPaneCounter = 0;
+const nextWorkbenchPaneId = (): string =>
+  `agent-pane-${Date.now()}-${workbenchPaneCounter++}`;
 
 const emptyView = (): ProviderView => ({
   sessions: [],
@@ -2071,10 +2079,26 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     const target = targets.find((candidate) => candidate.key === targetKey);
     const workspaceId = leaf?.workspaceId ?? target?.workspaceId;
     const leafId = leaf?.leafId ?? target?.leafId;
-    if (!workspaceId || !leafId) return;
     const store = useWorkspaceStore.getState();
-    store.setActive(workspaceId);
-    store.setFocusedLeaf(workspaceId, leafId);
+    if (workspaceId && leafId) {
+      store.setActive(workspaceId);
+      store.setFocusedLeaf(workspaceId, leafId);
+      return;
+    }
+    if (!target) return;
+    // The session's host has no open pane; open one so the terminal side
+    // always follows the selection.
+    const spec = buildWorkbenchPaneSpec(target.label, target.target, sessionCwd);
+    const paneId = nextWorkbenchPaneId();
+    store.addWorkspaceWithLayout(spec.name, {
+      type: "leaf",
+      id: paneId,
+      ptyId: null,
+      command: spec.command,
+      sshConnection: spec.sshConnection,
+      sshRemoteCommand: spec.sshRemoteCommand,
+      launchCwd: spec.launchCwd,
+    }, paneId);
   }, [focusLeaves, targets]);
 
   const requestSelection = useCallback((

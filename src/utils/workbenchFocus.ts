@@ -1,6 +1,14 @@
 // Selecting a session in the AI workbench should pull the matching terminal
 // pane into focus, so the left (terminal) and right (chat) sides stay in step.
 
+import {
+  buildSshCommandWithRemoteCmdFromConnection,
+  parseSshCommandLine,
+  quoteCommandArg,
+  sshConnectionToCommandLine,
+  type SshConnection,
+} from "./sshConnection.ts";
+
 export interface WorkbenchLeafCandidate {
   workspaceId: string;
   leafId: string;
@@ -33,4 +41,48 @@ export const pickWorkbenchFocusLeaf = (
     if (matches.length > 0) return matches.find((leaf) => leaf.focused) ?? matches[0];
   }
   return contextLeaves.find((leaf) => leaf.focused) ?? contextLeaves[0];
+};
+
+export interface WorkbenchPaneTarget {
+  cwd?: string;
+  sshCommand?: string;
+  sshConnection?: SshConnection;
+}
+
+export interface WorkbenchPaneSpec {
+  name: string;
+  command?: string;
+  sshConnection?: SshConnection;
+  sshRemoteCommand?: string;
+  launchCwd?: string;
+}
+
+// Describe the terminal pane to open when a session is selected for a host
+// that has no open pane: a local shell launched in the session's directory,
+// or an SSH connection that lands in it via a `cd` remote command.
+export const buildWorkbenchPaneSpec = (
+  label: string,
+  target: WorkbenchPaneTarget,
+  sessionCwd?: string,
+): WorkbenchPaneSpec => {
+  const connection = target.sshConnection ?? parseSshCommandLine(target.sshCommand)?.connection;
+  if (!connection && !target.sshCommand) {
+    const cwd = sessionCwd ?? target.cwd;
+    const name = cwd ? cwd.replace(/\/+$/, "").split("/").pop() || label : label;
+    return { name, ...(cwd ? { launchCwd: cwd } : {}) };
+  }
+  if (connection && sessionCwd) {
+    const remote = `cd ${quoteCommandArg(sessionCwd)} && exec "\${SHELL:-sh}" -l`;
+    return {
+      name: label,
+      command: buildSshCommandWithRemoteCmdFromConnection(connection, remote, true),
+      sshConnection: connection,
+      sshRemoteCommand: remote,
+    };
+  }
+  return {
+    name: label,
+    command: target.sshCommand ?? (connection ? sshConnectionToCommandLine(connection) : undefined),
+    sshConnection: connection,
+  };
 };
