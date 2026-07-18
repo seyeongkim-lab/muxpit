@@ -437,6 +437,92 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* Markdown inside assistant messages (shared MarkdownContent renderer). */
+.timeline-content .agent-md p,
+.timeline-content .agent-md pre,
+.timeline-content .agent-md ul,
+.timeline-content .agent-md ol {
+  margin: 0 0 8px;
+}
+
+.timeline-content .agent-md p:last-child,
+.timeline-content .agent-md pre:last-child,
+.timeline-content .agent-md ul:last-child,
+.timeline-content .agent-md ol:last-child {
+  margin-bottom: 0;
+}
+
+/* .timeline-content strong is display:block for label markup; markdown bold
+   must stay inline within a sentence. */
+.timeline-content .agent-md strong {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+}
+
+.timeline-content .agent-md ul,
+.timeline-content .agent-md ol {
+  padding-left: 20px;
+  color: #e4e7ec;
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.timeline-content .agent-md li {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.timeline-content .agent-md code {
+  padding: 1px 4px;
+  border: 1px solid #2d3440;
+  background: #11141a;
+  font-family: "JetBrains Mono", "Roboto Mono", monospace;
+  font-size: 13px;
+}
+
+.timeline-content .agent-md pre code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: inherit;
+}
+
+.timeline-content .agent-md-heading {
+  font-weight: 600;
+}
+
+.timeline-content .agent-md-h1,
+.timeline-content .agent-md-h2 {
+  font-size: 16px;
+}
+
+.timeline-content .agent-md-h3,
+.timeline-content .agent-md-h4 {
+  font-size: 15px;
+}
+
+.timeline-content .agent-md-link {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.timeline-content .agent-tool-details summary {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "Roboto Mono", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.timeline-content .agent-tool-details[open] summary {
+  margin-bottom: 6px;
+}
+
 .approval-actions {
   display: flex;
   justify-content: flex-end;

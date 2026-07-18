@@ -31,12 +31,24 @@ test("timeline rows are memoized and mark the streaming assistant message", () =
 
 test("assistant messages render markdown and tool output collapses when long", () => {
   const workbench = read("../src/components/AgentWorkbenchPanel.tsx");
+  const shared = read("../src/components/AgentMessageContent.tsx");
   const styles = read("../src/components/AgentWorkbenchPanel.css");
   assert.match(workbench, /<MarkdownContent text=\{item\.text\} \/>/);
   assert.match(workbench, /<ToolOutput text=\{item\.text\} \/>/);
-  assert.match(workbench, /<details className="agent-tool-details">/);
+  assert.match(shared, /<details className="agent-tool-details">/);
   assert.match(styles, /\.agent-md code \{/);
   assert.match(styles, /\.agent-tool-details summary \{/);
+});
+
+test("the mobile app shares the markdown and tool-output renderers", () => {
+  const mobile = read("../src/mobile/MobileApp.tsx");
+  const styles = read("../src/mobile/mobile.css");
+  assert.match(mobile, /from "\.\.\/components\/AgentMessageContent\.tsx"/);
+  assert.match(mobile, /<MarkdownContent text=\{item\.text\} \/>/);
+  assert.match(mobile, /<ToolOutput text=\{item\.text\} \/>/);
+  assert.match(styles, /\.timeline-content \.agent-md code \{/);
+  // Mobile's block-level strong labels must not leak into markdown bold.
+  assert.match(styles, /\.timeline-content \.agent-md strong \{\n  display: inline;/);
 });
 
 test("stopping Claude interrupts the turn in place with a close fallback", () => {
