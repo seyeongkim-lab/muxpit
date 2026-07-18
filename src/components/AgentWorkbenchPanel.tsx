@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import claudeIconUrl from "../assets/provider-claude.svg";
 import codexIconUrl from "../assets/provider-codex.svg";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
@@ -191,6 +191,21 @@ const ProviderMark = ({ provider }: { provider: AiKind }) => {
 let workbenchPaneCounter = 0;
 const nextWorkbenchPaneId = (): string =>
   `agent-pane-${Date.now()}-${workbenchPaneCounter++}`;
+
+// Memoized so streaming deltas only re-render the row that changed, keeping
+// long conversations smooth while text pours in.
+const TimelineRow = memo(({ item, providerName, streaming }: {
+  item: MobileTimelineItem;
+  providerName: string;
+  streaming: boolean;
+}) => (
+  <article className={`agent-timeline-row ${item.kind}${streaming ? " streaming" : ""}`}>
+    <div>
+      <small>{item.kind === "user" ? "You" : item.kind === "assistant" ? providerName : item.title ?? "Status"}</small>
+      {item.kind === "tool" ? <pre>{item.text}</pre> : <p>{item.text}</p>}
+    </div>
+  </article>
+));
 
 const emptyView = (): ProviderView => ({
   sessions: [],
@@ -1779,13 +1794,15 @@ const DesktopTargetRuntime = ({
                   </div>
                 )
               ) : null}
-              {runtime.items.map((item) => (
-                <article key={item.id} className={`agent-timeline-row ${item.kind}`}>
-                  <div>
-                    <small>{item.kind === "user" ? "You" : item.kind === "assistant" ? PROVIDER_NAMES[provider] : item.title ?? "Status"}</small>
-                    {item.kind === "tool" ? <pre>{item.text}</pre> : <p>{item.text}</p>}
-                  </div>
-                </article>
+              {runtime.items.map((item, index) => (
+                <TimelineRow
+                  key={item.id}
+                  item={item}
+                  providerName={PROVIDER_NAMES[provider]}
+                  streaming={runtime.running
+                    && index === runtime.items.length - 1
+                    && item.kind === "assistant"}
+                />
               ))}
               {runtime.approvals.map((approval) => (
                 <article key={approval.requestId} className="agent-approval">
@@ -1851,9 +1868,17 @@ const DesktopTargetRuntime = ({
                   })(),
                 )}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  // Never treat Enter as send while an IME (e.g. Hangul) is
+                  // still composing — that Enter commits the composition.
+                  if (event.nativeEvent.isComposing) return;
+                  if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     void sendText(provider, runtime.draft);
+                    return;
+                  }
+                  if (event.key === "Escape" && runtime.running) {
+                    event.preventDefault();
+                    void stop();
                   }
                 }}
                 placeholder={runtime.running && !runtime.queueMode ? "Redirect the active task…" : runtime.running ? "Add the next instruction…" : "Message the agent…"}
@@ -1866,10 +1891,10 @@ const DesktopTargetRuntime = ({
                       <button type="button" className={!runtime.queueMode ? "active" : ""} onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queueMode: false }))}>Steer</button>
                       <button type="button" className={runtime.queueMode ? "active" : ""} onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queueMode: true }))}>Queue</button>
                     </>
-                  ) : <span>Ctrl+Enter to send</span>}
+                  ) : <span>Enter to send · Shift+Enter for a new line</span>}
                 </div>
                 <div>
-                  {runtime.running ? <button type="button" className="agent-stop-button" onClick={() => void stop()}>Stop</button> : null}
+                  {runtime.running ? <button type="button" className="agent-stop-button" title="Stop the current task (Esc)" onClick={() => void stop()}>Stop</button> : null}
                   <button
                     type="button"
                     className="agent-send-button"
