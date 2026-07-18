@@ -437,6 +437,68 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* Host-synced session goals. */
+.session-goal-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.session-goal-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: #e4e7ec;
+  font-size: 13px;
+}
+
+.session-goal-bar button {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-goal-status.active {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.session-goal-status.done {
+  text-decoration: line-through;
+}
+
+.session-goal-text {
+  overflow: hidden;
+  flex: 1;
+  color: #e4e7ec;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-list .session-goal {
+  display: block;
+  overflow: hidden;
+  color: var(--blue);
+  font-size: 12px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-list .session-goal.done {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 /* Markdown inside assistant messages (shared MarkdownContent renderer). */
 .timeline-content .agent-md p,
 .timeline-content .agent-md pre,

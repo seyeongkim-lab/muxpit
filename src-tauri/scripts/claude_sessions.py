@@ -1,8 +1,13 @@
+import base64
 import glob
 import json
 import os
 import sys
 
+
+GOALS_PATH = os.path.expanduser(os.path.join("~", ".muxpit", "session-goals.json"))
+MAX_GOAL_TEXT = 2000
+MAX_GOALS = 500
 
 LIST_TAIL_BYTES = 256 * 1024
 HISTORY_TAIL_BYTES = 1024 * 1024
@@ -196,8 +201,93 @@ def load_session(root, session_id):
     }), flush=True)
 
 
+# Session goals live on the host so every muxpit surface (desktop, mobile)
+# connecting to it sees the same goal for a session. Keys are
+# "<provider>:<session-id>"; writes are atomic (tmp + rename).
+def load_goals():
+    try:
+        with open(GOALS_PATH, "r", encoding="utf-8") as stream:
+            data = json.load(stream)
+    except (OSError, ValueError):
+        return {}
+    goals = data.get("goals") if isinstance(data, dict) else None
+    return goals if isinstance(goals, dict) else {}
+
+
+def save_goals(goals):
+    os.makedirs(os.path.dirname(GOALS_PATH), exist_ok=True)
+    tmp_path = GOALS_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as stream:
+        json.dump({"version": 1, "goals": goals}, stream, ensure_ascii=False)
+    os.replace(tmp_path, GOALS_PATH)
+
+
+def print_goals(goals):
+    print(json.dumps({"type": "muxpit_goals", "goals": goals}), flush=True)
+
+
+def fail(message):
+    print(json.dumps({"type": "muxpit_error", "message": message}), flush=True)
+
+
+def normalized_goal(value):
+    if not isinstance(value, dict):
+        return None
+    text = value.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    status = value.get("status")
+    updated_at = value.get("updatedAt")
+    return {
+        "text": text.strip()[:MAX_GOAL_TEXT],
+        "status": status if status in ("active", "done") else "active",
+        "updatedAt": updated_at if isinstance(updated_at, int) else 0,
+    }
+
+
+def set_goal(key, encoded_payload):
+    try:
+        payload = json.loads(base64.b64decode(encoded_payload).decode("utf-8"))
+    except (TypeError, ValueError):
+        fail("Invalid goal payload")
+        return
+    goal = normalized_goal(payload)
+    if goal is None:
+        fail("Goal text is required")
+        return
+    goals = load_goals()
+    goals[key] = goal
+    if len(goals) > MAX_GOALS:
+        def goal_age(item):
+            return item[1].get("updatedAt", 0) if isinstance(item[1], dict) else 0
+        ordered = sorted(goals.items(), key=goal_age)
+        goals = dict(ordered[len(ordered) - MAX_GOALS:])
+    save_goals(goals)
+    print_goals(goals)
+
+
+def delete_goal(key):
+    goals = load_goals()
+    goals.pop(key, None)
+    save_goals(goals)
+    print_goals(goals)
+
+
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else "list"
+    if command == "goals":
+        print_goals(load_goals())
+        return
+    if command == "goal-set":
+        if len(sys.argv) < 4:
+            raise SystemExit("goal-set requires a key and a payload")
+        set_goal(sys.argv[2], sys.argv[3])
+        return
+    if command == "goal-delete":
+        if len(sys.argv) < 3:
+            raise SystemExit("goal-delete requires a key")
+        delete_goal(sys.argv[2])
+        return
     if command == "history":
         if len(sys.argv) < 3:
             raise SystemExit("history requires a session id")

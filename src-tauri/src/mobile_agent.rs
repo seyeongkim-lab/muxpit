@@ -760,6 +760,67 @@ pub async fn mobile_claude_session(
     .await
 }
 
+fn valid_goal_key(value: &str) -> bool {
+    valid_session_id(value) && value.contains(':')
+}
+
+fn valid_goal_payload(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 8192
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '='))
+}
+
+#[tauri::command]
+pub async fn mobile_session_goals(
+    app: AppHandle,
+    state: State<'_, MobileSshManager>,
+    profile_id: String,
+    channel_id: String,
+) -> Result<(), String> {
+    open_claude_session_script(app, state, profile_id, channel_id, &["goals"]).await
+}
+
+#[tauri::command]
+pub async fn mobile_session_goal_set(
+    app: AppHandle,
+    state: State<'_, MobileSshManager>,
+    profile_id: String,
+    channel_id: String,
+    key: String,
+    payload: String,
+) -> Result<(), String> {
+    if !valid_goal_key(&key) {
+        return Err("Invalid session goal key".into());
+    }
+    if !valid_goal_payload(&payload) {
+        return Err("Invalid session goal payload".into());
+    }
+    open_claude_session_script(
+        app,
+        state,
+        profile_id,
+        channel_id,
+        &["goal-set", &key, &payload],
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn mobile_session_goal_delete(
+    app: AppHandle,
+    state: State<'_, MobileSshManager>,
+    profile_id: String,
+    channel_id: String,
+    key: String,
+) -> Result<(), String> {
+    if !valid_goal_key(&key) {
+        return Err("Invalid session goal key".into());
+    }
+    open_claude_session_script(app, state, profile_id, channel_id, &["goal-delete", &key]).await
+}
+
 #[tauri::command]
 pub async fn mobile_agent_write(
     state: State<'_, MobileSshManager>,
@@ -828,6 +889,9 @@ pub fn run() {
             mobile_agent_close,
             mobile_claude_sessions,
             mobile_claude_session,
+            mobile_session_goals,
+            mobile_session_goal_set,
+            mobile_session_goal_delete,
         ])
         .plugin(
             tauri_plugin_log::Builder::default()

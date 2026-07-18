@@ -44,6 +44,44 @@ export interface MobileSession {
   provider: AgentProvider;
 }
 
+// Session goals are stored on the host (~/.muxpit/session-goals.json) so
+// every muxpit surface connected to it sees the same goal for a session.
+export interface SessionGoal {
+  text: string;
+  status: "active" | "done";
+  updatedAt: number;
+}
+
+export const sessionGoalKey = (provider: AgentProvider, sessionId: string): string =>
+  `${provider}:${sessionId}`;
+
+export const encodeSessionGoal = (goal: SessionGoal): string => {
+  const bytes = new TextEncoder().encode(JSON.stringify(goal));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+};
+
+export const parseSessionGoalsMessage = (
+  message: Record<string, unknown>,
+): Record<string, SessionGoal> | null => {
+  if (message.type !== "muxpit_goals" || typeof message.goals !== "object" || message.goals === null) {
+    return null;
+  }
+  const goals: Record<string, SessionGoal> = {};
+  for (const [key, value] of Object.entries(message.goals as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const goal = value as Record<string, unknown>;
+    if (typeof goal.text !== "string" || !goal.text) continue;
+    goals[key] = {
+      text: goal.text,
+      status: goal.status === "done" ? "done" : "active",
+      updatedAt: typeof goal.updatedAt === "number" ? goal.updatedAt : 0,
+    };
+  }
+  return goals;
+};
+
 export const mergeAgentSessions = (
   cached: MobileSession[],
   fresh: MobileSession[],

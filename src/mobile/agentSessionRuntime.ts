@@ -60,7 +60,7 @@ export const createSessionRuntime = (): AgentSessionRuntime => ({
   historyBaseItems: [],
 });
 
-export type AgentChannelPurpose = "provider" | "claude-list" | "claude-history";
+export type AgentChannelPurpose = "provider" | "claude-list" | "claude-history" | "goals";
 
 export const shouldProcessAgentChannelPayload = (
   purpose: AgentChannelPurpose,
