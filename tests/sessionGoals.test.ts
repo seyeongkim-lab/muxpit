@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 
 import {
   encodeSessionGoal,
+  encodeSessionSettings,
   parseSessionGoalsMessage,
+  parseSessionSettingsMessage,
   sessionGoalKey,
 } from "../src/mobile/agentProtocol.ts";
 
@@ -40,6 +42,55 @@ test("parseSessionGoalsMessage accepts muxpit_goals and drops malformed entries"
 test("parseSessionGoalsMessage ignores other message types", () => {
   assert.equal(parseSessionGoalsMessage({ type: "muxpit_sessions", sessions: [] }), null);
   assert.equal(parseSessionGoalsMessage({ type: "muxpit_goals" }), null);
+});
+
+test("encoded session settings round-trip through the host helper format", () => {
+  const settings = { model: "sonnet", effort: "high", serviceTier: null, updatedAt: 1752835000 };
+  const decoded = JSON.parse(Buffer.from(encodeSessionSettings(settings), "base64").toString("utf8"));
+  assert.deepEqual(decoded, settings);
+});
+
+test("parseSessionSettingsMessage accepts muxpit_session_settings and normalises entries", () => {
+  const settings = parseSessionSettingsMessage({
+    type: "muxpit_session_settings",
+    settings: {
+      "claude:a": { model: "sonnet", effort: "high", serviceTier: null, updatedAt: 5 },
+      "codex:b": { model: "", effort: 3, updatedAt: "x" },
+      "gemini:c": "not-an-object",
+    },
+  });
+  assert.deepEqual(settings, {
+    "claude:a": { model: "sonnet", effort: "high", serviceTier: null, updatedAt: 5 },
+    "codex:b": { model: null, effort: null, serviceTier: null, updatedAt: 0 },
+  });
+  assert.equal(parseSessionSettingsMessage({ type: "muxpit_goals", goals: {} }), null);
+});
+
+test("session settings flow is wired end to end on both surfaces", () => {
+  const script = read("../src-tauri/scripts/claude_sessions.py");
+  assert.match(script, /muxpit_session_settings/);
+  assert.match(script, /setting-set/);
+  assert.match(script, /os\.replace\(tmp_path, SETTINGS_PATH\)/);
+
+  const desktopRust = read("../src-tauri/src/desktop_agent.rs");
+  assert.match(desktopRust, /pub fn desktop_session_settings\(/);
+  assert.match(desktopRust, /pub fn desktop_session_setting_set\(/);
+
+  const mobileRust = read("../src-tauri/src/mobile_agent.rs");
+  assert.match(mobileRust, /pub async fn mobile_session_settings\(/);
+  assert.match(mobileRust, /pub async fn mobile_session_setting_set\(/);
+
+  const workbench = read("../src/components/AgentWorkbenchPanel.tsx");
+  assert.match(workbench, /parseSessionSettingsMessage\(message\)/);
+  assert.match(workbench, /applySessionSettings\(settingsUpdate\)/);
+  assert.match(workbench, /pushSessionSettings\(kind, sessionId, settings\)/);
+  assert.match(workbench, /hostSessionSettings\.current\[sessionGoalKey\(kind, session\.id\)\]/);
+
+  const mobile = read("../src/mobile/MobileApp.tsx");
+  assert.match(mobile, /parseSessionSettingsMessage\(message\)/);
+  assert.match(mobile, /applySessionSettings\(settingsUpdate\)/);
+  assert.match(mobile, /pushSessionSettings\(kind, sessionId, settings\)/);
+  assert.match(mobile, /hostSessionSettings\.current\[sessionGoalKey\(kind, session\.id\)\]/);
 });
 
 test("goals flow is wired end to end on both surfaces", () => {

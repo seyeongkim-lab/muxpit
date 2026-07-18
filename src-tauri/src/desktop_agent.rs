@@ -505,6 +505,56 @@ pub fn desktop_session_goal_set(
 }
 
 #[tauri::command]
+pub fn desktop_session_settings(
+    app: AppHandle,
+    state: State<'_, DesktopAgentManager>,
+    channel_id: String,
+    cwd: Option<String>,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<(), String> {
+    let remote = ssh_connection.is_some() || ssh_command.is_some();
+    open_command(
+        app,
+        state.inner().clone(),
+        channel_id,
+        claude_script_command(&["settings"], remote),
+        cwd,
+        ssh_command,
+        ssh_connection,
+    )
+}
+
+#[tauri::command]
+pub fn desktop_session_setting_set(
+    app: AppHandle,
+    state: State<'_, DesktopAgentManager>,
+    channel_id: String,
+    key: String,
+    payload: String,
+    cwd: Option<String>,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<(), String> {
+    if !valid_goal_key(&key) {
+        return Err("Invalid session settings key".into());
+    }
+    if !valid_goal_payload(&payload) {
+        return Err("Invalid session settings payload".into());
+    }
+    let remote = ssh_connection.is_some() || ssh_command.is_some();
+    open_command(
+        app,
+        state.inner().clone(),
+        channel_id,
+        claude_script_command(&["setting-set", &key, &payload], remote),
+        cwd,
+        ssh_command,
+        ssh_connection,
+    )
+}
+
+#[tauri::command]
 pub fn desktop_session_goal_delete(
     app: AppHandle,
     state: State<'_, DesktopAgentManager>,

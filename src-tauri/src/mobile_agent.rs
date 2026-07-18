@@ -808,6 +808,41 @@ pub async fn mobile_session_goal_set(
 }
 
 #[tauri::command]
+pub async fn mobile_session_settings(
+    app: AppHandle,
+    state: State<'_, MobileSshManager>,
+    profile_id: String,
+    channel_id: String,
+) -> Result<(), String> {
+    open_claude_session_script(app, state, profile_id, channel_id, &["settings"]).await
+}
+
+#[tauri::command]
+pub async fn mobile_session_setting_set(
+    app: AppHandle,
+    state: State<'_, MobileSshManager>,
+    profile_id: String,
+    channel_id: String,
+    key: String,
+    payload: String,
+) -> Result<(), String> {
+    if !valid_goal_key(&key) {
+        return Err("Invalid session settings key".into());
+    }
+    if !valid_goal_payload(&payload) {
+        return Err("Invalid session settings payload".into());
+    }
+    open_claude_session_script(
+        app,
+        state,
+        profile_id,
+        channel_id,
+        &["setting-set", &key, &payload],
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn mobile_session_goal_delete(
     app: AppHandle,
     state: State<'_, MobileSshManager>,
@@ -892,6 +927,8 @@ pub fn run() {
             mobile_session_goals,
             mobile_session_goal_set,
             mobile_session_goal_delete,
+            mobile_session_settings,
+            mobile_session_setting_set,
         ])
         .plugin(
             tauri_plugin_log::Builder::default()

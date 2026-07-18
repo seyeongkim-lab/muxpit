@@ -10,6 +10,10 @@ GOALS_PATH = os.path.expanduser(os.path.join("~", ".muxpit", "session-goals.json
 MAX_GOAL_TEXT = 2000
 MAX_GOALS = 500
 
+SETTINGS_PATH = os.path.expanduser(os.path.join("~", ".muxpit", "session-settings.json"))
+MAX_SETTING_VALUE = 100
+MAX_SESSION_SETTINGS = 500
+
 LIST_TAIL_BYTES = 256 * 1024
 HISTORY_TAIL_BYTES = 1024 * 1024
 MAX_HISTORY_ITEMS = 200
@@ -280,6 +284,70 @@ def delete_goal(key):
     print_goals(goals)
 
 
+# Session execution settings (model/effort/service tier) live on the host for
+# the same reason as goals: every muxpit surface loading a session should see
+# the settings it was last driven with. Keys are "<provider>:<session-id>".
+def load_settings():
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as stream:
+            data = json.load(stream)
+    except (OSError, ValueError):
+        return {}
+    settings = data.get("settings") if isinstance(data, dict) else None
+    return settings if isinstance(settings, dict) else {}
+
+
+def save_settings(settings):
+    os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+    tmp_path = SETTINGS_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as stream:
+        json.dump({"version": 1, "settings": settings}, stream, ensure_ascii=False)
+    os.replace(tmp_path, SETTINGS_PATH)
+
+
+def print_settings(settings):
+    print(json.dumps({"type": "muxpit_session_settings", "settings": settings}), flush=True)
+
+
+def setting_value(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()[:MAX_SETTING_VALUE]
+
+
+def normalized_setting(value):
+    if not isinstance(value, dict):
+        return None
+    updated_at = value.get("updatedAt")
+    return {
+        "model": setting_value(value.get("model")),
+        "effort": setting_value(value.get("effort")),
+        "serviceTier": setting_value(value.get("serviceTier")),
+        "updatedAt": updated_at if isinstance(updated_at, int) else 0,
+    }
+
+
+def set_setting(key, encoded_payload):
+    try:
+        payload = json.loads(base64.b64decode(encoded_payload).decode("utf-8"))
+    except (TypeError, ValueError):
+        fail("Invalid settings payload")
+        return
+    setting = normalized_setting(payload)
+    if setting is None:
+        fail("Settings payload must be an object")
+        return
+    settings = load_settings()
+    settings[key] = setting
+    if len(settings) > MAX_SESSION_SETTINGS:
+        def setting_age(item):
+            return item[1].get("updatedAt", 0) if isinstance(item[1], dict) else 0
+        ordered = sorted(settings.items(), key=setting_age)
+        settings = dict(ordered[len(ordered) - MAX_SESSION_SETTINGS:])
+    save_settings(settings)
+    print_settings(settings)
+
+
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else "list"
     if command == "goals":
@@ -294,6 +362,14 @@ def main():
         if len(sys.argv) < 3:
             raise SystemExit("goal-delete requires a key")
         delete_goal(sys.argv[2])
+        return
+    if command == "settings":
+        print_settings(load_settings())
+        return
+    if command == "setting-set":
+        if len(sys.argv) < 4:
+            raise SystemExit("setting-set requires a key and a payload")
+        set_setting(sys.argv[2], sys.argv[3])
         return
     if command == "history":
         if len(sys.argv) < 3:

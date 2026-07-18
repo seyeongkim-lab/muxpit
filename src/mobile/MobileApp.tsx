@@ -17,10 +17,12 @@ import {
   JsonLineDecoder,
   composerAction,
   encodeSessionGoal,
+  encodeSessionSettings,
   isSessionActive,
   markSessionActivity,
   normalizeClaudeHistoryMessage,
   parseSessionGoalsMessage,
+  parseSessionSettingsMessage,
   sessionGoalKey,
   reconcileAgentSessions,
   replaceAgentSessions,
@@ -28,6 +30,7 @@ import {
   type MobileSession,
   type MobileTimelineItem,
   type SessionGoal,
+  type SessionSettings,
 } from "./agentProtocol.ts";
 import {
   beginSessionHistory,
@@ -58,7 +61,9 @@ import {
   deleteSessionGoal,
   listClaudeSessions,
   listSessionGoals,
+  listSessionSettings,
   setSessionGoal,
+  setSessionSetting,
   listInstalledAgents,
   loadClaudeSession,
   loadHostProfilesSecure,
@@ -371,6 +376,8 @@ export const MobileApp = () => {
   const discoveryChannels = useRef(new Map<string, DiscoveryChannelMeta>());
   const discoveryDecoders = useRef(new Map<string, JsonLineDecoder>());
   const discoveryTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // Last host-synced per-session execution settings, keyed by sessionGoalKey.
+  const hostSessionSettings = useRef<Record<string, SessionSettings>>({});
   const discoveryCodexClients = useRef(new Map<string, CodexMobileClient>());
   const discoveryAcpClients = useRef(new Map<string, AcpClient>());
   const discoveryProviderChannels = useRef(new Map<string, string>());
@@ -420,6 +427,7 @@ export const MobileApp = () => {
       attempt += 1;
       void requestGoals().then((started) => {
         if (!started && attempt < 8 && !cancelled) setTimeout(tryFetch, 2_000);
+        else if (started) void requestSettings();
       });
     };
     tryFetch();
@@ -892,6 +900,52 @@ export const MobileApp = () => {
       ? setSessionGoal(profileId, channelId, key, encodeSessionGoal(goal))
       : deleteSessionGoal(profileId, channelId, key));
 
+  const requestSettings = (): Promise<boolean> =>
+    openGoalsChannel((profileId, channelId) => listSessionSettings(profileId, channelId));
+
+  const pushSessionSettings = (
+    kind: Provider,
+    sessionId: string,
+    settings: AgentExecutionSettings,
+  ): Promise<boolean> => openGoalsChannel((profileId, channelId) => setSessionSetting(
+    profileId,
+    channelId,
+    sessionGoalKey(kind, sessionId),
+    encodeSessionSettings({
+      model: settings.model ?? null,
+      effort: settings.effort ?? null,
+      serviceTier: settings.serviceTier ?? null,
+      updatedAt: Math.floor(Date.now() / 1000),
+    }),
+  ));
+
+  // Store the host settings map and seed runtimes that never chose settings
+  // locally, so a session loaded on this surface shows the model/effort it
+  // was last driven with anywhere.
+  const applySessionSettings = (incoming: Record<string, SessionSettings>): void => {
+    hostSessionSettings.current = incoming;
+    for (const kind of MOBILE_PROVIDERS) {
+      updateProviderView(kind, (view) => {
+        let runtimes = view.runtimes;
+        for (const session of view.sessions) {
+          const hostSettings = incoming[sessionGoalKey(kind, session.id)];
+          if (!hostSettings) continue;
+          const local = readSessionRuntime(runtimes, session.id).executionSettings;
+          if (local.model !== null || local.effort !== null || local.serviceTier !== null) continue;
+          runtimes = updateSessionRuntime(runtimes, session.id, (runtime) => ({
+            ...runtime,
+            executionSettings: {
+              model: hostSettings.model,
+              effort: hostSettings.effort,
+              serviceTier: hostSettings.serviceTier,
+            },
+          }));
+        }
+        return runtimes === view.runtimes ? view : { ...view, runtimes };
+      });
+    }
+  };
+
   const requestClaudeData = async (sessionId?: string): Promise<void> => {
     const profile = currentProfileRef.current;
     if (!profile) return;
@@ -922,6 +976,7 @@ export const MobileApp = () => {
       else {
         await listClaudeSessions(profile.id, channelId);
         void requestGoals();
+        void requestSettings();
       }
     } catch (reason) {
       channels.current.delete(channelId);
@@ -1656,6 +1711,12 @@ export const MobileApp = () => {
       }
       try {
         const message = JSON.parse(line) as Record<string, unknown>;
+        const settingsUpdate = parseSessionSettingsMessage(message);
+        if (settingsUpdate) {
+          meta.handledPayload = true;
+          if (meta.profileId === currentProfileRef.current?.id) applySessionSettings(settingsUpdate);
+          continue;
+        }
         const goalsUpdate = parseSessionGoalsMessage(message);
         if (goalsUpdate) {
           meta.handledPayload = true;
@@ -2063,6 +2124,25 @@ export const MobileApp = () => {
     setSessionSheetOpen(false);
     setSettingsSheetOpen(false);
     const selectedRuntime = readSessionRuntime(providerView.runtimes, session.id);
+    // Seed host-synced settings before anything launches so the session opens
+    // with the model/effort it was last driven with on any surface.
+    const hostSettings = hostSessionSettings.current[sessionGoalKey(kind, session.id)];
+    const localSettings = selectedRuntime.executionSettings;
+    if (
+      hostSettings
+      && localSettings.model === null
+      && localSettings.effort === null
+      && localSettings.serviceTier === null
+    ) {
+      updateProviderRuntime(kind, session.id, (runtime) => ({
+        ...runtime,
+        executionSettings: {
+          model: hostSettings.model,
+          effort: hostSettings.effort,
+          serviceTier: hostSettings.serviceTier,
+        },
+      }));
+    }
     const shouldReconnect = selectedRuntime.connectionState === "disconnected";
     updateProviderView(kind, (view) => ({ ...view, activeSessionId: session.id }));
     const shouldLoadHistory = selectedRuntime.historyState === "idle";
@@ -2285,6 +2365,9 @@ export const MobileApp = () => {
       if (kind === "codex") {
         if (sessionId) await codexClient.current?.updateSessionSettings(sessionId, settings);
       }
+      // Best-effort host sync so other surfaces load this session with the
+      // same settings.
+      if (sessionId) void pushSessionSettings(kind, sessionId, settings);
     } catch (reason) {
       updateProviderRuntime(kind, sessionId, (runtime) => ({
         ...runtime,

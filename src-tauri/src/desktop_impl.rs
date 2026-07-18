@@ -16,7 +16,8 @@ use monitor::MonitorManager;
 use desktop_agent::{
     check_local_clis_sync, desktop_agent_close, desktop_agent_open, desktop_agent_write,
     desktop_claude_session, desktop_claude_sessions, desktop_session_goal_delete,
-    desktop_session_goal_set, desktop_session_goals, DesktopAgentManager,
+    desktop_session_goal_set, desktop_session_goals, desktop_session_setting_set,
+    desktop_session_settings, DesktopAgentManager,
 };
 use pasted_image::{push_image_to_remote_sync, save_image_locally_sync};
 use platform::command::silent_command;
@@ -571,6 +572,8 @@ pub fn run() {
             desktop_session_goals,
             desktop_session_goal_set,
             desktop_session_goal_delete,
+            desktop_session_settings,
+            desktop_session_setting_set,
             save_image_locally,
             push_image_to_remote,
             tmux_list_sessions,

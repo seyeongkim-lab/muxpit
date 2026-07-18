@@ -27,11 +27,13 @@ import {
   deleteDesktopSessionGoal,
   listDesktopClaudeSessions,
   listDesktopSessionGoals,
+  listDesktopSessionSettings,
   loadDesktopClaudeSession,
   onDesktopAgentTransport,
   openDesktopAgent,
   probeDesktopAgents,
   setDesktopSessionGoal,
+  setDesktopSessionSetting,
   writeDesktopAgentLine,
   type DesktopAgentTarget,
 } from "../agent/desktopAgentBridge.ts";
@@ -42,17 +44,20 @@ import {
   claudeInterruptLine,
   composerAction,
   encodeSessionGoal,
+  encodeSessionSettings,
   isSessionActive,
   markSessionActivity,
   mergeAgentSessions,
   normalizeClaudeHistoryMessage,
   parseSessionGoalsMessage,
+  parseSessionSettingsMessage,
   reconcileAgentSessions,
   sessionGoalKey,
   type MobileAgentEvent,
   type MobileSession,
   type MobileTimelineItem,
   type SessionGoal,
+  type SessionSettings,
 } from "../mobile/agentProtocol.ts";
 import {
   beginSessionHistory,
@@ -432,6 +437,8 @@ const DesktopTargetRuntime = ({
   // backoff so a slow host isn't hammered with a fresh ssh exec every 5s.
   const listFailures = useRef(new Map<AiKind, number>());
   const nextListRefresh = useRef(new Map<AiKind, number>());
+  // Last host-synced per-session execution settings, keyed by sessionGoalKey.
+  const hostSessionSettings = useRef<Record<string, SessionSettings>>({});
   const channelNamespace = useRef(newDesktopAgentChannelNamespace());
   const channelSequence = useRef(0);
   const runtimeGeneration = useRef(0);
@@ -754,6 +761,53 @@ const DesktopTargetRuntime = ({
     openGoalsChannel((channelId) => listDesktopSessionGoals(channelId, target)),
   [openGoalsChannel, target]);
 
+  const refreshSessionSettings = useCallback((): Promise<void> =>
+    openGoalsChannel((channelId) => listDesktopSessionSettings(channelId, target)),
+  [openGoalsChannel, target]);
+
+  // Store the host settings map and seed runtimes that never chose settings
+  // locally, so a session loaded on this surface shows the model/effort it
+  // was last driven with anywhere.
+  const applySessionSettings = useCallback((incoming: Record<string, SessionSettings>): void => {
+    hostSessionSettings.current = incoming;
+    for (const kind of AI_KINDS) {
+      updateView(kind, (current) => {
+        let runtimes = current.runtimes;
+        for (const session of current.sessions) {
+          const hostSettings = incoming[sessionGoalKey(kind, session.id)];
+          if (!hostSettings) continue;
+          const local = readSessionRuntime(runtimes, session.id).executionSettings;
+          if (local.model !== null || local.effort !== null || local.serviceTier !== null) continue;
+          runtimes = updateSessionRuntime(runtimes, session.id, (runtime) => ({
+            ...runtime,
+            executionSettings: {
+              model: hostSettings.model,
+              effort: hostSettings.effort,
+              serviceTier: hostSettings.serviceTier,
+            },
+          }));
+        }
+        return runtimes === current.runtimes ? current : { ...current, runtimes };
+      });
+    }
+  }, [updateView]);
+
+  const pushSessionSettings = useCallback((
+    kind: AiKind,
+    sessionId: string,
+    settings: AgentExecutionSettings,
+  ): Promise<void> => openGoalsChannel((channelId) => setDesktopSessionSetting(
+    channelId,
+    sessionGoalKey(kind, sessionId),
+    encodeSessionSettings({
+      model: settings.model ?? null,
+      effort: settings.effort ?? null,
+      serviceTier: settings.serviceTier ?? null,
+      updatedAt: Math.floor(Date.now() / 1000),
+    }),
+    target,
+  )), [openGoalsChannel, target]);
+
   const requestGoalChange = useCallback((key: string, goal: SessionGoal | null): Promise<void> =>
     openGoalsChannel((channelId) => goal
       ? setDesktopSessionGoal(channelId, key, encodeSessionGoal(goal), target)
@@ -1054,6 +1108,12 @@ const DesktopTargetRuntime = ({
             setGoals(goalsUpdate);
             continue;
           }
+          const settingsUpdate = parseSessionSettingsMessage(message);
+          if (settingsUpdate) {
+            meta.handledPayload = true;
+            applySessionSettings(settingsUpdate);
+            continue;
+          }
           if (message.type === "muxpit_sessions" && Array.isArray(message.sessions)) {
             meta.handledPayload = true;
             const timeout = helperTimeouts.current.get(event.channelId);
@@ -1156,7 +1216,7 @@ const DesktopTargetRuntime = ({
       disposed = true;
       unlisten?.();
     };
-  }, [applyEvent, clearListFailures, updateRuntime, updateView]);
+  }, [applyEvent, applySessionSettings, clearListFailures, updateRuntime, updateView]);
 
   useEffect(() => () => {
     runtimeGeneration.current += 1;
@@ -1219,8 +1279,10 @@ const DesktopTargetRuntime = ({
       }
       if (document.visibilityState === "visible" && discover && probedTarget === targetKey) {
         void refreshSessions();
-        // Pick up goal changes made from other devices while we were hidden.
+        // Pick up goal and settings changes made from other devices while
+        // we were hidden.
         void refreshGoals();
+        void refreshSessionSettings();
         for (const kind of AI_KINDS) {
           if (!installed.has(kind)) continue;
           const sessionId = viewsRef.current[kind].activeSessionId ?? undefined;
@@ -1245,12 +1307,13 @@ const DesktopTargetRuntime = ({
       document.removeEventListener("visibilitychange", persistWhenHidden);
       window.removeEventListener("beforeunload", persistWorkbench);
     };
-  }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, refreshGoals, refreshSessions, targetKey]);
+  }, [discover, installed, openClaudeAux, openProvider, persistWorkbench, probedTarget, refreshGoals, refreshSessionSettings, refreshSessions, targetKey]);
 
   useEffect(() => {
     if (!discover || probedTarget !== targetKey) return;
     void refreshGoals();
-  }, [discover, probedTarget, refreshGoals, targetKey]);
+    void refreshSessionSettings();
+  }, [discover, probedTarget, refreshGoals, refreshSessionSettings, targetKey]);
 
   useEffect(() => {
     if (!discover || probedTarget !== targetKey) return;
@@ -1336,6 +1399,25 @@ const DesktopTargetRuntime = ({
 
   const selectSession = async (kind: AiKind, session: MobileSession): Promise<void> => {
     const selectedRuntime = readSessionRuntime(viewsRef.current[kind].runtimes, session.id);
+    // Seed host-synced settings before anything launches so the session opens
+    // with the model/effort it was last driven with on any surface.
+    const hostSettings = hostSessionSettings.current[sessionGoalKey(kind, session.id)];
+    const localSettings = selectedRuntime.executionSettings;
+    if (
+      hostSettings
+      && localSettings.model === null
+      && localSettings.effort === null
+      && localSettings.serviceTier === null
+    ) {
+      updateRuntime(kind, session.id, (runtime) => ({
+        ...runtime,
+        executionSettings: {
+          model: hostSettings.model,
+          effort: hostSettings.effort,
+          serviceTier: hostSettings.serviceTier,
+        },
+      }));
+    }
     const shouldReconnect = selectedRuntime.connectionState === "disconnected";
     const shouldLoadHistory = selectedRuntime.historyState === "idle";
     updateView(kind, (current) => ({
@@ -1791,6 +1873,9 @@ const DesktopTargetRuntime = ({
         if (!client) throw new Error("Codex channel is not ready");
         await client.updateSessionSettings(sessionId, settings);
       }
+      // Best-effort host sync so other surfaces load this session with the
+      // same settings.
+      if (sessionId) void pushSessionSettings(kind, sessionId, settings);
     } catch (reason) {
       updateRuntime(kind, sessionId, (sessionRuntime) => ({
         ...sessionRuntime,

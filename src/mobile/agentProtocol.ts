@@ -66,6 +66,50 @@ export const encodeSessionGoal = (goal: SessionGoal): string => {
   return btoa(binary);
 };
 
+// Host-shared per-session execution settings, keyed like goals with
+// sessionGoalKey. Loading a session on any surface restores the model/effort
+// it was last driven with instead of falling back to defaults.
+export interface SessionSettings {
+  model: string | null;
+  effort: string | null;
+  serviceTier: string | null;
+  updatedAt: number;
+}
+
+export const encodeSessionSettings = (settings: SessionSettings): string => {
+  const bytes = new TextEncoder().encode(JSON.stringify(settings));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+};
+
+const settingValue = (value: unknown): string | null =>
+  typeof value === "string" && value ? value : null;
+
+export const parseSessionSettingsMessage = (
+  message: Record<string, unknown>,
+): Record<string, SessionSettings> | null => {
+  if (
+    message.type !== "muxpit_session_settings"
+    || typeof message.settings !== "object"
+    || message.settings === null
+  ) {
+    return null;
+  }
+  const settings: Record<string, SessionSettings> = {};
+  for (const [key, value] of Object.entries(message.settings as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const entry = value as Record<string, unknown>;
+    settings[key] = {
+      model: settingValue(entry.model),
+      effort: settingValue(entry.effort),
+      serviceTier: settingValue(entry.serviceTier),
+      updatedAt: typeof entry.updatedAt === "number" ? entry.updatedAt : 0,
+    };
+  }
+  return settings;
+};
+
 export const parseSessionGoalsMessage = (
   message: Record<string, unknown>,
 ): Record<string, SessionGoal> | null => {
