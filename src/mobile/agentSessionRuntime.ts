@@ -86,6 +86,11 @@ export const readSessionRuntime = (
 export const activeSessionCount = (runtimes: AgentSessionRuntimes): number =>
   Object.values(runtimes).filter((runtime) => runtime.running || runtime.waiting).length;
 
+export const runningSessionIds = (runtimes: AgentSessionRuntimes): string[] =>
+  Object.entries(runtimes)
+    .filter(([key, runtime]) => key !== NEW_SESSION_KEY && (runtime.running || runtime.waiting))
+    .map(([key]) => key);
+
 export const updateSessionRuntime = (
   runtimes: AgentSessionRuntimes,
   sessionId: string | null | undefined,

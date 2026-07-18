@@ -149,7 +149,7 @@ test("mobile refreshes every saved host without replacing active SSH channels", 
   assert.doesNotMatch(nativeAgent, /mobile_ssh_disconnect\(state\.clone\(\)\)\.await/);
   assert.match(build, /"mobile_agent_installed"/);
   assert.match(capability, /"allow-mobile-agent-installed"/);
-  assert.match(mobileApp, /sessions: replaceAgentSessions\(event\.sessions\)/);
+  assert.match(mobileApp, /sessions: reconcileAgentSessions\(\s*event\.sessions,/);
 });
 
 test("mobile opens and controls every desktop ACP provider", () => {

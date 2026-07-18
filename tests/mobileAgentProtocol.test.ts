@@ -8,6 +8,7 @@ import {
   normalizeClaudeMessage,
   normalizeClaudeHistoryMessage,
   normalizeCodexMessage,
+  reconcileAgentSessions,
 } from "../src/mobile/agentProtocol.ts";
 
 test("JSON line decoder preserves split UTF-8 chunks", () => {
@@ -252,4 +253,34 @@ test("composer action distinguishes send, steer, and queue", () => {
   assert.equal(composerAction(false, false), "send");
   assert.equal(composerAction(true, false), "steer");
   assert.equal(composerAction(true, true), "queue");
+});
+
+test("reconciled session lists keep active and running sessions the lister missed", () => {
+  const fresh = [
+    { id: "listed-1", title: "Listed", updatedAt: 100, provider: "claude" as const },
+  ];
+  const current = [
+    { id: "active-new", title: "Just created", updatedAt: 200, provider: "claude" as const },
+    { id: "running-1", title: "Running", updatedAt: 150, provider: "claude" as const },
+    { id: "stale-1", title: "Deleted on host", updatedAt: 50, provider: "claude" as const },
+  ];
+
+  assert.deepEqual(
+    reconcileAgentSessions(fresh, current, ["active-new", "running-1"]).map((session) => session.id),
+    ["active-new", "running-1", "listed-1"],
+  );
+});
+
+test("reconciled session lists prefer the fresh entry for kept ids", () => {
+  const fresh = [
+    { id: "session-1", title: "Authoritative", cwd: "/srv", updatedAt: 300, provider: "claude" as const },
+  ];
+  const current = [
+    { id: "session-1", title: "Stub", updatedAt: 200, provider: "claude" as const },
+  ];
+
+  assert.deepEqual(
+    reconcileAgentSessions(fresh, current, ["session-1"]),
+    fresh,
+  );
 });

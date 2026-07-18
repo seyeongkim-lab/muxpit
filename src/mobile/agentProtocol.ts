@@ -95,6 +95,22 @@ export const mergeAgentSessions = (
 export const replaceAgentSessions = (fresh: MobileSession[]): MobileSession[] =>
   mergeAgentSessions([], fresh);
 
+// A freshly created session can be missing from a list snapshot for a few
+// seconds (the provider persists its history file only after the first
+// prompt), so a wholesale replace would drop the session the user is working
+// in. Keep current entries for the ids in `keepIds` (active/running sessions)
+// until the lister catches up; everything else follows the fresh list.
+export const reconcileAgentSessions = (
+  fresh: MobileSession[],
+  current: MobileSession[],
+  keepIds: ReadonlyArray<string | null | undefined>,
+): MobileSession[] => {
+  const listed = new Set(fresh.map((session) => session.id));
+  const kept = current.filter((session) =>
+    keepIds.includes(session.id) && !listed.has(session.id));
+  return mergeAgentSessions(kept, fresh);
+};
+
 export interface MobileTimelineItem {
   id: string;
   kind: "user" | "assistant" | "tool" | "status";

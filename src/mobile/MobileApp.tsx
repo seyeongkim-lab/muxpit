@@ -20,6 +20,7 @@ import {
   normalizeClaudeHistoryMessage,
   parseSessionGoalsMessage,
   sessionGoalKey,
+  reconcileAgentSessions,
   replaceAgentSessions,
   type MobileAgentEvent,
   type MobileSession,
@@ -33,6 +34,7 @@ import {
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
+  runningSessionIds,
   sessionRuntimeLabel,
   sessionRuntimeKey,
   shouldProcessAgentChannelPayload,
@@ -509,7 +511,11 @@ export const MobileApp = () => {
     if (profileId === currentProfileRef.current?.id) {
       updateProviderView(kind, (view) => ({
         ...view,
-        sessions: replaceAgentSessions(fresh),
+        sessions: reconcileAgentSessions(
+          fresh,
+          view.sessions,
+          [view.activeSessionId, ...runningSessionIds(view.runtimes)],
+        ),
       }));
       return;
     }
@@ -1002,6 +1008,11 @@ export const MobileApp = () => {
           activeProviderSessionId,
           cwd || profile.cwd || ".",
         );
+        updateProviderRuntime(
+          nextProvider,
+          activeProviderSessionId,
+          (runtime) => completeSessionHistory(runtime, []),
+        );
       }
       updateProviderRuntime(nextProvider, activeProviderSessionId, (runtime) => ({
         ...runtime,
@@ -1069,6 +1080,11 @@ export const MobileApp = () => {
           await client.initialize();
           if (activeProviderSessionId) {
             await client.loadSession(activeProviderSessionId, cwd || profile.cwd || ".");
+            updateProviderRuntime(
+              nextProvider,
+              activeProviderSessionId,
+              (runtime) => completeSessionHistory(runtime, []),
+            );
           }
         }
         if (generation !== runtimeGeneration.current || !channels.current.has(channelId)) {
@@ -1412,7 +1428,11 @@ export const MobileApp = () => {
       case "sessionsLoaded":
         updateProviderView(kind, (view) => ({
           ...view,
-          sessions: replaceAgentSessions(event.sessions),
+          sessions: reconcileAgentSessions(
+            event.sessions,
+            view.sessions,
+            [view.activeSessionId, ...runningSessionIds(view.runtimes)],
+          ),
         }));
         return;
       case "sessionLoaded":
@@ -1634,7 +1654,11 @@ export const MobileApp = () => {
           helperTimeouts.current.delete(event.channelId);
           updateProviderView(meta.provider, (view) => ({
             ...view,
-            sessions: message.sessions as MobileSession[],
+            sessions: reconcileAgentSessions(
+              message.sessions as MobileSession[],
+              view.sessions,
+              [view.activeSessionId, ...runningSessionIds(view.runtimes)],
+            ),
           }));
           continue;
         }
@@ -1666,13 +1690,29 @@ export const MobileApp = () => {
             }
             providerChannels.current.set(providerChannelKey("claude", eventSessionId), event.channelId);
             meta.sessionId = eventSessionId;
-            updateProviderView("claude", (view) => ({
-              ...view,
-              activeSessionId: view.activeSessionId === previousId
-                ? eventSessionId
-                : view.activeSessionId,
-              runtimes: moveSessionRuntime(view.runtimes, previousId, eventSessionId),
-            }));
+            updateProviderView("claude", (view) => {
+              const runtimes = moveSessionRuntime(view.runtimes, previousId, eventSessionId);
+              // List the session as soon as its id is known; the periodic
+              // claude-list refresh fills in the authoritative title/cwd once
+              // the session file lands on the host.
+              const firstUserText = readSessionRuntime(runtimes, eventSessionId)
+                .items.find((item) => item.kind === "user")?.text ?? "";
+              return {
+                ...view,
+                activeSessionId: view.activeSessionId === previousId
+                  ? eventSessionId
+                  : view.activeSessionId,
+                runtimes,
+                sessions: view.sessions.some((session) => session.id === eventSessionId)
+                  ? view.sessions
+                  : [{
+                      id: eventSessionId,
+                      title: firstUserText.slice(0, 80) || "Claude session",
+                      updatedAt: Math.floor(Date.now() / 1000),
+                      provider: "claude" as const,
+                    }, ...view.sessions],
+              };
+            });
           }
           normalizedHandlerRef.current(meta.provider, normalized);
         }
@@ -1747,6 +1787,15 @@ export const MobileApp = () => {
             activeSessionId: view.activeSessionId === null
               ? createdSessionId
               : view.activeSessionId,
+            sessions: view.sessions.some((session) => session.id === createdSessionId)
+              ? view.sessions
+              : [{
+                  id: createdSessionId,
+                  title: timelineText.slice(0, 80),
+                  cwd: profile.cwd || undefined,
+                  updatedAt: Math.floor(Date.now() / 1000),
+                  provider: kind,
+                }, ...view.sessions],
           }));
           sessionRuntime = readSessionRuntime(readProviderView(kind).runtimes, createdSessionId);
           updateProviderRuntime(kind, createdSessionId, (runtime) => ({
@@ -2038,6 +2087,11 @@ export const MobileApp = () => {
           session.id,
           session.cwd ?? profile.cwd ?? ".",
         );
+        // ACP replays history via session/update events; the resolved
+        // session/load is the only completion signal, so mark the runtime
+        // loaded here or it stays on "Loading session…" with the composer
+        // blocked.
+        updateProviderRuntime(kind, session.id, (runtime) => completeSessionHistory(runtime, []));
       }
     } catch (reason) {
       updateProviderRuntime(kind, session.id, failSessionHistory);

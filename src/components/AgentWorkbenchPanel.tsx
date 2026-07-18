@@ -45,7 +45,7 @@ import {
   mergeAgentSessions,
   normalizeClaudeHistoryMessage,
   parseSessionGoalsMessage,
-  replaceAgentSessions,
+  reconcileAgentSessions,
   sessionGoalKey,
   type MobileAgentEvent,
   type MobileSession,
@@ -59,6 +59,7 @@ import {
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
+  runningSessionIds,
   sessionRuntimeLabel,
   sessionRuntimeKey,
   shouldProcessAgentChannelPayload,
@@ -488,7 +489,11 @@ const DesktopTargetRuntime = ({
       case "sessionsLoaded":
         updateView(kind, (current) => ({
           ...current,
-          sessions: replaceAgentSessions(event.sessions),
+          sessions: reconcileAgentSessions(
+            event.sessions,
+            current.sessions,
+            [current.activeSessionId, ...runningSessionIds(current.runtimes)],
+          ),
           status: "ready",
         }));
         return;
@@ -825,8 +830,16 @@ const DesktopTargetRuntime = ({
             );
             try {
               await client.loadSession(resumedSessionId, activeSession?.cwd ?? target.cwd ?? ".");
+              updateRuntime(kind, resumedSessionId, (runtime) => completeSessionHistory(runtime, []));
             } catch (reason) {
-              updateView(kind, (current) => ({ ...current, error: String(reason) }));
+              // Leave "loading" (e.g. the provider cannot replay saved
+              // sessions) or the timeline sticks on the placeholder and the
+              // composer stays blocked.
+              updateView(kind, (current) => ({
+                ...current,
+                runtimes: updateSessionRuntime(current.runtimes, resumedSessionId, failSessionHistory),
+                error: String(reason),
+              }));
             }
           }
           updateView(kind, (current) => ({ ...current, status: "ready" }));
@@ -1056,13 +1069,29 @@ const DesktopTargetRuntime = ({
               }
               providerChannels.current.set(providerChannelKey("claude", eventSessionId), event.channelId);
               meta.sessionId = eventSessionId;
-              updateView("claude", (current) => ({
-                ...current,
-                activeSessionId: current.activeSessionId === (previousId ?? null)
-                  ? eventSessionId
-                  : current.activeSessionId,
-                runtimes: moveSessionRuntime(current.runtimes, previousId, eventSessionId),
-              }));
+              updateView("claude", (current) => {
+                const runtimes = moveSessionRuntime(current.runtimes, previousId, eventSessionId);
+                // List the session as soon as its id is known; the periodic
+                // claude-list refresh fills in the authoritative title/cwd once
+                // the session file lands on the host.
+                const firstUserText = readSessionRuntime(runtimes, eventSessionId)
+                  .items.find((item) => item.kind === "user")?.text ?? "";
+                return {
+                  ...current,
+                  activeSessionId: current.activeSessionId === (previousId ?? null)
+                    ? eventSessionId
+                    : current.activeSessionId,
+                  runtimes,
+                  sessions: current.sessions.some((session) => session.id === eventSessionId)
+                    ? current.sessions
+                    : [{
+                        id: eventSessionId,
+                        title: firstUserText.slice(0, 80) || "Claude session",
+                        updatedAt: Math.floor(Date.now() / 1000),
+                        provider: "claude" as const,
+                      }, ...current.sessions],
+                };
+              });
             }
             applyEvent("claude", item);
           }
@@ -1302,6 +1331,11 @@ const DesktopTargetRuntime = ({
       } else {
         if (shouldLoadHistory) {
           await acpClients.current.get(kind)?.loadSession(session.id, session.cwd ?? target.cwd ?? ".");
+          // ACP replays history via session/update events; the resolved
+          // session/load is the only completion signal, so mark the runtime
+          // loaded here or it stays on "Loading session…" with the composer
+          // blocked.
+          updateRuntime(kind, session.id, (runtime) => completeSessionHistory(runtime, []));
         }
       }
     } catch (reason) {

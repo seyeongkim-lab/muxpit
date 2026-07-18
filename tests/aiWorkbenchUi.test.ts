@@ -193,8 +193,8 @@ test("desktop workbench restores the last host provider and session", () => {
 test("fresh provider lists replace cached desktop sessions", () => {
   const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
 
-  assert.match(workbench, /replaceAgentSessions/);
-  assert.match(workbench, /sessions: replaceAgentSessions\(event\.sessions\)/);
+  assert.match(workbench, /reconcileAgentSessions/);
+  assert.match(workbench, /sessions: reconcileAgentSessions\(\s*event\.sessions,/);
 });
 
 test("AI workbench stores composer state in each session runtime", () => {

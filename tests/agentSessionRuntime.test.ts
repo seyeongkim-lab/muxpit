@@ -9,6 +9,7 @@ import {
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
+  runningSessionIds,
   shouldProcessAgentChannelPayload,
   updateSessionRuntime,
   sessionRuntimeLabel,
@@ -206,4 +207,14 @@ test("failed session history can be retried", () => {
 
   assert.equal(failed.historyState, "idle");
   assert.deepEqual(failed.items, []);
+});
+
+test("running session ids skip idle runtimes and the draft session", () => {
+  let runtimes = {};
+  runtimes = updateSessionRuntime(runtimes, "session-1", (runtime) => ({ ...runtime, running: true }));
+  runtimes = updateSessionRuntime(runtimes, "session-2", (runtime) => ({ ...runtime, waiting: true }));
+  runtimes = updateSessionRuntime(runtimes, "session-3", (runtime) => runtime);
+  runtimes = updateSessionRuntime(runtimes, null, (runtime) => ({ ...runtime, running: true }));
+
+  assert.deepEqual(runningSessionIds(runtimes).sort(), ["session-1", "session-2"]);
 });
