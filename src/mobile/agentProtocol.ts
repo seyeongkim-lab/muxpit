@@ -405,6 +405,16 @@ export const normalizeClaudeMessage = (value: unknown): MobileAgentEvent[] => {
   return [];
 };
 
+// stream-json control request that asks a running claude CLI to stop the
+// current turn without killing the process; the CLI answers with a
+// control_response (ignored by the normalizer) and a result message.
+export const claudeInterruptLine = (requestId: string): string =>
+  JSON.stringify({
+    type: "control_request",
+    request_id: requestId,
+    request: { subtype: "interrupt" },
+  });
+
 export class ClaudeStreamNormalizer {
   private readonly messageIds = new Map<string, string>();
 
