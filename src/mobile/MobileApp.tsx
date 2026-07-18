@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   claudePromptLine,
   createAgentImageAttachments,
@@ -7,6 +7,7 @@ import {
 } from "../agent/agentImages.ts";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import { AgentImageAttachments } from "../components/AgentImageAttachments.tsx";
+import { MarkdownContent, ToolOutput } from "../components/AgentMessageContent.tsx";
 import {
   CodexMobileClient,
   type CodexModelOption,
@@ -2567,16 +2568,21 @@ const appendUserMessage = (
   { id: `user-${Date.now()}-${items.length}`, kind: "user", text },
 ];
 
-const TimelineRow = ({ item }: { item: MobileTimelineItem }) => (
+// Memoized so streaming deltas only re-render the row receiving text.
+const TimelineRow = memo(({ item }: { item: MobileTimelineItem }) => (
   <article className={`timeline-row ${item.kind}`}>
     <div className="timeline-content">
       <span className="timeline-label">
         {item.kind === "user" ? "You" : item.kind === "assistant" ? "Agent" : item.title ?? "Status"}
       </span>
-      {item.kind === "tool" ? <pre>{item.text}</pre> : <p>{item.text}</p>}
+      {item.kind === "tool"
+        ? <ToolOutput text={item.text} />
+        : item.kind === "assistant"
+          ? <MarkdownContent text={item.text} />
+          : <p>{item.text}</p>}
     </div>
   </article>
-);
+));
 
 interface ConnectionViewProps {
   profiles: HostProfile[];
