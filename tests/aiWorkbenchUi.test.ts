@@ -30,9 +30,26 @@ test("AI workbench uses readable type and a window-relative resize limit", () =>
   assert.match(workbench, /window\.innerWidth - MIN_TERMINAL_WIDTH/);
   assert.doesNotMatch(workbench, /Math\.min\(760/);
   assert.doesNotMatch(styles, /max-width: min\(760px/);
-  assert.match(styles, /\.agent-workbench \{[\s\S]*?font-size: 13px;/);
-  assert.match(styles, /\.agent-timeline-row p \{[\s\S]*?font-size: 14px;/);
-  assert.match(styles, /\.agent-composer textarea \{[\s\S]*?font-size: 14px;/);
+  assert.match(styles, /\.agent-workbench \{[^}]*font-size: 15px;/);
+  assert.match(styles, /\.agent-timeline-row p \{[^}]*font-size: 16px;/);
+  assert.match(styles, /\.agent-composer textarea \{[^}]*font-size: 16px;/);
+});
+
+test("workbench resizes its session column and docks the terminal below the composer", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const styles = readSource("../src/components/AgentWorkbenchPanel.css");
+  const app = readSource("../src/App.tsx");
+
+  assert.match(workbench, /gridTemplateColumns: `\$\{sessionWidth\}px minmax\(0, 1fr\)`/);
+  assert.match(workbench, /className="agent-session-resizer" onMouseDown=\{startSessionResize\}/);
+  assert.match(workbench, /localStorage\.setItem\(SESSION_COLUMN_WIDTH_KEY, String\(sessionWidth\)\)/);
+  assert.match(workbench, /className="agent-terminal-dock" style=\{\{ height: dockHeight \}\}/);
+  assert.match(workbench, /className="agent-terminal-dock-resizer" onMouseDown=\{startDockResize\}/);
+  assert.match(workbench, /localStorage\.setItem\(TERMINAL_DOCK_HEIGHT_KEY, String\(dockHeight\)\)/);
+  assert.match(styles, /\.agent-session-resizer \{[^}]*cursor: col-resize;/);
+  assert.match(styles, /\.agent-terminal-dock-resizer \{[^}]*cursor: row-resize;/);
+  assert.match(app, /dock=\{agentWorkbenchOpen \? terminalContent : undefined\}/);
+  assert.match(app, /\{agentWorkbenchOpen \? null : \(\s*<div style=\{styles\.terminalArea\}>\{terminalContent\}<\/div>\s*\)\}/);
 });
 
 test("desktop workbench folds its close control into the session actions", () => {

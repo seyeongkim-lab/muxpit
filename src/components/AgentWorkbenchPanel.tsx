@@ -101,6 +101,8 @@ import "./AgentWorkbenchPanel.css";
 interface AgentWorkbenchPanelProps {
   open: boolean;
   onClose: () => void;
+  /** Terminal area content docked below the AI composer while the panel is open. */
+  dock?: React.ReactNode;
 }
 
 interface ProviderView {
@@ -166,6 +168,16 @@ interface DesktopTargetRuntimeProps {
 
 const MIN_WORKBENCH_WIDTH = 420;
 const MIN_TERMINAL_WIDTH = 280;
+const SESSION_COLUMN_WIDTH_KEY = "muxpit-workbench-session-width";
+const MIN_SESSION_COLUMN_WIDTH = 150;
+const MAX_SESSION_COLUMN_WIDTH = 460;
+const TERMINAL_DOCK_HEIGHT_KEY = "muxpit-workbench-dock-height";
+const MIN_TERMINAL_DOCK_HEIGHT = 80;
+
+const clampedStoredPx = (key: string, fallback: number, min: number, max: number): number => {
+  const stored = Number.parseInt(localStorage.getItem(key) ?? "", 10);
+  return Number.isFinite(stored) ? Math.min(max, Math.max(min, stored)) : fallback;
+};
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
 const DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v2:";
 const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v1:";
@@ -2227,7 +2239,7 @@ const DesktopTargetRuntime = ({
   );
 };
 
-export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps) => {
+export const AgentWorkbenchPanel = ({ open, onClose, dock }: AgentWorkbenchPanelProps) => {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const activeId = useWorkspaceStore((state) => state.activeId);
   const leafCwds = useWorkspaceInfoStore((state) => state.leafCwds);
@@ -2251,6 +2263,16 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
   const [newSessionContext, setNewSessionContext] = useState("");
   const [newSessionProvider, setNewSessionProvider] = useState<AiKind>("codex");
   const [width, setWidth] = useState(620);
+  const [sessionWidth, setSessionWidth] = useState(() =>
+    clampedStoredPx(SESSION_COLUMN_WIDTH_KEY, 210, MIN_SESSION_COLUMN_WIDTH, MAX_SESSION_COLUMN_WIDTH));
+  const [dockHeight, setDockHeight] = useState(() =>
+    clampedStoredPx(TERMINAL_DOCK_HEIGHT_KEY, 280, MIN_TERMINAL_DOCK_HEIGHT, window.innerHeight));
+  useEffect(() => {
+    localStorage.setItem(SESSION_COLUMN_WIDTH_KEY, String(sessionWidth));
+  }, [sessionWidth]);
+  useEffect(() => {
+    localStorage.setItem(TERMINAL_DOCK_HEIGHT_KEY, String(dockHeight));
+  }, [dockHeight]);
   const selectionSequence = useRef(initialSelection.current ? 1 : 0);
   const commandSequence = useRef(0);
 
@@ -2507,10 +2529,58 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
     document.addEventListener("mouseup", stopResize);
   };
 
+  const startSessionResize = (event: React.MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sessionWidth;
+    const move = (moveEvent: MouseEvent) => {
+      setSessionWidth(Math.min(
+        MAX_SESSION_COLUMN_WIDTH,
+        Math.max(MIN_SESSION_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX),
+      ));
+    };
+    const stopResize = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", stopResize);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", stopResize);
+  };
+
+  const startDockResize = (event: React.MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = dockHeight;
+    const move = (moveEvent: MouseEvent) => {
+      const maxHeight = Math.max(MIN_TERMINAL_DOCK_HEIGHT, Math.round(window.innerHeight * 0.75));
+      setDockHeight(Math.min(
+        maxHeight,
+        Math.max(MIN_TERMINAL_DOCK_HEIGHT, startHeight + startY - moveEvent.clientY),
+      ));
+    };
+    const stopResize = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", stopResize);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", stopResize);
+  };
+
+  // While the terminal is docked the panel owns the full area right of the
+  // sidebar, so the side resizer is pointless and the width style must yield.
+  const docked = Boolean(dock);
   return (
-    <aside className="agent-workbench" style={{ width }} aria-label="AI workbench" hidden={!open}>
-      <div className="agent-workbench-resizer" onMouseDown={startResize} />
-      <div className="agent-workbench-body">
+    <aside
+      className="agent-workbench"
+      style={docked ? { flex: "1 1 auto", width: "auto", maxWidth: "none" } : { width }}
+      aria-label="AI workbench"
+      hidden={!open}
+    >
+      {docked ? null : <div className="agent-workbench-resizer" onMouseDown={startResize} />}
+      <div
+        className="agent-workbench-body"
+        style={{ gridTemplateColumns: `${sessionWidth}px minmax(0, 1fr)` }}
+      >
         <section className="agent-session-column">
           <div className="agent-session-actions">
             <span>Sessions</span>
@@ -2627,20 +2697,29 @@ export const AgentWorkbenchPanel = ({ open, onClose }: AgentWorkbenchPanelProps)
             })}
             {filteredSessions.length === 0 ? <p>No saved sessions</p> : null}
           </div>
+          <div className="agent-session-resizer" onMouseDown={startSessionResize} />
         </section>
 
-        <div className="agent-target-runtimes">
-          {targets.map((target) => (
-            <DesktopTargetRuntime
-              key={target.key}
-              command={command}
-              discover={open}
-              active={open && target.key === activeTargetKey}
-              selection={selection}
-              target={target}
-              onSnapshot={updateTargetSnapshot}
-            />
-          ))}
+        <div className="agent-main-column">
+          <div className="agent-target-runtimes">
+            {targets.map((target) => (
+              <DesktopTargetRuntime
+                key={target.key}
+                command={command}
+                discover={open}
+                active={open && target.key === activeTargetKey}
+                selection={selection}
+                target={target}
+                onSnapshot={updateTargetSnapshot}
+              />
+            ))}
+          </div>
+          {docked ? (
+            <div className="agent-terminal-dock" style={{ height: dockHeight }}>
+              <div className="agent-terminal-dock-resizer" onMouseDown={startDockResize} />
+              <div className="agent-terminal-dock-body">{dock}</div>
+            </div>
+          ) : null}
         </div>
       </div>
     </aside>

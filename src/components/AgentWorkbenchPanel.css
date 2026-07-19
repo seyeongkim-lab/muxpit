@@ -14,7 +14,7 @@
   background: var(--muxpit-bg);
   border-left: 1px solid var(--muxpit-hairline-strong);
   font-family: var(--muxpit-font-sans, system-ui, sans-serif);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .agent-workbench[hidden] {
@@ -56,14 +56,14 @@
 }
 
 .agent-workbench-empty strong {
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .agent-workbench-empty p {
   max-width: 310px;
   margin: 0;
   color: var(--muxpit-subtext);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
 }
 
@@ -77,12 +77,27 @@
 }
 
 .agent-session-column {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--muxpit-bg-elev);
   border-right: 1px solid var(--muxpit-hairline);
+}
+
+.agent-session-resizer {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.agent-session-resizer:hover {
+  background: color-mix(in srgb, var(--muxpit-accent) 42%, transparent);
 }
 
 .agent-session-actions {
@@ -92,7 +107,7 @@
   justify-content: space-between;
   padding: 0 9px 0 11px;
   color: var(--muxpit-subtext);
-  font-size: 11px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -101,7 +116,7 @@
   padding: 4px 7px;
   border: 1px solid var(--muxpit-hairline-strong);
   background: var(--muxpit-bg);
-  font-size: 11px;
+  font-size: 13px;
   text-transform: none;
   cursor: pointer;
 }
@@ -158,7 +173,7 @@
 
 .agent-new-session label > span {
   color: var(--muxpit-subtext);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -171,7 +186,7 @@
   outline: 0;
   background: var(--muxpit-bg);
   color: var(--muxpit-text);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .agent-new-session > button {
@@ -191,7 +206,7 @@
   outline: 0;
   background: var(--muxpit-bg);
   color: var(--muxpit-text);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .agent-session-column > input:focus {
@@ -244,7 +259,7 @@
 }
 
 .agent-session-main > strong {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -256,7 +271,7 @@
   border: 0;
   background: transparent;
   color: var(--muxpit-subtext);
-  font-size: 9px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -281,7 +296,7 @@
 .agent-session-cwd {
   color: var(--muxpit-subtext);
   font-family: var(--muxpit-font-mono);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .agent-session-context {
@@ -292,7 +307,7 @@
   gap: 5px;
   overflow: hidden;
   color: var(--muxpit-subtext);
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -311,7 +326,7 @@
   border: 1px solid var(--muxpit-hairline-strong);
   color: var(--muxpit-accent);
   font-family: var(--muxpit-font-mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .agent-session-provider-mark img {
@@ -325,7 +340,7 @@
   top: 9px;
   right: 7px;
   color: var(--muxpit-subtext);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .agent-session-list small.running {
@@ -336,14 +351,51 @@
 .agent-session-list > p {
   padding: 18px 10px;
   color: var(--muxpit-subtext);
-  font-size: 12px;
+  font-size: 14px;
   text-align: center;
+}
+
+.agent-main-column {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .agent-target-runtimes {
   min-width: 0;
   min-height: 0;
+  flex: 1;
   display: grid;
+  overflow: hidden;
+}
+
+/* Terminal docked below the AI composer; the top-edge handle slides it. */
+.agent-terminal-dock {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 0;
+  border-top: 2px solid var(--muxpit-hairline-strong);
+}
+
+.agent-terminal-dock-resizer {
+  position: absolute;
+  z-index: 2;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+}
+
+.agent-terminal-dock-resizer:hover {
+  background: color-mix(in srgb, var(--muxpit-accent) 42%, transparent);
+}
+
+.agent-terminal-dock-body {
+  position: relative;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -388,7 +440,7 @@
 .agent-conversation-header-main > div:first-child > span {
   color: var(--muxpit-accent);
   font-family: var(--muxpit-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -407,7 +459,7 @@
   border: 1px solid var(--muxpit-hairline);
   background: transparent;
   color: var(--muxpit-subtext);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
@@ -430,7 +482,7 @@
 
 .agent-execution-settings label > span {
   color: var(--muxpit-subtext);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -441,12 +493,12 @@
   border: 1px solid var(--muxpit-hairline-strong);
   background: var(--muxpit-bg);
   color: var(--muxpit-text);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .agent-conversation-header strong {
   overflow: hidden;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -457,7 +509,7 @@
   padding: 3px 6px;
   border: 1px solid var(--muxpit-hairline);
   color: var(--muxpit-subtext);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
 }
 
@@ -486,13 +538,13 @@
 
 .agent-timeline-empty strong {
   color: var(--muxpit-text);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .agent-timeline-empty p {
   max-width: 280px;
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
 }
 
@@ -543,7 +595,7 @@
   gap: 5px;
   margin-bottom: 4px;
   color: var(--muxpit-subtext);
-  font-size: 11px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -567,7 +619,7 @@
 .agent-timeline-row p {
   margin: 0;
   color: var(--muxpit-text);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -583,7 +635,7 @@
   background: var(--muxpit-bg-elev);
   color: var(--muxpit-text);
   font-family: var(--muxpit-font-mono);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
 }
@@ -593,7 +645,7 @@
   display: block;
   overflow: hidden;
   color: var(--muxpit-accent);
-  font-size: 12px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -618,7 +670,7 @@
   border: 1px solid var(--muxpit-hairline);
   background: var(--muxpit-bg-elev);
   color: var(--muxpit-text);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .agent-goal-bar button {
@@ -626,7 +678,7 @@
   border: 1px solid var(--muxpit-hairline);
   background: transparent;
   color: var(--muxpit-subtext);
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -647,7 +699,7 @@
   overflow: hidden;
   flex: 1;
   color: var(--muxpit-text);
-  font-size: 12px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -672,7 +724,7 @@
 .agent-md ol {
   padding-left: 20px;
   color: var(--muxpit-text);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.55;
 }
 
@@ -686,7 +738,7 @@
   border: 1px solid var(--muxpit-hairline);
   background: var(--muxpit-bg-elev);
   font-family: var(--muxpit-font-mono);
-  font-size: 12.5px;
+  font-size: 14.5px;
 }
 
 .agent-md pre code {
@@ -702,12 +754,12 @@
 
 .agent-md-h1,
 .agent-md-h2 {
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .agent-md-h3,
 .agent-md-h4 {
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .agent-md-link {
@@ -720,7 +772,7 @@
   overflow: hidden;
   color: var(--muxpit-subtext);
   font-family: var(--muxpit-font-mono);
-  font-size: 12px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
@@ -741,7 +793,7 @@
   border-left: 2px solid #e06c75;
   background: color-mix(in srgb, #e06c75 10%, var(--muxpit-bg));
   color: var(--muxpit-text);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -750,7 +802,7 @@
   border: 0;
   background: transparent;
   color: var(--muxpit-subtext);
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -764,7 +816,7 @@
 .agent-approval strong {
   display: block;
   margin-bottom: 7px;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .agent-approval > div {
@@ -779,7 +831,7 @@
   padding: 5px 8px;
   border: 1px solid var(--muxpit-hairline-strong);
   background: var(--muxpit-bg);
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -795,7 +847,7 @@
   gap: 4px;
   margin: 0 0 8px;
   color: var(--muxpit-subtext);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .agent-working span {
@@ -823,7 +875,7 @@
   padding: 6px 9px;
   border-top: 1px solid var(--muxpit-hairline);
   background: var(--muxpit-bg-elev);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .agent-queue-preview span {
@@ -867,7 +919,7 @@
   outline: 0;
   background: var(--muxpit-bg);
   color: var(--muxpit-text);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.45;
 }
 
@@ -891,7 +943,7 @@
 
 .agent-composer-actions span {
   color: var(--muxpit-subtext);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .agent-composer-actions button {
@@ -899,7 +951,7 @@
   padding: 0 9px;
   border: 1px solid var(--muxpit-hairline-strong);
   background: var(--muxpit-bg);
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 

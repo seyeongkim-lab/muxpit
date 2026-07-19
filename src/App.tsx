@@ -914,6 +914,41 @@ export const App = () => {
     }
   }, []);
 
+  // Terminal surfaces survive the move because useTerminalSession reattaches
+  // existing instances; the content renders in the main area normally, or
+  // docked below the AI composer while the workbench is open.
+  const terminalContent = gridView ? (
+    <GridOverview
+      workspaces={workspaces}
+      activeId={activeId}
+    />
+  ) : activeWs ? (
+    <>
+      <SplitPane
+        node={
+          activeWs.zoomedLeafId
+            ? collectOrderedLeaves(activeWs.layout).find((n) => n.id === activeWs.zoomedLeafId) ?? activeWs.layout
+            : activeWs.layout
+        }
+        workspaceId={activeWs.id}
+        browserVisible={browserVisible}
+      />
+      <PaneNumberOverlay workspaceId={activeWs.id} />
+    </>
+  ) : (
+    <div style={styles.welcome}>
+      <div style={styles.welcomeLogo}>muxpit</div>
+      <div style={styles.welcomeTagline}>Terminal Multiplexer</div>
+      <div style={styles.welcomeHints}>
+        <span><b>Ctrl+Shift+T</b> New session</span>
+        <span><b>Ctrl+Shift+D</b> Split horizontal</span>
+        <span><b>Ctrl+Shift+E</b> Split vertical</span>
+        <span><b>Ctrl+Shift+G</b> Grid overview</span>
+        <span><b>H</b> button to manage SSH hosts</span>
+      </div>
+    </div>
+  );
+
   return (
     <div style={styles.container}>
       {dashboardLayout === "left" ? (
@@ -970,42 +1005,13 @@ export const App = () => {
             sshCommand={fileRailSshCommand}
           />
         ) : null}
-        <div style={styles.terminalArea}>
-          {gridView ? (
-            <GridOverview
-              workspaces={workspaces}
-              activeId={activeId}
-            />
-          ) : activeWs ? (
-            <>
-              <SplitPane
-                node={
-                  activeWs.zoomedLeafId
-                    ? collectOrderedLeaves(activeWs.layout).find((n) => n.id === activeWs.zoomedLeafId) ?? activeWs.layout
-                    : activeWs.layout
-                }
-                workspaceId={activeWs.id}
-                browserVisible={browserVisible}
-              />
-              <PaneNumberOverlay workspaceId={activeWs.id} />
-            </>
-          ) : (
-            <div style={styles.welcome}>
-              <div style={styles.welcomeLogo}>muxpit</div>
-              <div style={styles.welcomeTagline}>Terminal Multiplexer</div>
-              <div style={styles.welcomeHints}>
-                <span><b>Ctrl+Shift+T</b> New session</span>
-                <span><b>Ctrl+Shift+D</b> Split horizontal</span>
-                <span><b>Ctrl+Shift+E</b> Split vertical</span>
-                <span><b>Ctrl+Shift+G</b> Grid overview</span>
-                <span><b>H</b> button to manage SSH hosts</span>
-              </div>
-            </div>
-          )}
-        </div>
+        {agentWorkbenchOpen ? null : (
+          <div style={styles.terminalArea}>{terminalContent}</div>
+        )}
         <AgentWorkbenchPanel
           open={agentWorkbenchOpen}
           onClose={() => setAgentWorkbenchOpen(false)}
+          dock={agentWorkbenchOpen ? terminalContent : undefined}
         />
         <PrefixIndicator />
         <HistoryPanel />
