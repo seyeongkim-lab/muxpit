@@ -15,8 +15,22 @@ test("session list only offers UUID-named files claude can resume", () => {
   assert.match(script, /SESSION_ID_RE = re\.compile\(/);
 });
 
+test("session list keeps only sessions a person actually drove", () => {
+  // claude's own conversation-summarizer sessions are resumable but were never
+  // driven by a person, and they outnumber real conversations; only a prompt
+  // submitted through the normal input path records "last-prompt".
+  assert.match(script, /def user_driven_session\(entries\):/);
+  assert.match(script, /item\.get\("type"\) == "last-prompt"/);
+  assert.match(script, /if not user_driven_session\(entries\):/);
+  // Filtering has to happen per file while collecting, not after slicing the
+  // newest N, or the internal sessions eat most of the returned list.
+  const listSessions = script.slice(script.indexOf("def list_sessions"), script.indexOf("def load_session"));
+  assert.match(listSessions, /if len\(sessions\) >= MAX_LISTED_SESSIONS:/);
+  assert.doesNotMatch(listSessions, /session_files\(root\)\[:MAX_LISTED_SESSIONS\]/);
+});
+
 test("Claude session selection loads history without rescanning the full list", () => {
-  assert.match(script, /for updated_at, path in session_files\(root\)\[:100\]:/);
+  assert.match(script, /for updated_at, path in session_files\(root\)\[:MAX_SCANNED_SESSIONS\]:/);
   assert.match(script, /"type": "muxpit_claude_session"/);
   assert.match(bridge, /export const loadClaudeSession/);
   assert.match(app, /loadClaudeSession\(profile\.id, channelId, sessionId\)/);

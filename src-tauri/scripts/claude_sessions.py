@@ -19,6 +19,8 @@ LIST_TAIL_BYTES = 256 * 1024
 HISTORY_TAIL_BYTES = 1024 * 1024
 MAX_HISTORY_ITEMS = 200
 MAX_ITEM_CHARS = 12000
+MAX_LISTED_SESSIONS = 100
+MAX_SCANNED_SESSIONS = 600
 
 # A running turn keeps appending to the session file, so a recent write means
 # the session is likely active right now. Computed against the host clock so
@@ -36,6 +38,15 @@ SESSION_ID_RE = re.compile(
 
 def resumable_session_file(path):
     return SESSION_ID_RE.match(os.path.splitext(os.path.basename(path))[0]) is not None
+
+
+# claude also spawns one-shot internal sessions (conversation summarizers) that
+# are resumable but were never driven by a person, and they outnumber real
+# conversations. A prompt submitted through the normal input path — typed, or
+# fed to `-p` over stdin the way muxpit drives it — records a "last-prompt"
+# entry; the internal ones bypass that path, so it marks the real ones.
+def user_driven_session(entries):
+    return any(item.get("type") == "last-prompt" for item in entries)
 
 
 def session_files(root):
@@ -188,12 +199,19 @@ def history_items(entries):
 
 def list_sessions(root):
     sessions = []
-    for updated_at, path in session_files(root)[:100]:
+    # Internal sessions are filtered per file rather than after a slice of the
+    # newest ones, or they would eat most of the returned list. The scan is
+    # still bounded so a large tree cannot outrun the caller's timeout.
+    for updated_at, path in session_files(root)[:MAX_SCANNED_SESSIONS]:
+        if len(sessions) >= MAX_LISTED_SESSIONS:
+            break
         try:
             entries = list(json_items(read_tail(path, LIST_TAIL_BYTES)))
-            sessions.append(session_metadata(path, updated_at, entries))
         except OSError:
             continue
+        if not user_driven_session(entries):
+            continue
+        sessions.append(session_metadata(path, updated_at, entries))
     print(json.dumps({"type": "muxpit_sessions", "sessions": sessions}), flush=True)
 
 
