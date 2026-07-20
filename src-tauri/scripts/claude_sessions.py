@@ -49,6 +49,19 @@ def user_driven_session(entries):
     return any(item.get("type") == "last-prompt" for item in entries)
 
 
+# claude answers with the "<synthetic>" model when it replies locally instead
+# of reaching the API — a logged-out CLI, for instance, answers "Not logged in"
+# and exits. The launch still leaves a session file behind, so a prompt that
+# only ever got synthetic answers is a failed start, not a conversation.
+def model_answered_session(entries):
+    models = {
+        item["message"].get("model")
+        for item in entries
+        if item.get("type") == "assistant" and isinstance(item.get("message"), dict)
+    }
+    return models != {"<synthetic>"}
+
+
 def session_files(root):
     files = []
     for path in glob.iglob(os.path.join(root, "**", "*.jsonl"), recursive=True):
@@ -209,7 +222,7 @@ def list_sessions(root):
             entries = list(json_items(read_tail(path, LIST_TAIL_BYTES)))
         except OSError:
             continue
-        if not user_driven_session(entries):
+        if not user_driven_session(entries) or not model_answered_session(entries):
             continue
         sessions.append(session_metadata(path, updated_at, entries))
     print(json.dumps({"type": "muxpit_sessions", "sessions": sessions}), flush=True)

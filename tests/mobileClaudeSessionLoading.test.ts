@@ -21,12 +21,21 @@ test("session list keeps only sessions a person actually drove", () => {
   // submitted through the normal input path records "last-prompt".
   assert.match(script, /def user_driven_session\(entries\):/);
   assert.match(script, /item\.get\("type"\) == "last-prompt"/);
-  assert.match(script, /if not user_driven_session\(entries\):/);
+  assert.match(script, /if not user_driven_session\(entries\)/);
   // Filtering has to happen per file while collecting, not after slicing the
   // newest N, or the internal sessions eat most of the returned list.
   const listSessions = script.slice(script.indexOf("def list_sessions"), script.indexOf("def load_session"));
   assert.match(listSessions, /if len\(sessions\) >= MAX_LISTED_SESSIONS:/);
   assert.doesNotMatch(listSessions, /session_files\(root\)\[:MAX_LISTED_SESSIONS\]/);
+});
+
+test("session list drops launches that never reached the model", () => {
+  // A logged-out CLI answers "Not logged in" from the "<synthetic>" model and
+  // exits, leaving a session file per attempt; those are failed starts, not
+  // conversations. A session with no assistant reply yet still counts.
+  assert.match(script, /def model_answered_session\(entries\):/);
+  assert.match(script, /return models != \{"<synthetic>"\}/);
+  assert.match(script, /or not model_answered_session\(entries\)/);
 });
 
 test("Claude session selection loads history without rescanning the full list", () => {
