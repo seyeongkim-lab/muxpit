@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-session-goal-set"
+description = "Enables the desktop_session_goal_set command without any pre-configured scope."
+commands.allow = ["desktop_session_goal_set"]
+
+[[permission]]
+identifier = "deny-desktop-session-goal-set"
+description = "Denies the desktop_session_goal_set command without any pre-configured scope."
+commands.deny = ["desktop_session_goal_set"]

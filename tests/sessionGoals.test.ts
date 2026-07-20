@@ -76,6 +76,15 @@ test("session settings flow is wired end to end on both surfaces", () => {
   assert.match(desktopRust, /pub fn desktop_session_settings\(/);
   assert.match(desktopRust, /pub fn desktop_session_setting_set\(/);
 
+  // Handlers alone are not callable: without build.rs registration and a
+  // capability entry every invoke dies with "not allowed by ACL".
+  const buildScript = read("../src-tauri/build.rs");
+  assert.match(buildScript, /"desktop_session_settings"/);
+  assert.match(buildScript, /"desktop_session_setting_set"/);
+  const capability = read("../src-tauri/capabilities/default.json");
+  assert.match(capability, /"allow-desktop-session-settings"/);
+  assert.match(capability, /"allow-desktop-session-setting-set"/);
+
   const mobileRust = read("../src-tauri/src/mobile_agent.rs");
   assert.match(mobileRust, /pub async fn mobile_session_settings\(/);
   assert.match(mobileRust, /pub async fn mobile_session_setting_set\(/);
@@ -104,6 +113,15 @@ test("goals flow is wired end to end on both surfaces", () => {
   assert.match(desktopRust, /pub fn desktop_session_goals\(/);
   assert.match(desktopRust, /pub fn desktop_session_goal_set\(/);
   assert.match(desktopRust, /pub fn desktop_session_goal_delete\(/);
+
+  const buildScript = read("../src-tauri/build.rs");
+  assert.match(buildScript, /"desktop_session_goals"/);
+  assert.match(buildScript, /"desktop_session_goal_set"/);
+  assert.match(buildScript, /"desktop_session_goal_delete"/);
+  const capability = read("../src-tauri/capabilities/default.json");
+  assert.match(capability, /"allow-desktop-session-goals"/);
+  assert.match(capability, /"allow-desktop-session-goal-set"/);
+  assert.match(capability, /"allow-desktop-session-goal-delete"/);
 
   const mobileRust = read("../src-tauri/src/mobile_agent.rs");
   assert.match(mobileRust, /pub async fn mobile_session_goals\(/);

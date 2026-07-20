@@ -7,6 +7,14 @@ const bridge = readFileSync(new URL("../src/mobile/mobileBridge.ts", import.meta
 const rust = readFileSync(new URL("../src-tauri/src/mobile_agent.rs", import.meta.url), "utf8");
 const script = readFileSync(new URL("../src-tauri/scripts/claude_sessions.py", import.meta.url), "utf8");
 
+test("session list only offers UUID-named files claude can resume", () => {
+  // agent-*.jsonl subagent transcripts live in the same projects tree but
+  // `claude --resume` rejects their ids, so listing them yields dead sessions.
+  assert.match(script, /def resumable_session_file\(path\):/);
+  assert.match(script, /if not resumable_session_file\(path\):/);
+  assert.match(script, /SESSION_ID_RE = re\.compile\(/);
+});
+
 test("Claude session selection loads history without rescanning the full list", () => {
   assert.match(script, /for updated_at, path in session_files\(root\)\[:100\]:/);
   assert.match(script, /"type": "muxpit_claude_session"/);

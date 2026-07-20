@@ -516,11 +516,24 @@ export const normalizeClaudeMessage = (value: unknown): MobileAgentEvent[] => {
   }
   if (type === "result") {
     const subtype = stringValue(message.subtype);
-    return [{
-      type: "turnCompleted",
-      sessionId,
-      status: message.is_error === true ? "failed" : subtype === "success" ? "completed" : subtype ?? "completed",
-    }];
+    if (message.is_error !== true) {
+      return [{
+        type: "turnCompleted",
+        sessionId,
+        status: subtype === "success" ? "completed" : subtype ?? "completed",
+      }];
+    }
+    // A failed turn streams nothing before its result, so the result text is
+    // the only place the failure reason exists; dropping it leaves the turn
+    // looking like it silently produced no reply.
+    return [
+      { type: "turnCompleted", sessionId, status: "failed" },
+      {
+        type: "error",
+        message: stringValue(message.result) || `Claude turn failed (${subtype ?? "error"})`,
+        ...(sessionId ? { sessionId } : {}),
+      },
+    ];
   }
   return [];
 };

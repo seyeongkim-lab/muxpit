@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-session-goal-delete"
+description = "Enables the desktop_session_goal_delete command without any pre-configured scope."
+commands.allow = ["desktop_session_goal_delete"]
+
+[[permission]]
+identifier = "deny-desktop-session-goal-delete"
+description = "Denies the desktop_session_goal_delete command without any pre-configured scope."
+commands.deny = ["desktop_session_goal_delete"]

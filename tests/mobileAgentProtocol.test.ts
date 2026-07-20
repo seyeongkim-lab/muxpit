@@ -150,6 +150,41 @@ test("Claude stream messages become text, tool, and completion events", () => {
     normalizeClaudeMessage({ type: "result", session_id: "session-1", subtype: "success" }),
     [{ type: "turnCompleted", sessionId: "session-1", status: "completed" }],
   );
+
+  assert.deepEqual(
+    normalizeClaudeMessage({
+      type: "result",
+      session_id: "session-1",
+      subtype: "error_during_execution",
+      is_error: true,
+      result: "No conversation found with session ID: session-1",
+    }),
+    [
+      { type: "turnCompleted", sessionId: "session-1", status: "failed" },
+      {
+        type: "error",
+        sessionId: "session-1",
+        message: "No conversation found with session ID: session-1",
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    normalizeClaudeMessage({
+      type: "result",
+      session_id: "session-1",
+      subtype: "error_during_execution",
+      is_error: true,
+    }),
+    [
+      { type: "turnCompleted", sessionId: "session-1", status: "failed" },
+      {
+        type: "error",
+        sessionId: "session-1",
+        message: "Claude turn failed (error_during_execution)",
+      },
+    ],
+  );
 });
 
 test("Claude partial stream reuses the message id for delta and completion", () => {

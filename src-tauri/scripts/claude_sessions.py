@@ -2,6 +2,7 @@ import base64
 import glob
 import json
 import os
+import re
 import sys
 import time
 
@@ -24,10 +25,24 @@ MAX_ITEM_CHARS = 12000
 # client clock skew cannot distort it.
 ACTIVE_WINDOW_SEC = 30
 
+# Conversations claude can resume are UUID-named. The projects tree also holds
+# subagent/teammate transcripts (agent-*.jsonl) that `claude --resume` rejects,
+# so anything else must stay out of the session list.
+SESSION_ID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z",
+    re.IGNORECASE,
+)
+
+
+def resumable_session_file(path):
+    return SESSION_ID_RE.match(os.path.splitext(os.path.basename(path))[0]) is not None
+
 
 def session_files(root):
     files = []
     for path in glob.iglob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        if not resumable_session_file(path):
+            continue
         try:
             files.append((os.path.getmtime(path), path))
         except OSError:
