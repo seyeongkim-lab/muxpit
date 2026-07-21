@@ -187,6 +187,7 @@ const PROBE_RETRY_BASE_MS = 5_000;
 const PROBE_RETRY_MAX_MS = 60_000;
 const LIST_RETRY_MAX_MS = 60_000;
 const TIMELINE_PIN_THRESHOLD_PX = 48;
+const COMPOSER_MAX_HEIGHT_PX = 148;
 const CLAUDE_INTERRUPT_FALLBACK_MS = 2_500;
 const CLAUDE_MODELS = ["opus", "sonnet", "fable"] as const;
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -429,6 +430,7 @@ const DesktopTargetRuntime = ({
     };
   });
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const timelinePinned = useRef(true);
   const timelineSessionRef = useRef<string | null>(null);
   const viewsRef = useRef(views);
@@ -1409,6 +1411,13 @@ const DesktopTargetRuntime = ({
     runtime.running,
   ]);
 
+  useLayoutEffect(() => {
+    const input = composerInputRef.current;
+    if (!input) return;
+    input.style.height = "0";
+    input.style.height = `${Math.min(input.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`;
+  }, [runtime.draft, timelineSessionKey]);
+
   const selectSession = async (kind: AiKind, session: MobileSession): Promise<void> => {
     const selectedRuntime = readSessionRuntime(viewsRef.current[kind].runtimes, session.id);
     // Seed host-synced settings before anything launches so the session opens
@@ -1968,13 +1977,6 @@ const DesktopTargetRuntime = ({
                   <strong>{activeSession?.title ?? "New session"}</strong>
                 </div>
                 <div className="agent-conversation-header-actions">
-                  {supportsExecutionSettings ? (
-                    <button
-                      type="button"
-                      className="agent-execution-summary"
-                      onClick={() => setSettingsOpen((current) => !current)}
-                    >{executionSummaryLabel}</button>
-                  ) : null}
                   <span className={runtime.running ? "agent-run-state running" : "agent-run-state"}>
                     {view.status === "connecting" ? "Connecting" : sessionRuntimeLabel(runtime)}
                   </span>
@@ -2022,6 +2024,77 @@ const DesktopTargetRuntime = ({
                   )}
                 </div>
               ) : null}
+            </header>
+
+            <div ref={timelineRef} className="agent-timeline" aria-live="polite" onScroll={handleTimelineScroll}>
+              {view.error ? (
+                <div className="agent-inline-error" role="alert">
+                  <span>{view.error}</span>
+                  <button type="button" onClick={() => updateView(provider, (current) => ({ ...current, error: null }))}>Dismiss</button>
+                </div>
+              ) : null}
+              {runtime.items.length === 0 && runtime.approvals.length === 0 ? (
+                runtime.historyState === "loading" ? (
+                  <div className="agent-timeline-empty">
+                    <strong>Loading session history…</strong>
+                  </div>
+                ) : (
+                  <div className="agent-timeline-empty">
+                    <strong>Send the next instruction</strong>
+                    <p>Messages and tool activity appear here. The provider terminal stays hidden.</p>
+                  </div>
+                )
+              ) : null}
+              {runtime.items.map((item, index) => (
+                <TimelineRow
+                  key={item.id}
+                  item={item}
+                  providerName={PROVIDER_NAMES[provider]}
+                  streaming={runtime.running
+                    && index === runtime.items.length - 1
+                    && item.kind === "assistant"}
+                />
+              ))}
+              {runtime.approvals.map((approval) => (
+                <article key={approval.requestId} className="agent-approval">
+                  <small>Approval required</small>
+                  <strong>{approval.title}</strong>
+                  {approval.detail ? <pre>{approval.detail}</pre> : null}
+                  <div>
+                    {approval.options?.length ? approval.options.map((option) => (
+                      <button
+                        type="button"
+                        key={option.id}
+                        className={option.kind.startsWith("allow") ? "approve" : "deny"}
+                        onClick={() => void resolveApproval(approval, option.id)}
+                      >{option.label}</button>
+                    )) : (
+                      <>
+                        <button type="button" className="deny" onClick={() => void resolveApproval(approval, undefined, false)}>Deny</button>
+                        <button type="button" className="approve" onClick={() => void resolveApproval(approval, undefined, true)}>Approve once</button>
+                      </>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {runtime.running ? (
+                <div className="agent-working">
+                  <span /><span /><span />
+                  {runtime.connectionState === "disconnected" ? "Connection paused · checking task" : "Working"}
+                </div>
+              ) : null}
+            </div>
+
+            {runtime.queue.length > 0 ? (
+              <div className="agent-queue-preview">
+                <span>{runtime.queue.length} queued</span>
+                <p>{runtime.queue[0]}</p>
+                <button type="button" onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queue: [] }))}>Clear</button>
+              </div>
+            ) : null}
+
+            <footer className={runtime.running && !runtime.queueMode ? "agent-composer steering" : "agent-composer"}>
+              <div className="agent-composer-surface">
               {settingsOpen && supportsExecutionSettings ? (
                 <div className="agent-execution-settings">
                   <label>
@@ -2098,86 +2171,8 @@ const DesktopTargetRuntime = ({
                   ) : null}
                 </div>
               ) : null}
-            </header>
-
-            <div ref={timelineRef} className="agent-timeline" aria-live="polite" onScroll={handleTimelineScroll}>
-              {view.error ? (
-                <div className="agent-inline-error" role="alert">
-                  <span>{view.error}</span>
-                  <button type="button" onClick={() => updateView(provider, (current) => ({ ...current, error: null }))}>Dismiss</button>
-                </div>
-              ) : null}
-              {runtime.items.length === 0 && runtime.approvals.length === 0 ? (
-                runtime.historyState === "loading" ? (
-                  <div className="agent-timeline-empty">
-                    <strong>Loading session history…</strong>
-                  </div>
-                ) : (
-                  <div className="agent-timeline-empty">
-                    <strong>Send the next instruction</strong>
-                    <p>Messages and tool activity appear here. The provider terminal stays hidden.</p>
-                  </div>
-                )
-              ) : null}
-              {runtime.items.map((item, index) => (
-                <TimelineRow
-                  key={item.id}
-                  item={item}
-                  providerName={PROVIDER_NAMES[provider]}
-                  streaming={runtime.running
-                    && index === runtime.items.length - 1
-                    && item.kind === "assistant"}
-                />
-              ))}
-              {runtime.approvals.map((approval) => (
-                <article key={approval.requestId} className="agent-approval">
-                  <small>Approval required</small>
-                  <strong>{approval.title}</strong>
-                  {approval.detail ? <pre>{approval.detail}</pre> : null}
-                  <div>
-                    {approval.options?.length ? approval.options.map((option) => (
-                      <button
-                        type="button"
-                        key={option.id}
-                        className={option.kind.startsWith("allow") ? "approve" : "deny"}
-                        onClick={() => void resolveApproval(approval, option.id)}
-                      >{option.label}</button>
-                    )) : (
-                      <>
-                        <button type="button" className="deny" onClick={() => void resolveApproval(approval, undefined, false)}>Deny</button>
-                        <button type="button" className="approve" onClick={() => void resolveApproval(approval, undefined, true)}>Approve once</button>
-                      </>
-                    )}
-                  </div>
-                </article>
-              ))}
-              {runtime.running ? (
-                <div className="agent-working">
-                  <span /><span /><span />
-                  {runtime.connectionState === "disconnected" ? "Connection paused · checking task" : "Working"}
-                </div>
-              ) : null}
-            </div>
-
-            {runtime.queue.length > 0 ? (
-              <div className="agent-queue-preview">
-                <span>{runtime.queue.length} queued</span>
-                <p>{runtime.queue[0]}</p>
-                <button type="button" onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queue: [] }))}>Clear</button>
-              </div>
-            ) : null}
-
-            <footer className={runtime.running && !runtime.queueMode ? "agent-composer steering" : "agent-composer"}>
-              <AgentImageAttachments
-                attachments={runtime.attachments}
-                disabled={runtime.running && runtime.queueMode}
-                onFiles={(files) => addComposerImages(provider, view.activeSessionId, files)}
-                onRemove={(id) => updateRuntime(provider, view.activeSessionId, (current) => ({
-                  ...current,
-                  attachments: current.attachments.filter((attachment) => attachment.id !== id),
-                }))}
-              />
               <textarea
+                ref={composerInputRef}
                 value={runtime.draft}
                 onChange={(event) => updateRuntime(provider, view.activeSessionId, (current) => ({
                   ...current,
@@ -2207,16 +2202,33 @@ const DesktopTargetRuntime = ({
                   }
                 }}
                 placeholder={runtime.running && !runtime.queueMode ? "Redirect the active task…" : runtime.running ? "Add the next instruction…" : "Message the agent…"}
-                rows={3}
+                rows={1}
               />
               <div className="agent-composer-actions">
                 <div>
+                  <AgentImageAttachments
+                    attachments={runtime.attachments}
+                    disabled={runtime.running && runtime.queueMode}
+                    onFiles={(files) => addComposerImages(provider, view.activeSessionId, files)}
+                    onRemove={(id) => updateRuntime(provider, view.activeSessionId, (current) => ({
+                      ...current,
+                      attachments: current.attachments.filter((attachment) => attachment.id !== id),
+                    }))}
+                  />
+                  {supportsExecutionSettings ? (
+                    <button
+                      type="button"
+                      className="agent-execution-summary"
+                      aria-expanded={settingsOpen}
+                      onClick={() => setSettingsOpen((current) => !current)}
+                    >{executionSummaryLabel}</button>
+                  ) : null}
                   {runtime.running ? (
                     <>
                       <button type="button" className={!runtime.queueMode ? "active" : ""} onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queueMode: false }))}>Steer</button>
                       <button type="button" className={runtime.queueMode ? "active" : ""} onClick={() => updateRuntime(provider, view.activeSessionId, (current) => ({ ...current, queueMode: true }))}>Queue</button>
                     </>
-                  ) : <span>Enter to send · Shift+Enter for a new line</span>}
+                  ) : supportsExecutionSettings ? null : <span>Enter to send · Shift+Enter for a new line</span>}
                 </div>
                 <div>
                   {runtime.running ? <button type="button" className="agent-stop-button" title="Stop the current task (Esc)" onClick={() => void stop()}>Stop</button> : null}
@@ -2233,6 +2245,7 @@ const DesktopTargetRuntime = ({
                     {runtime.running ? runtime.queueMode ? "Queue" : "Steer" : "Send"}
                   </button>
                 </div>
+              </div>
               </div>
             </footer>
     </section>

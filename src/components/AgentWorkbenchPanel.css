@@ -453,10 +453,11 @@
 }
 
 .agent-execution-summary {
-  max-width: min(310px, 45vw);
+  max-width: min(310px, 40vw);
   overflow: hidden;
-  padding: 3px 6px;
-  border: 1px solid var(--muxpit-hairline);
+  min-height: 28px;
+  padding: 0 6px;
+  border: 0;
   background: transparent;
   color: var(--muxpit-subtext);
   font-size: 12px;
@@ -468,9 +469,9 @@
 .agent-execution-settings {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--muxpit-hairline);
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--muxpit-hairline);
 }
 
 .agent-execution-settings label {
@@ -900,30 +901,43 @@
 .agent-composer {
   grid-row: 4;
   flex: 0 0 auto;
-  padding: 7px 8px;
-  border-top: 2px solid var(--muxpit-hairline-strong);
-  background: var(--muxpit-bg-elev);
+  padding: 12px 16px;
+  background: transparent;
 }
 
-.agent-composer.steering {
-  border-top-color: #d4a44e;
+.agent-composer-surface {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid var(--muxpit-hairline-strong);
+  border-radius: 6px;
+  background: var(--muxpit-bg-elev);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+}
+
+.agent-composer.steering .agent-composer-surface {
+  border-color: #d4a44e;
 }
 
 .agent-composer textarea {
   width: 100%;
-  min-height: 52px;
+  min-height: 32px;
+  max-height: 148px;
   box-sizing: border-box;
   resize: none;
-  padding: 8px;
-  border: 1px solid var(--muxpit-hairline-strong);
+  padding: 4px 8px;
+  overflow-y: auto;
+  border: 0;
   outline: 0;
-  background: var(--muxpit-bg);
+  background: transparent;
   color: var(--muxpit-text);
   font-size: 16px;
   line-height: 1.45;
 }
 
-.agent-composer textarea:focus {
+.agent-composer-surface:focus-within {
   border-color: var(--muxpit-accent);
 }
 
@@ -932,13 +946,19 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 7px;
+  padding: 0 6px 6px;
 }
 
 .agent-composer-actions > div {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+}
+
+.agent-composer-actions .agent-image-attachments {
+  min-height: 28px;
+  margin: 0;
 }
 
 .agent-composer-actions span {

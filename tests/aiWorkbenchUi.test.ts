@@ -33,6 +33,25 @@ test("AI workbench uses readable type and a window-relative resize limit", () =>
   assert.match(styles, /\.agent-workbench \{[^}]*font-size: 15px;/);
   assert.match(styles, /\.agent-timeline-row p \{[^}]*font-size: 16px;/);
   assert.match(styles, /\.agent-composer textarea \{[^}]*font-size: 16px;/);
+  assert.match(styles, /\.agent-composer \{[^}]*padding: 12px 16px;/);
+  assert.match(styles, /\.agent-composer-surface \{[^}]*max-width: 720px;[^}]*margin: 0 auto;[^}]*box-shadow:/s);
+  assert.match(styles, /\.agent-composer textarea \{[^}]*min-height: 32px;[^}]*max-height: 148px;/s);
+  assert.match(workbench, /ref=\{composerInputRef\}/);
+  assert.match(workbench, /<textarea[\s\S]*?rows=\{1\}/);
+});
+
+test("desktop composer owns execution settings instead of the conversation header", () => {
+  const workbench = readSource("../src/components/AgentWorkbenchPanel.tsx");
+  const header = workbench.slice(
+    workbench.indexOf('<header className="agent-conversation-header">'),
+    workbench.indexOf('<div ref={timelineRef}'),
+  );
+  const composer = workbench.slice(workbench.indexOf("<footer className="));
+
+  assert.doesNotMatch(header, /agent-execution-summary|agent-execution-settings/);
+  assert.match(composer, /agent-composer-surface/);
+  assert.match(composer, /agent-execution-summary/);
+  assert.match(composer, /agent-execution-settings/);
 });
 
 test("workbench resizes its session column and docks the terminal below the composer", () => {
