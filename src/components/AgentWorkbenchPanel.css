@@ -258,8 +258,14 @@
   white-space: nowrap;
 }
 
+/* Only the open session's title carries weight; a list where every row is
+   bold reads as all-noise. */
 .agent-session-main > strong {
   font-size: 15px;
+  font-weight: 400;
+}
+
+.agent-session-row.active .agent-session-main > strong {
   font-weight: 600;
 }
 
