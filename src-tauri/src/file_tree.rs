@@ -164,9 +164,13 @@ pub fn read_local_file(path: &str, cwd: Option<&str>) -> Result<FileContent, Str
     }
     let mut resolved = expand_local_home(trimmed).unwrap_or_else(|| PathBuf::from(trimmed));
     if resolved.is_relative() {
-        if let Some(base) = cwd.map(str::trim).filter(|value| !value.is_empty()) {
-            resolved = PathBuf::from(base).join(resolved);
-        }
+        // Without a base a relative path would silently resolve against the
+        // app process cwd, which is never what the caller meant.
+        let base = cwd
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("No working directory is known to resolve {trimmed}"))?;
+        resolved = PathBuf::from(base).join(resolved);
     }
     let file = fs::File::open(&resolved).map_err(|err| format!("{}: {err}", resolved.display()))?;
     let size = file
@@ -205,18 +209,24 @@ pub fn read_remote_file(
     }
     // Only relative paths need the session cwd; when the cwd itself is gone,
     // failing beats silently resolving against the SSH login's home directory.
-    let cd = if trimmed.starts_with('/') || trimmed.starts_with('~') {
+    let rooted = trimmed.starts_with('/') || trimmed.starts_with('~');
+    let base = cwd.map(str::trim).filter(|value| !value.is_empty());
+    let cd = if rooted {
         String::new()
     } else {
-        cwd.map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| {
-                format!(
-                    "cd -- {} 2>/dev/null || {{ echo 'Session directory is not accessible' >&2; exit 3; }}; ",
-                    quote_remote_path(value),
-                )
-            })
-            .unwrap_or_default()
+        let base = base
+            .ok_or_else(|| format!("No working directory is known to resolve {trimmed}"))?;
+        format!(
+            "cd -- {} 2>/dev/null || {{ echo 'Session directory is not accessible' >&2; exit 3; }}; ",
+            quote_remote_path(base),
+        )
+    };
+    // Header shows this path; join the base in so the user sees where a
+    // relative link actually resolved.
+    let display = if rooted {
+        trimmed.to_string()
+    } else {
+        format!("{}/{}", base.unwrap_or_default().trim_end_matches('/'), trimmed)
     };
     // First line is the byte size; the rest is the (possibly truncated) body.
     // One extra byte is requested so truncation is detectable even when the
@@ -235,7 +245,7 @@ pub fn read_remote_file(
         .trim()
         .parse()
         .map_err(|_| "Unexpected remote read output".to_string())?;
-    Ok(file_content(trimmed.to_string(), size, &output[newline + 1..]))
+    Ok(file_content(display, size, &output[newline + 1..]))
 }
 
 fn run_remote(ssh: &SshCommand, remote_script: &str) -> Result<Vec<u8>, String> {
@@ -294,5 +304,13 @@ mod tests {
     fn remote_tilde_path_resolves_via_home_outside_quotes() {
         assert_eq!(quote_remote_path("~/notes/plan.md"), "\"$HOME\"/'notes/plan.md'");
         assert_eq!(quote_remote_path("/var/log/syslog"), "'/var/log/syslog'");
+    }
+
+    #[test]
+    fn relative_local_path_without_a_base_is_rejected() {
+        // Would otherwise resolve against the app process cwd.
+        let error = read_local_file("src/main.rs", None).unwrap_err();
+
+        assert!(error.contains("No working directory"), "{error}");
     }
 }

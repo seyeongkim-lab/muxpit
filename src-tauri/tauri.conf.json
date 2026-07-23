@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "muxpit",
-  "version": "0.2.28",
+  "version": "0.2.29",
   "identifier": "com.muxpit.terminal",
   "build": {
     "frontendDist": "../dist",
@@ -28,6 +28,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "template": "./nsis/installer.nsi"
+      }
+    },
     "externalBin": [
       "../target/sidecars/muxpit-cli"
     ],

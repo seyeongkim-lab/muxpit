@@ -136,14 +136,18 @@ def session_metadata(path, updated_at, entries):
         text = trimmed(message_text(message.get("content")))
         if text and not text.startswith("<"):
             title = text[:120]
-    return {
+    metadata = {
         "id": os.path.splitext(os.path.basename(path))[0],
         "title": title or "Claude session",
-        "cwd": cwd,
         "updatedAt": int(updated_at),
         "provider": "claude",
         "active": time.time() - updated_at < ACTIVE_WINDOW_SEC,
     }
+    # The file viewer resolves relative paths against the session cwd; an
+    # empty string must stay absent or it masquerades as a usable base.
+    if cwd:
+        metadata["cwd"] = cwd
+    return metadata
 
 
 def tool_result_text(content):

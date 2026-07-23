@@ -589,6 +589,21 @@
   }
 }
 
+/* Tool runs and status/thinking rows are supporting detail — dimmed so the
+   conversation itself carries the visual weight; hover restores them for
+   reading. Opacity sits on the inner div, not the row, so it composes with
+   the row's entry animation instead of snapping when it ends. */
+.agent-timeline-row.tool > div,
+.agent-timeline-row.status > div {
+  opacity: 0.62;
+  transition: opacity 0.12s ease-out;
+}
+
+.agent-timeline-row.tool:hover > div,
+.agent-timeline-row.status:hover > div {
+  opacity: 1;
+}
+
 .agent-timeline-row small,
 .agent-approval small {
   display: flex;

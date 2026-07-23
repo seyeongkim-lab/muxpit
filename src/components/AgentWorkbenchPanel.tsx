@@ -1396,12 +1396,13 @@ const DesktopTargetRuntime = ({
   }, []);
 
   // File-looking inline code in the conversation opens the viewer drawer.
-  // Relative paths resolve against the active session's cwd on this target.
+  // Relative paths resolve against the active session's cwd on this target;
+  // `||` (not `??`) so an empty cwd falls through to the target's directory.
   const openFileFromTimeline = useCallback((path: string): void => {
     const view = viewsRef.current[providerRef.current];
     const session = view.sessions.find((candidate) => candidate.id === view.activeSessionId);
     useFileViewerStore.getState().openFile(path, {
-      cwd: session?.cwd ?? target.cwd,
+      cwd: session?.cwd || target.cwd,
       sshCommand: target.sshCommand,
       sshConnection: target.sshConnection,
     });

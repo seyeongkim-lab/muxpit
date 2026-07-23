@@ -38,6 +38,13 @@ test("session list drops launches that never reached the model", () => {
   assert.match(script, /or not model_answered_session\(entries\)/);
 });
 
+test("session metadata omits an unknown cwd instead of sending an empty base", () => {
+  // The file viewer resolves relative paths against the session cwd; an empty
+  // string is not nullish in TS, so it would shadow every fallback base.
+  assert.match(script, /if cwd:\n\s+metadata\["cwd"\] = cwd/);
+  assert.doesNotMatch(script, /"cwd": cwd,/);
+});
+
 test("Claude session selection loads history without rescanning the full list", () => {
   assert.match(script, /for updated_at, path in session_files\(root\)\[:MAX_SCANNED_SESSIONS\]:/);
   assert.match(script, /"type": "muxpit_claude_session"/);
