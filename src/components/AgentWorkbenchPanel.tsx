@@ -96,7 +96,7 @@ import {
   type WorkbenchLeafCandidate,
 } from "../utils/workbenchFocus.ts";
 import { AgentImageAttachments } from "./AgentImageAttachments.tsx";
-import { MarkdownContent, ToolOutput } from "./AgentMessageContent.tsx";
+import { MarkdownContent, ThinkingOutput, ToolCallContent, ToolOutput } from "./AgentMessageContent.tsx";
 import "./AgentWorkbenchPanel.css";
 
 interface AgentWorkbenchPanelProps {
@@ -239,12 +239,24 @@ const TimelineRow = memo(({ item, providerName, streaming, onOpenFile }: {
 }) => (
   <article className={`agent-timeline-row ${item.kind}${streaming ? " streaming" : ""}`}>
     <div>
-      <small>{item.kind === "user" ? "You" : item.kind === "assistant" ? providerName : item.title ?? "Status"}</small>
+      <small>
+        {item.kind === "user"
+          ? "You"
+          : item.kind === "assistant"
+            ? providerName
+            : item.kind === "thinking"
+              ? "Thinking"
+              : item.title ?? "Status"}
+      </small>
       {item.kind === "tool"
-        ? <ToolOutput text={item.text} />
+        ? item.tool
+          ? <ToolCallContent tool={item.tool} fallbackText={item.text} />
+          : <ToolOutput text={item.text} />
         : item.kind === "assistant"
-          ? <MarkdownContent text={item.text} onOpenFile={onOpenFile} />
-          : <p>{item.text}</p>}
+          ? <MarkdownContent text={item.text} onOpenFile={onOpenFile} highlightCode />
+          : item.kind === "thinking"
+            ? <ThinkingOutput text={item.text} />
+            : <p>{item.text}</p>}
     </div>
   </article>
 ));
@@ -277,6 +289,10 @@ const snapshotViews = (
   }]),
 ) as Record<AiKind, AgentWorkbenchViewSnapshot>;
 
+// Model ids can carry a decoration suffix like "claude-fable-5[1m]" (context
+// size marker in settings.json); labels drop it.
+const stripModelDecoration = (value: string): string => value.replace(/\[[^\]]*\]$/, "");
+
 const relativeTime = (timestamp?: number): string => {
   if (!timestamp) return "";
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
@@ -301,7 +317,7 @@ const appendDelta = (
   items: MobileTimelineItem[],
   id: string,
   text: string,
-  kind: "user" | "assistant" = "assistant",
+  kind: "user" | "assistant" | "thinking" = "assistant",
 ): MobileTimelineItem[] => {
   const item = items.find((candidate) => candidate.id === id);
   return item
@@ -418,6 +434,12 @@ const DesktopTargetRuntime = ({
   const [probing, setProbing] = useState(false);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [codexModels, setCodexModels] = useState<CodexModelOption[]>([]);
+  // The host CLI's own defaults (~/.claude/settings.json model/effortLevel),
+  // reported with every session list; labels the "Default" choice.
+  const [claudeCliDefaults, setClaudeCliDefaults] = useState<{
+    model: string | null;
+    effort: string | null;
+  }>({ model: null, effort: null });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [goals, setGoals] = useState<Record<string, SessionGoal>>({});
   const [goalDraft, setGoalDraft] = useState<string | null>(null);
@@ -635,7 +657,48 @@ const DesktopTargetRuntime = ({
             kind: "tool",
             title: event.title,
             text: event.detail,
+            ...(event.tool ? { tool: event.tool } : {}),
           }),
+        }));
+        return;
+      case "toolResult":
+        // Nest the result under its originating call; a result that arrives
+        // for an unknown call still surfaces as its own row.
+        updateRuntime(kind, event.sessionId, (current) => ({
+          ...current,
+          items: current.items.some((item) => item.id === event.itemId)
+            ? current.items.map((item) => item.id === event.itemId
+                ? {
+                    ...item,
+                    tool: {
+                      ...(item.tool ?? { name: item.title ?? "Tool" }),
+                      resultText: event.text,
+                      ...(event.isError ? { resultError: true } : {}),
+                    },
+                  }
+                : item)
+            : appendItem(current.items, {
+                id: `${event.itemId}-result`,
+                kind: "tool",
+                title: "Tool result",
+                text: event.text,
+              }),
+        }));
+        return;
+      case "thinking":
+        updateRuntime(kind, event.sessionId, (current) => ({
+          ...current,
+          items: appendItem(current.items, {
+            id: event.itemId,
+            kind: "thinking",
+            text: event.text,
+          }),
+        }));
+        return;
+      case "thinkingDelta":
+        updateRuntime(kind, event.sessionId, (current) => ({
+          ...current,
+          items: appendDelta(current.items, event.itemId, event.text, "thinking"),
         }));
         return;
       case "approvalRequested": {
@@ -1136,6 +1199,11 @@ const DesktopTargetRuntime = ({
             if (timeout) clearTimeout(timeout);
             helperTimeouts.current.delete(event.channelId);
             clearListFailures("claude");
+            const defaults = message.defaults as { model?: unknown; effort?: unknown } | undefined;
+            setClaudeCliDefaults({
+              model: typeof defaults?.model === "string" && defaults.model ? defaults.model : null,
+              effort: typeof defaults?.effort === "string" && defaults.effort ? defaults.effort : null,
+            });
             applyEvent("claude", {
               type: "sessionsLoaded",
               sessions: message.sessions as MobileSession[],
@@ -1956,10 +2024,26 @@ const DesktopTargetRuntime = ({
     ? selectedCodexModel?.supportedReasoningEfforts ?? []
     : [...CLAUDE_EFFORTS];
   const serviceTierOptions = selectedCodexModel?.serviceTiers ?? [];
+  // A claude session without muxpit-chosen settings runs on the CLI's own
+  // defaults; "Default" is labeled with what that actually is — the model the
+  // transcript last recorded, else the host CLI default from settings.json.
+  const activeClaudeSession = provider === "claude"
+    ? view.sessions.find((session) => session.id === view.activeSessionId)
+    : undefined;
+  const claudeDefaultModel = activeClaudeSession?.model ?? claudeCliDefaults.model;
+  const claudeModelDefaultLabel = claudeDefaultModel
+    ? `Default (${stripModelDecoration(claudeDefaultModel)})`
+    : "Default";
+  const claudeEffortDefaultLabel = claudeCliDefaults.effort
+    ? `Default (${claudeCliDefaults.effort})`
+    : "Default";
   const modelLabel = provider === "codex"
     ? selectedCodexModel?.displayName ?? threadSettings.model ?? "Default"
-    : threadSettings.model ?? "Default";
-  const effortLabel = threadSettings.effort ?? selectedCodexModel?.defaultReasoningEffort ?? "Default";
+    : threadSettings.model ?? claudeModelDefaultLabel;
+  const effortLabel = threadSettings.effort
+    ?? (provider === "claude"
+      ? claudeEffortDefaultLabel
+      : selectedCodexModel?.defaultReasoningEffort ?? "Default");
   const serviceTierLabel = serviceTierOptions.find((tier) => tier.id === threadSettings.serviceTier)?.name
     ?? threadSettings.serviceTier
     ?? "Standard";
@@ -2135,7 +2219,7 @@ const DesktopTargetRuntime = ({
                         void applyExecutionSettings({ model, effort, serviceTier });
                       }}
                     >
-                      <option value="">Default</option>
+                      <option value="">{provider === "claude" ? claudeModelDefaultLabel : "Default"}</option>
                       {provider === "codex"
                         ? codexModels.map((model) => (
                             <option key={model.id} value={model.model}>{model.displayName}</option>
@@ -2158,7 +2242,7 @@ const DesktopTargetRuntime = ({
                         effort: event.target.value || null,
                       })}
                     >
-                      <option value="">Default</option>
+                      <option value="">{provider === "claude" ? claudeEffortDefaultLabel : "Default"}</option>
                       {threadSettings.effort && !effortOptions.includes(threadSettings.effort)
                         ? <option value={threadSettings.effort}>{threadSettings.effort}</option>
                         : null}

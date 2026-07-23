@@ -44,6 +44,40 @@ test("unordered and ordered lists group their items", () => {
   assert.equal((blocks[1] as { ordered: boolean }).ordered, true);
 });
 
+test("indented items nest one level under the previous top item", () => {
+  const blocks = parseMarkdown("- top\n  - sub one\n  - sub two\n- next");
+  assert.equal(blocks.length, 1);
+  const list = blocks[0] as { items: { children: unknown[]; sub?: { items: unknown[] } }[] };
+  assert.equal(list.items.length, 2);
+  assert.equal(list.items[0].sub?.items.length, 2);
+  assert.equal(list.items[1].sub, undefined);
+});
+
+test("blockquotes group consecutive quoted lines", () => {
+  const blocks = parseMarkdown("> quoted\n> more\nplain");
+  assert.equal(blocks.length, 2);
+  assert.deepEqual(blocks[0], {
+    type: "blockquote",
+    children: [{ type: "text", text: "quoted\nmore" }],
+  });
+});
+
+test("pipe tables parse header and body rows", () => {
+  const blocks = parseMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |");
+  assert.equal(blocks.length, 1);
+  const table = blocks[0] as { type: string; header: unknown[]; rows: unknown[][] };
+  assert.equal(table.type, "table");
+  assert.equal(table.header.length, 2);
+  assert.equal(table.rows.length, 2);
+});
+
+test("a table after a paragraph does not get absorbed into it", () => {
+  const blocks = parseMarkdown("intro line\n| a | b |\n| - | - |\n| 1 | 2 |");
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].type, "paragraph");
+  assert.equal(blocks[1].type, "table");
+});
+
 test("inline code, bold, italic, and links tokenize", () => {
   assert.deepEqual(parseMarkdownInline("run `npm test` now"), [
     { type: "text", text: "run " },

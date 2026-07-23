@@ -62,6 +62,42 @@ def model_answered_session(entries):
     return models != {"<synthetic>"}
 
 
+# The model the session actually ran on, from its newest real assistant reply.
+# Sessions driven outside muxpit have no synced settings, so this is the only
+# way a surface can label them with more than "Default".
+def session_model(entries):
+    model = ""
+    for item in entries:
+        if item.get("type") != "assistant":
+            continue
+        message = item.get("message") if isinstance(item.get("message"), dict) else {}
+        value = message.get("model")
+        if isinstance(value, str) and value and value != "<synthetic>":
+            model = value
+    return model
+
+
+CLAUDE_SETTINGS_PATH = os.path.expanduser(os.path.join("~", ".claude", "settings.json"))
+
+
+# The CLI defaults a session falls back to when muxpit never chose settings
+# for it: "model" and "effortLevel" in the host's ~/.claude/settings.json.
+def cli_defaults():
+    try:
+        with open(CLAUDE_SETTINGS_PATH, "r", encoding="utf-8") as stream:
+            data = json.load(stream)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    defaults = {}
+    if isinstance(data.get("model"), str) and data["model"]:
+        defaults["model"] = data["model"]
+    if isinstance(data.get("effortLevel"), str) and data["effortLevel"]:
+        defaults["effort"] = data["effortLevel"]
+    return defaults
+
+
 def session_files(root):
     files = []
     for path in glob.iglob(os.path.join(root, "**", "*.jsonl"), recursive=True):
@@ -147,6 +183,9 @@ def session_metadata(path, updated_at, entries):
     # empty string must stay absent or it masquerades as a usable base.
     if cwd:
         metadata["cwd"] = cwd
+    model = session_model(entries)
+    if model:
+        metadata["model"] = model
     return metadata
 
 
@@ -164,6 +203,9 @@ def tool_result_text(content):
 
 def history_items(entries):
     result = []
+    # tool_use id -> its item, so a later tool_result nests under the call it
+    # answers instead of floating as its own "Tool result" row.
+    tool_calls = {}
     for line_index, item in enumerate(entries):
         if item.get("isSidechain"):
             continue
@@ -181,6 +223,13 @@ def history_items(entries):
                     if not isinstance(block, dict) or block.get("type") != "tool_result":
                         continue
                     tool_text = limited(tool_result_text(block.get("content")))
+                    call = tool_calls.get(block.get("tool_use_id"))
+                    if call is not None:
+                        if tool_text:
+                            call["resultText"] = tool_text
+                        if block.get("is_error") is True:
+                            call["resultError"] = True
+                        continue
                     if tool_text:
                         result.append({
                             "id": f"{item_id}-tool-result-{block_index}",
@@ -204,13 +253,31 @@ def history_items(entries):
                         "kind": "assistant",
                         "text": text,
                     })
+            elif block_type == "thinking":
+                text = limited(block.get("thinking", ""))
+                if text:
+                    result.append({
+                        "id": f"{item_id}-thinking-{block_index}",
+                        "kind": "thinking",
+                        "text": text,
+                    })
             elif block_type == "tool_use":
-                result.append({
+                name = block.get("name") or "Tool"
+                entry = {
                     "id": f"{item_id}-tool-{block_index}",
                     "kind": "tool",
-                    "title": trimmed(block.get("name") or "Tool"),
+                    "title": trimmed(name),
                     "text": limited(compact_json(block.get("input"))),
-                })
+                    "toolName": name,
+                }
+                # The structured input drives rich renderers (diffs, todo
+                # lists); oversized inputs fall back to the capped text.
+                if len(compact_json(block.get("input"))) <= MAX_ITEM_CHARS:
+                    entry["toolInput"] = block.get("input")
+                tool_use_id = block.get("id")
+                if isinstance(tool_use_id, str) and tool_use_id:
+                    tool_calls[tool_use_id] = entry
+                result.append(entry)
     return result[-MAX_HISTORY_ITEMS:]
 
 
@@ -229,7 +296,11 @@ def list_sessions(root):
         if not user_driven_session(entries) or not model_answered_session(entries):
             continue
         sessions.append(session_metadata(path, updated_at, entries))
-    print(json.dumps({"type": "muxpit_sessions", "sessions": sessions}), flush=True)
+    print(json.dumps({
+        "type": "muxpit_sessions",
+        "sessions": sessions,
+        "defaults": cli_defaults(),
+    }), flush=True)
 
 
 def load_session(root, session_id):

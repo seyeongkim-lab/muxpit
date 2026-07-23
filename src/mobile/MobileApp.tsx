@@ -7,7 +7,7 @@ import {
 } from "../agent/agentImages.ts";
 import { AcpClient, automaticPermissionOptionId } from "../agent/acpClient.ts";
 import { AgentImageAttachments } from "../components/AgentImageAttachments.tsx";
-import { MarkdownContent, ToolOutput } from "../components/AgentMessageContent.tsx";
+import { MarkdownContent, ThinkingOutput, ToolCallContent, ToolOutput } from "../components/AgentMessageContent.tsx";
 import {
   CodexMobileClient,
   type CodexModelOption,
@@ -1599,7 +1599,49 @@ export const MobileApp = () => {
             kind: "tool",
             title: event.title,
             text: event.detail,
+            ...(event.tool ? { tool: event.tool } : {}),
           }),
+        }));
+        return;
+      case "toolResult":
+        // Nest the result under its originating call; a result for an
+        // unknown call still surfaces as its own row.
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
+          ...runtime,
+          items: runtime.items.some((item) => item.id === event.itemId)
+            ? runtime.items.map((item) => item.id === event.itemId
+                ? {
+                    ...item,
+                    tool: {
+                      ...(item.tool ?? { name: item.title ?? "Tool" }),
+                      resultText: event.text,
+                      ...(event.isError ? { resultError: true } : {}),
+                    },
+                  }
+                : item)
+            : appendUnique(runtime.items, {
+                id: `${event.itemId}-result`,
+                kind: "tool",
+                title: "Tool result",
+                text: event.text,
+              }),
+        }));
+        return;
+      case "thinking":
+        // The completed block replaces any text accumulated from deltas.
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
+          ...runtime,
+          items: runtime.items.some((item) => item.id === event.itemId)
+            ? runtime.items.map((item) => item.id === event.itemId
+                ? { ...item, text: event.text }
+                : item)
+            : [...runtime.items, { id: event.itemId, kind: "thinking" as const, text: event.text }],
+        }));
+        return;
+      case "thinkingDelta":
+        updateProviderRuntime(kind, event.sessionId, (runtime) => ({
+          ...runtime,
+          items: appendMessageDelta(runtime.items, event.itemId, event.text, "thinking"),
         }));
         return;
       case "approvalRequested": {
@@ -2827,9 +2869,10 @@ const appendMessageDelta = (
   items: MobileTimelineItem[],
   id: string,
   delta: string,
+  kind: "assistant" | "thinking" = "assistant",
 ): MobileTimelineItem[] => {
   const index = items.findIndex((item) => item.id === id);
-  if (index < 0) return [...items, { id, kind: "assistant", text: delta }];
+  if (index < 0) return [...items, { id, kind, text: delta }];
   return items.map((item) => item.id === id ? { ...item, text: item.text + delta } : item);
 };
 
@@ -2857,13 +2900,23 @@ const TimelineRow = memo(({ item }: { item: MobileTimelineItem }) => (
   <article className={`timeline-row ${item.kind}`}>
     <div className="timeline-content">
       <span className="timeline-label">
-        {item.kind === "user" ? "You" : item.kind === "assistant" ? "Agent" : item.title ?? "Status"}
+        {item.kind === "user"
+          ? "You"
+          : item.kind === "assistant"
+            ? "Agent"
+            : item.kind === "thinking"
+              ? "Thinking"
+              : item.title ?? "Status"}
       </span>
       {item.kind === "tool"
-        ? <ToolOutput text={item.text} />
+        ? item.tool
+          ? <ToolCallContent tool={item.tool} fallbackText={item.text} />
+          : <ToolOutput text={item.text} />
         : item.kind === "assistant"
           ? <MarkdownContent text={item.text} />
-          : <p>{item.text}</p>}
+          : item.kind === "thinking"
+            ? <ThinkingOutput text={item.text} />
+            : <p>{item.text}</p>}
     </div>
   </article>
 ));

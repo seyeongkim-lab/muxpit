@@ -1,6 +1,6 @@
 [package]
 name = "muxpit"
-version = "0.2.29"
+version = "0.2.30"
 description = "Terminal multiplexer for AI agents"
 authors = ["you"]
 license = "MIT"

@@ -570,6 +570,98 @@ textarea:focus-visible {
   text-underline-offset: 2px;
 }
 
+.timeline-content .agent-md blockquote {
+  margin: 0 0 8px;
+  padding: 2px 10px;
+  border-left: 3px solid #2d3440;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.timeline-content .agent-md table {
+  margin: 0 0 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.timeline-content .agent-md th,
+.timeline-content .agent-md td {
+  padding: 3px 8px;
+  border: 1px solid #2d3440;
+  text-align: left;
+  vertical-align: top;
+}
+
+.timeline-content .agent-md th {
+  background: #11141a;
+  font-weight: 600;
+}
+
+.timeline-content .agent-tool-call {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timeline-content .agent-tool-call-summary {
+  display: block;
+  padding: 2px 6px;
+  border: 1px solid #2d3440;
+  background: #11141a;
+  font-family: "JetBrains Mono", "Roboto Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.timeline-content .agent-tool-call-diff {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid #2d3440;
+  background: #11141a;
+  font-family: "JetBrains Mono", "Roboto Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.timeline-content .agent-tool-call-diff .removed {
+  color: var(--red, #f38ba8);
+}
+
+.timeline-content .agent-tool-call-diff .added {
+  color: var(--green, #a6e3a1);
+}
+
+.timeline-content .agent-tool-call-todos {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.timeline-content .agent-tool-call-todos li.completed {
+  color: var(--muted);
+}
+
+.timeline-content .agent-tool-call-result.error pre,
+.timeline-content .agent-tool-call-result.error summary {
+  color: var(--red, #f38ba8);
+}
+
+.timeline-content .agent-thinking-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .timeline-content .agent-tool-details summary {
   overflow: hidden;
   color: var(--muted);

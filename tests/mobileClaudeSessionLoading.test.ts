@@ -38,6 +38,29 @@ test("session list drops launches that never reached the model", () => {
   assert.match(script, /or not model_answered_session\(entries\)/);
 });
 
+test("history pairs tool results onto their calls and keeps thinking", () => {
+  // Rich timeline rendering needs the structured input, and a result must
+  // nest under the call it answers instead of floating as its own row.
+  assert.match(script, /call = tool_calls\.get\(block\.get\("tool_use_id"\)\)/);
+  assert.match(script, /call\["resultText"\] = tool_text/);
+  assert.match(script, /"kind": "thinking"/);
+  assert.match(script, /entry\["toolInput"\] = block\.get\("input"\)/);
+});
+
+test("session metadata reports the model the transcript actually used", () => {
+  // Sessions driven outside muxpit have no synced settings; the newest real
+  // assistant reply's model is the only honest label for them.
+  assert.match(script, /def session_model\(entries\):/);
+  assert.match(script, /value != "<synthetic>"/);
+  assert.match(script, /if model:\n\s+metadata\["model"\] = model/);
+});
+
+test("session list carries the host CLI defaults for the Default label", () => {
+  assert.match(script, /def cli_defaults\(\):/);
+  assert.match(script, /data\.get\("effortLevel"\)/);
+  assert.match(script, /"defaults": cli_defaults\(\)/);
+});
+
 test("session metadata omits an unknown cwd instead of sending an empty base", () => {
   // The file viewer resolves relative paths against the session cwd; an empty
   // string is not nullish in TS, so it would shadow every fallback base.

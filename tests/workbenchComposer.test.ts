@@ -33,7 +33,7 @@ test("assistant messages render markdown and tool output collapses when long", (
   const workbench = read("../src/components/AgentWorkbenchPanel.tsx");
   const shared = read("../src/components/AgentMessageContent.tsx");
   const styles = read("../src/components/AgentWorkbenchPanel.css");
-  assert.match(workbench, /<MarkdownContent text=\{item\.text\} onOpenFile=\{onOpenFile\} \/>/);
+  assert.match(workbench, /<MarkdownContent text=\{item\.text\} onOpenFile=\{onOpenFile\} highlightCode \/>/);
   assert.match(workbench, /<ToolOutput text=\{item\.text\} \/>/);
   assert.match(shared, /<details className="agent-tool-details">/);
   assert.match(styles, /\.agent-md code \{/);

@@ -23,7 +23,17 @@ export type MobileAgentEvent =
   | { type: "messageDelta"; sessionId: string; turnId: string; itemId: string; text: string }
   | { type: "userMessage"; sessionId: string; itemId: string; text: string }
   | { type: "messageCompleted"; sessionId: string; itemId?: string; text: string }
-  | { type: "toolStarted"; sessionId: string; itemId: string; title: string; detail: string }
+  | {
+      type: "toolStarted";
+      sessionId: string;
+      itemId: string;
+      title: string;
+      detail: string;
+      tool?: MobileToolCall;
+    }
+  | { type: "toolResult"; sessionId: string; itemId: string; text: string; isError?: boolean }
+  | { type: "thinking"; sessionId: string; itemId: string; text: string }
+  | { type: "thinkingDelta"; sessionId: string; itemId: string; text: string }
   | {
       type: "approvalRequested";
       requestId: string | number;
@@ -42,6 +52,8 @@ export interface MobileSession {
   cwd?: string;
   updatedAt?: number;
   provider: AgentProvider;
+  /** Host-computed: the model the session's newest assistant reply ran on. */
+  model?: string;
   /** Host-computed: the session history was written to very recently. */
   active?: boolean;
   /** Client-side expiry for the host `active` flag (ms epoch); see markSessionActivity. */
@@ -177,11 +189,22 @@ export const markSessionActivity = (
 export const isSessionActive = (session: MobileSession, nowMs: number): boolean =>
   (session.activeUntil ?? 0) > nowMs;
 
+// Structured view of a tool call: the raw input drives the rich renderers
+// (summary line, Edit diff, TodoWrite checklist) and the paired result nests
+// under the call instead of floating as its own row.
+export interface MobileToolCall {
+  name: string;
+  input?: unknown;
+  resultText?: string;
+  resultError?: boolean;
+}
+
 export interface MobileTimelineItem {
   id: string;
-  kind: "user" | "assistant" | "tool" | "status";
+  kind: "user" | "assistant" | "tool" | "status" | "thinking";
   text: string;
   title?: string;
+  tool?: MobileToolCall;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -445,8 +468,9 @@ export const normalizeClaudeHistoryMessage = (
   const session: MobileSession = {
     id: loadedSessionId,
     title: stringValue(sessionValue?.title) ?? "Claude session",
-    ...(typeof sessionValue?.cwd === "string" ? { cwd: sessionValue.cwd } : {}),
+    ...(typeof sessionValue?.cwd === "string" && sessionValue.cwd ? { cwd: sessionValue.cwd } : {}),
     ...(typeof sessionValue?.updatedAt === "number" ? { updatedAt: sessionValue.updatedAt } : {}),
+    ...(typeof sessionValue?.model === "string" && sessionValue.model ? { model: sessionValue.model } : {}),
     provider: "claude",
   };
   const items: MobileTimelineItem[] = [];
@@ -456,12 +480,26 @@ export const normalizeClaudeHistoryMessage = (
       const id = stringValue(item?.id);
       const kind = stringValue(item?.kind);
       const text = stringValue(item?.text);
-      if (!id || !text || !kind || !["user", "assistant", "tool", "status"].includes(kind)) continue;
+      if (!id || !text || !kind || !["user", "assistant", "tool", "status", "thinking"].includes(kind)) {
+        continue;
+      }
+      const toolName = stringValue(item?.toolName);
+      const resultText = stringValue(item?.resultText);
       items.push({
         id,
         kind: kind as MobileTimelineItem["kind"],
         text,
         ...(typeof item?.title === "string" ? { title: item.title } : {}),
+        ...(kind === "tool" && toolName
+          ? {
+              tool: {
+                name: toolName,
+                ...(item?.toolInput !== undefined ? { input: item.toolInput } : {}),
+                ...(resultText ? { resultText } : {}),
+                ...(item?.resultError === true ? { resultError: true } : {}),
+              },
+            }
+          : {}),
       });
     }
   }
@@ -476,6 +514,29 @@ const claudeToolDetail = (input: unknown): string => {
     ?? displayJson(input);
 };
 
+const CLAUDE_RESULT_TEXT_LIMIT = 12_000;
+
+// tool_result content is a string, a list of text blocks, or arbitrary JSON —
+// same shapes claude_sessions.py handles for history.
+const claudeResultText = (content: unknown): string => {
+  let text: string;
+  if (typeof content === "string") {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content
+      .map((block) => {
+        const value = objectValue(block);
+        return value?.type === "text" ? stringValue(value.text) ?? "" : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  } else {
+    text = displayJson(content);
+  }
+  text = text.trim();
+  return text.length <= CLAUDE_RESULT_TEXT_LIMIT ? text : `${text.slice(0, CLAUDE_RESULT_TEXT_LIMIT - 1)}…`;
+};
+
 export const normalizeClaudeMessage = (value: unknown): MobileAgentEvent[] => {
   const message = objectValue(value);
   if (!message) return [];
@@ -486,21 +547,34 @@ export const normalizeClaudeMessage = (value: unknown): MobileAgentEvent[] => {
     const content = assistantMessage?.content;
     const messageId = stringValue(assistantMessage?.id);
     if (!Array.isArray(content)) return [];
+    // Thinking precedes the reply, the reply precedes its tool calls; emit in
+    // that order so the timeline reads like the turn actually ran.
+    const thinkingEvents: MobileAgentEvent[] = [];
     const events: MobileAgentEvent[] = [];
     const textBlocks: string[] = [];
-    for (const blockValue of content) {
+    for (const [index, blockValue] of content.entries()) {
       const block = objectValue(blockValue);
       if (block?.type === "text" && typeof block.text === "string" && block.text) {
         textBlocks.push(block.text);
       }
+      if (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
+        thinkingEvents.push({
+          type: "thinking",
+          sessionId,
+          itemId: `${messageId ?? "message"}-thinking-${index}`,
+          text: block.thinking,
+        });
+      }
       if (block?.type === "tool_use") {
         const itemId = stringValue(block.id) ?? `tool-${events.length}`;
+        const name = stringValue(block.name) ?? "Tool";
         events.push({
           type: "toolStarted",
           sessionId,
           itemId,
-          title: stringValue(block.name) ?? "Tool",
+          title: name,
           detail: claudeToolDetail(block.input),
+          tool: { name, input: block.input },
         });
       }
     }
@@ -510,6 +584,29 @@ export const normalizeClaudeMessage = (value: unknown): MobileAgentEvent[] => {
         sessionId,
         ...(messageId ? { itemId: messageId } : {}),
         text: textBlocks.join(""),
+      });
+    }
+    return [...thinkingEvents, ...events];
+  }
+  if (type === "user") {
+    // stream-json wraps tool results in user messages; pairing them onto the
+    // originating call is the only way the live view ever shows tool output.
+    const content = objectValue(message.message)?.content;
+    if (!Array.isArray(content)) return [];
+    const events: MobileAgentEvent[] = [];
+    for (const blockValue of content) {
+      const block = objectValue(blockValue);
+      if (block?.type !== "tool_result") continue;
+      const itemId = stringValue(block.tool_use_id);
+      if (!itemId) continue;
+      const text = claudeResultText(block.content);
+      if (!text) continue;
+      events.push({
+        type: "toolResult",
+        sessionId,
+        itemId,
+        text,
+        ...(block.is_error === true ? { isError: true } : {}),
       });
     }
     return events;
@@ -565,10 +662,21 @@ export class ClaudeStreamNormalizer {
     }
     if (event?.type !== "content_block_delta") return [];
     const delta = objectValue(event.delta);
-    const text = delta?.type === "text_delta" ? stringValue(delta.text) : undefined;
     const itemId = this.messageIds.get(sessionId);
-    return text && itemId
-      ? [{ type: "messageDelta", sessionId, turnId: itemId, itemId, text }]
-      : [];
+    if (!itemId) return [];
+    if (delta?.type === "text_delta") {
+      const text = stringValue(delta.text);
+      return text ? [{ type: "messageDelta", sessionId, turnId: itemId, itemId, text }] : [];
+    }
+    if (delta?.type === "thinking_delta") {
+      const text = stringValue(delta.thinking);
+      // Same id scheme as the completed assistant message's thinking blocks,
+      // so the full block replaces the accumulated deltas when it lands.
+      const index = typeof event.index === "number" ? event.index : 0;
+      return text
+        ? [{ type: "thinkingDelta", sessionId, itemId: `${itemId}-thinking-${index}`, text }]
+        : [];
+    }
+    return [];
   }
 }

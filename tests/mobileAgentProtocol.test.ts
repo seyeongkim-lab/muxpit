@@ -142,6 +142,7 @@ test("Claude stream messages become text, tool, and completion events", () => {
         itemId: "tool-1",
         title: "Bash",
         detail: "pnpm test",
+        tool: { name: "Bash", input: { command: "pnpm test" } },
       },
     ],
   );
@@ -283,6 +284,7 @@ test("Claude assistant text blocks complete one streamed message", () => {
       itemId: "tool-1",
       title: "Read",
       detail: "a",
+      tool: { name: "Read", input: { path: "a" } },
     },
   ]);
 });
