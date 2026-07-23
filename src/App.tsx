@@ -14,6 +14,7 @@ import { PaneNumberOverlay } from "./components/PaneNumberOverlay";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { LaunchProfilesPanel } from "./components/LaunchProfilesPanel";
 import { AgentWorkbenchPanel } from "./components/AgentWorkbenchPanel";
+import { FileViewerDrawer } from "./components/FileViewerDrawer";
 import { OnboardingPanel } from "./components/OnboardingPanel";
 import { useWorkspaceStore, collectLeafIds, findLeafByPtyId } from "./stores/workspace";
 import {
@@ -30,6 +31,7 @@ import { useLaunchProfileStore } from "./stores/launchProfiles";
 import { useTmuxSessionsStore } from "./stores/tmuxSessions";
 import { useSettingsStore } from "./stores/settings";
 import { usePrefixStore, PREFIX_TIMEOUT_MS, PANE_NUMBER_TIMEOUT_MS } from "./stores/prefix";
+import { useFileViewerStore } from "./stores/fileViewer";
 import { destroyTerminal, destroyAllTerminals, terminalInstances } from "./components/terminalRegistry";
 import { useWorkspaceInfoPoller, useSshContextPoller, useWorkspaceInfoStore } from "./hooks/useWorkspaceInfo";
 import { useAgentSessionProcessMonitor } from "./hooks/useAgentSessionProcessMonitor";
@@ -114,6 +116,7 @@ export const App = () => {
   const setLaunchProfilesOpen = useLaunchProfileStore((state) => state.setPanelOpen);
   const notificationPanelOpen = useNotificationStore((state) => state.panelOpen);
   const historyPanelOpen = usePrefixStore((state) => state.historyOpen);
+  const fileViewerOpen = useFileViewerStore((state) => state.open);
   const paneNumbersVisible = usePrefixStore((state) => state.showPaneNumbers);
   const closingRef = useRef(false);
 
@@ -146,7 +149,8 @@ export const App = () => {
     !hasCompletedOnboarding ||
     notificationPanelOpen ||
     historyPanelOpen ||
-    paneNumbersVisible
+    paneNumbersVisible ||
+    fileViewerOpen
   );
 
   // Push resolved theme colours onto :root as CSS custom properties so the
@@ -1013,6 +1017,7 @@ export const App = () => {
           onClose={() => setAgentWorkbenchOpen(false)}
           dock={agentWorkbenchOpen ? terminalContent : undefined}
         />
+        <FileViewerDrawer />
         <PrefixIndicator />
         <HistoryPanel />
         <NotificationPanel />
@@ -1091,6 +1096,8 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 0,
     display: "flex",
     overflow: "hidden",
+    // Anchors the absolutely-positioned file viewer drawer below the top bar.
+    position: "relative",
   },
   terminalArea: {
     flex: 1,

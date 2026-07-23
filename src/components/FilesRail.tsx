@@ -2,6 +2,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { SshConnection } from "../utils/sshConnection";
 import { clampFilesRailWidth, useSidebarLayoutStore } from "../stores/sidebarLayout";
+import { useFileViewerStore } from "../stores/fileViewer";
+import { compactPath, formatSize } from "../utils/pathDisplay";
+import { beginEdgeDrag } from "../utils/edgeResize";
 
 export interface DirEntry {
   name: string;
@@ -26,18 +29,6 @@ interface FilesRailProps {
   sshConnection?: SshConnection | null;
   sshCommand?: string | null;
 }
-
-const formatSize = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
-};
-
-const compactPath = (path: string): string =>
-  path
-    .replace(/^\/home\/[^/]+(?=\/|$)/, "~")
-    .replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
 
 const joinPath = (parent: string, name: string): string => {
   if (!parent) return name;
@@ -72,37 +63,19 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
   const startResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = asideRef.current?.getBoundingClientRect().width ?? railWidth;
-      let pending = startWidth;
-      let frameId: number | null = null;
-
-      const apply = () => {
-        frameId = null;
-        if (asideRef.current) {
-          asideRef.current.style.width = `${pending}px`;
-          asideRef.current.style.minWidth = `${pending}px`;
-        }
-      };
-
-      const onMouseMove = (ev: MouseEvent) => {
-        pending = clampFilesRailWidth(startWidth + (ev.clientX - startX));
-        if (frameId === null) frameId = requestAnimationFrame(apply);
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-        if (frameId !== null) cancelAnimationFrame(frameId);
-        setRailWidth(pending);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      };
-
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      beginEdgeDrag({
+        startX: e.clientX,
+        startWidth: asideRef.current?.getBoundingClientRect().width ?? railWidth,
+        direction: 1,
+        clamp: clampFilesRailWidth,
+        apply: (width) => {
+          if (asideRef.current) {
+            asideRef.current.style.width = `${width}px`;
+            asideRef.current.style.minWidth = `${width}px`;
+          }
+        },
+        commit: setRailWidth,
+      });
     },
     [railWidth, setRailWidth],
   );
@@ -186,6 +159,18 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
     void loadPath(rootPath ?? requestedRoot);
   }, [loadPath, requestedRoot, rootPath]);
 
+  // Rail paths are already absolute (the root comes from `pwd`/canonicalize),
+  // so the viewer needs no cwd.
+  const openFile = useCallback(
+    (path: string) => {
+      useFileViewerStore.getState().openFile(path, {
+        sshCommand: sshCommand ?? null,
+        sshConnection: sshConnection ?? null,
+      });
+    },
+    [sshCommand, sshConnection],
+  );
+
   const renderEntry = (parentPath: string, entry: DirEntry, depth: number) => {
     const path = joinPath(parentPath, entry.name);
     const isExpanded = expanded.has(path);
@@ -203,7 +188,11 @@ const FilesRailImpl = ({ cwd, sshConnection, sshCommand }: FilesRailProps) => {
             {isExpanded ? "v" : ">"}
           </button>
           <span style={entry.isDir ? styles.dirMark : styles.fileMark}>{entry.isDir ? "D" : "F"}</span>
-          <span style={styles.fileName} title={path}>{entry.name}</span>
+          <span
+            style={entry.isDir ? styles.fileName : { ...styles.fileName, cursor: "pointer" }}
+            title={entry.isDir ? path : `Open ${path}`}
+            onClick={() => !entry.isDir && openFile(path)}
+          >{entry.name}</span>
           <span style={styles.fileSize}>{entry.isDir ? "" : formatSize(entry.size)}</span>
         </div>
         {entry.isDir && isExpanded && (

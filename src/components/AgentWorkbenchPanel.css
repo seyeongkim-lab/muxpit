@@ -769,6 +769,14 @@
   text-underline-offset: 2px;
 }
 
+/* Inline code recognized as a file path — clickable, opens the viewer. */
+.agent-md-file {
+  color: var(--muxpit-accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .agent-tool-details summary {
   overflow: hidden;
   color: var(--muxpit-subtext);

@@ -327,4 +327,14 @@ export const applyThemeVars = (theme: TerminalTheme): void => {
   root.style.setProperty("--muxpit-accent-strong", hexToRgba(accent, 0.55));
   root.style.setProperty("--muxpit-accent-glow", hexToRgba(accent, 0.35));
   root.style.setProperty("--muxpit-accent-2-soft", hexToRgba(accent2, 0.08));
+
+  // Syntax token colours for highlighted code (file viewer), derived from the
+  // terminal ANSI palette so they track theme switches in light and dark.
+  root.style.setProperty("--muxpit-syn-keyword", accent2);
+  root.style.setProperty("--muxpit-syn-string", theme.green ?? "#a6e3a1");
+  root.style.setProperty("--muxpit-syn-number", theme.yellow ?? "#f9e2af");
+  root.style.setProperty("--muxpit-syn-function", accent);
+  root.style.setProperty("--muxpit-syn-type", theme.cyan ?? "#94e2d5");
+  root.style.setProperty("--muxpit-syn-tag", theme.red ?? "#f38ba8");
+  root.style.setProperty("--muxpit-syn-comment", subtext);
 };

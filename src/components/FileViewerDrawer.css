@@ -1,0 +1,211 @@
+/* Right-side file viewer drawer. Sits above the terminal panes but below the
+   modal overlays (z-index 200), and leaves the rest of the app interactive. */
+
+.file-viewer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--muxpit-bg);
+  border-left: 1px solid var(--muxpit-hairline-strong);
+  box-shadow: -14px 0 36px rgba(0, 0, 0, 0.4);
+  outline: none;
+}
+
+.file-viewer-resize {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+/* Fixed 34px row — matches the top bar and the panes' AI bar so the app
+   shares one horizontal baseline. */
+.file-viewer-header {
+  height: 34px;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--muxpit-hairline);
+}
+
+.file-viewer-header strong {
+  color: var(--muxpit-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.file-viewer-header span {
+  overflow: hidden;
+  color: var(--muxpit-subtext);
+  font-family: var(--muxpit-font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.file-viewer-actions .muxpit-btn {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muxpit-subtext);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-viewer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.file-viewer-status,
+.file-viewer-error {
+  padding: 20px 16px;
+  color: var(--muxpit-subtext);
+  font-size: 13px;
+  text-align: center;
+}
+
+.file-viewer-error {
+  color: var(--muxpit-danger, #f38ba8);
+  font-family: var(--muxpit-font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  text-align: left;
+}
+
+/* Markdown documents read as prose: proportional type on a bounded measure. */
+.file-viewer-doc {
+  max-width: 72ch;
+  margin: 0 auto;
+  padding: 20px 24px 32px;
+}
+
+.file-viewer-doc .agent-md p {
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.file-viewer-doc .agent-md-h1 {
+  font-size: 20px;
+}
+
+.file-viewer-doc .agent-md-h2 {
+  font-size: 17px;
+}
+
+.file-viewer-doc .agent-md pre {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--muxpit-hairline);
+  background: var(--muxpit-bg-elev);
+  font-family: var(--muxpit-font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Code and plain text files. */
+.file-viewer-code {
+  margin: 0;
+  padding: 14px 16px 28px;
+  color: var(--muxpit-text);
+  font-family: var(--muxpit-font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  tab-size: 4;
+  white-space: pre;
+}
+
+.file-viewer-footer {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--muxpit-hairline);
+  color: var(--muxpit-subtext);
+  font-size: 11px;
+}
+
+/* Prism token colours, mapped onto the terminal ANSI palette pushed by
+   applyThemeVars so highlighting follows the active theme. */
+.token.keyword,
+.token.atrule,
+.token.rule,
+.token.important {
+  color: var(--muxpit-syn-keyword);
+}
+
+.token.string,
+.token.char,
+.token.attr-value,
+.token.regex,
+.token.inserted {
+  color: var(--muxpit-syn-string);
+}
+
+.token.number,
+.token.boolean,
+.token.constant,
+.token.symbol {
+  color: var(--muxpit-syn-number);
+}
+
+.token.function,
+.token.selector,
+.token.attr-name,
+.token.property {
+  color: var(--muxpit-syn-function);
+}
+
+.token.class-name,
+.token.builtin,
+.token.namespace,
+.token.type-definition {
+  color: var(--muxpit-syn-type);
+}
+
+.token.tag,
+.token.deleted,
+.token.variable {
+  color: var(--muxpit-syn-tag);
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: var(--muxpit-syn-comment);
+  font-style: italic;
+}
+
+.token.punctuation,
+.token.operator {
+  color: var(--muxpit-subtext);
+}
+
+.token.bold {
+  font-weight: 600;
+}
+
+.token.italic {
+  font-style: italic;
+}

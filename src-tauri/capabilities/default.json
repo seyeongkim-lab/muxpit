@@ -39,6 +39,8 @@
     "allow-list-fonts",
     "allow-read-dir",
     "allow-remote-read-dir",
+    "allow-read-file",
+    "allow-remote-read-file",
     "allow-start-monitor",
     "allow-stop-monitor",
     "allow-request-session-content",

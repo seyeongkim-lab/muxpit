@@ -38,6 +38,8 @@ fn main() {
             "list_fonts",
             "read_dir",
             "remote_read_dir",
+            "read_file",
+            "remote_read_file",
             "start_monitor",
             "stop_monitor",
             "request_session_content",

@@ -85,6 +85,7 @@ import {
 } from "../mobile/agentWorkbenchPersistence.ts";
 import { CodexMobileClient, type CodexModelOption } from "../mobile/codexMobileClient.ts";
 import { AI_KINDS } from "../stores/aiCli.ts";
+import { useFileViewerStore } from "../stores/fileViewer.ts";
 import { buildSshConnection, useSshHostsStore } from "../stores/sshHosts.ts";
 import { useWorkspaceStore, type AiKind } from "../stores/workspace.ts";
 import { collectOrderedLeaves } from "../utils/layoutGeometry.ts";
@@ -230,10 +231,11 @@ const nextWorkbenchPaneId = (): string =>
 
 // Memoized so streaming deltas only re-render the row that changed, keeping
 // long conversations smooth while text pours in.
-const TimelineRow = memo(({ item, providerName, streaming }: {
+const TimelineRow = memo(({ item, providerName, streaming, onOpenFile }: {
   item: MobileTimelineItem;
   providerName: string;
   streaming: boolean;
+  onOpenFile?: (path: string) => void;
 }) => (
   <article className={`agent-timeline-row ${item.kind}${streaming ? " streaming" : ""}`}>
     <div>
@@ -241,7 +243,7 @@ const TimelineRow = memo(({ item, providerName, streaming }: {
       {item.kind === "tool"
         ? <ToolOutput text={item.text} />
         : item.kind === "assistant"
-          ? <MarkdownContent text={item.text} />
+          ? <MarkdownContent text={item.text} onOpenFile={onOpenFile} />
           : <p>{item.text}</p>}
     </div>
   </article>
@@ -1393,6 +1395,18 @@ const DesktopTargetRuntime = ({
       timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < TIMELINE_PIN_THRESHOLD_PX;
   }, []);
 
+  // File-looking inline code in the conversation opens the viewer drawer.
+  // Relative paths resolve against the active session's cwd on this target.
+  const openFileFromTimeline = useCallback((path: string): void => {
+    const view = viewsRef.current[providerRef.current];
+    const session = view.sessions.find((candidate) => candidate.id === view.activeSessionId);
+    useFileViewerStore.getState().openFile(path, {
+      cwd: session?.cwd ?? target.cwd,
+      sshCommand: target.sshCommand,
+      sshConnection: target.sshConnection,
+    });
+  }, [target]);
+
   useLayoutEffect(() => {
     if (!active || !timelineRef.current) return;
     if (timelineSessionRef.current !== timelineSessionKey) {
@@ -2053,6 +2067,7 @@ const DesktopTargetRuntime = ({
                   streaming={runtime.running
                     && index === runtime.items.length - 1
                     && item.kind === "assistant"}
+                  onOpenFile={openFileFromTimeline}
                 />
               ))}
               {runtime.approvals.map((approval) => (

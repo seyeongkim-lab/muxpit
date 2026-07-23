@@ -200,6 +200,29 @@ async fn remote_read_dir(
 }
 
 #[tauri::command]
+async fn read_file(path: String, cwd: Option<String>) -> Result<file_tree::FileContent, String> {
+    tauri::async_runtime::spawn_blocking(move || file_tree::read_local_file(&path, cwd.as_deref()))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn remote_read_file(
+    path: String,
+    cwd: Option<String>,
+    ssh_command: Option<String>,
+    ssh_connection: Option<SshCommand>,
+) -> Result<file_tree::FileContent, String> {
+    let ssh = resolve_ssh_command(ssh_command.as_deref(), ssh_connection)
+        .ok_or_else(|| "Invalid SSH command".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        file_tree::read_remote_file(&ssh, &path, cwd.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
 fn start_monitor(
     app: AppHandle,
     state: State<'_, MonitorManager>,
@@ -561,6 +584,8 @@ pub fn run() {
             list_fonts,
             read_dir,
             remote_read_dir,
+            read_file,
+            remote_read_file,
             check_remote_clis,
             check_local_clis,
             check_remote_tmux,
