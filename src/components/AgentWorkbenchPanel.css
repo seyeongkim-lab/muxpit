@@ -559,6 +559,12 @@
   position: relative;
   padding-bottom: 16px;
   animation: agent-row-in 0.16s ease-out;
+  /* Every composer keystroke dirties layout, and without this the whole
+     transcript is laid out again to answer it: at 754 rows that measured 24ms
+     per keystroke against 1.4ms with offscreen rows skipped. `auto` keeps each
+     row's last rendered size so the timeline's scroll height stays put. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
 }
 
 @keyframes agent-row-in {
