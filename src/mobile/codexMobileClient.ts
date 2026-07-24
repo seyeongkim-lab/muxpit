@@ -118,6 +118,10 @@ export class CodexMobileClient {
         title: "muxpit Mobile",
         version: "0.2.17",
       },
+      // The app server gates thread/settings/update (model/effort/serviceTier
+      // changes on a live thread) behind this opt-in; without it the request
+      // is rejected with "requires experimentalApi capability".
+      capabilities: { experimentalApi: true },
     });
     await this.notify("initialized", {});
   }
