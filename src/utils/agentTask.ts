@@ -62,6 +62,20 @@ export const reduceAgentTask = (
   update: AgentTaskUpdate,
 ): AgentTask[] => {
   const id = `${update.workspaceId}:${update.surfaceId}`;
+  // AI panes re-report the same status on every output burst. Returning the
+  // same array lets store subscribers skip re-rendering, keeps updatedAt
+  // meaning "last status change", and preserves an acknowledgement instead of
+  // re-flagging attention for a status the user already saw.
+  const existing = tasks.find((task) => task.id === id);
+  if (
+    existing &&
+    existing.source === update.source &&
+    existing.label === update.label &&
+    existing.status === update.status &&
+    existing.parentSurfaceId === update.parentSurfaceId
+  ) {
+    return tasks as AgentTask[];
+  }
   const next: AgentTask = { ...update, id, acknowledged: false };
   return [next, ...tasks.filter((task) => task.id !== id)]
     .sort((left, right) => right.updatedAt - left.updatedAt)

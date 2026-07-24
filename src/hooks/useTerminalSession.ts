@@ -51,6 +51,11 @@ import { createTerminalSurface, type TerminalSurface } from "../components/termi
 // Exponential backoff between tmux-CC reconnection attempts.
 const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
 
+// Trailing delay before an AI status snapshot after output arrives. Long
+// enough to coalesce a typing burst, short enough that sidebar labels still
+// track the agent's spinner line.
+const AI_STATUS_SNAPSHOT_DELAY_MS = 250;
+
 const SHOULD_CLEAR_STALE_INPUT_BUFFER_AFTER_TEXT_INPUT = isLinuxWebKitRuntime();
 const TERMINAL_INPUT_PLATFORM = getRuntimePlatform();
 
@@ -215,26 +220,39 @@ export const useTerminalSession = ({
       return !!findTerminalAiKind(getWorkspaces(), workspaceId, leafId) ||
         !!detectAiAgentName(info?.agent, info?.processName, info?.command, data);
     };
-    let aiStatusSnapshotFrame: number | null = null;
+    let aiStatusSnapshotTimer: number | null = null;
     const cancelAiStatusSnapshot = () => {
-      if (aiStatusSnapshotFrame === null) return;
-      window.cancelAnimationFrame(aiStatusSnapshotFrame);
-      aiStatusSnapshotFrame = null;
+      if (aiStatusSnapshotTimer === null) return;
+      window.clearTimeout(aiStatusSnapshotTimer);
+      aiStatusSnapshotTimer = null;
     };
     const scheduleAiStatusSnapshot = () => {
-      if (aiStatusSnapshotFrame !== null) return;
-      aiStatusSnapshotFrame = window.requestAnimationFrame(() => {
-        aiStatusSnapshotFrame = null;
+      if (aiStatusSnapshotTimer !== null) return;
+      // Trailing-throttled rather than per-frame: a snapshot re-parses the
+      // visible text and touches the workspace-info and agent-task stores,
+      // whose subscribers include App itself — per-frame snapshots turned
+      // every echoed keystroke of an AI pane into an app-wide re-render.
+      aiStatusSnapshotTimer = window.setTimeout(() => {
+        aiStatusSnapshotTimer = null;
         if (!isAiTerminal()) return;
         const status = parseAiTerminalStatus(surface.getVisibleText(24), Date.now(), {
           allowFallback: true,
         });
         if (!status) return;
-        useWorkspaceInfoStore.getState().patchInfo(workspaceId, {
-          aiStatusLabel: status.label,
-          aiStatusKind: status.kind,
-          aiStatusUpdatedAt: status.updatedAt,
-        });
+        // Patch only on a label/kind change: the timestamp is always fresh, so
+        // an unconditional patch would publish a new info object per snapshot
+        // and re-render every subscriber even while the status is stable.
+        const currentInfo = useWorkspaceInfoStore.getState().info[workspaceId];
+        if (
+          currentInfo?.aiStatusLabel !== status.label ||
+          currentInfo?.aiStatusKind !== status.kind
+        ) {
+          useWorkspaceInfoStore.getState().patchInfo(workspaceId, {
+            aiStatusLabel: status.label,
+            aiStatusKind: status.kind,
+            aiStatusUpdatedAt: status.updatedAt,
+          });
+        }
         const leaf = findTerminalLeaf(getWorkspaces(), workspaceId, leafId);
         const source = leaf?.agentLabel ?? findTerminalAiKind(getWorkspaces(), workspaceId, leafId) ??
           detectAiAgentName(
@@ -251,7 +269,7 @@ export const useTerminalSession = ({
           updatedAt: status.updatedAt,
           parentSurfaceId: leaf?.parentSurfaceId,
         });
-      });
+      }, AI_STATUS_SNAPSHOT_DELAY_MS);
     };
     const writeImmediate = (data: string) => {
       writeBuffer.flush();
@@ -272,10 +290,10 @@ export const useTerminalSession = ({
           handleTerminalOutputEvent(event, workspaceId, leafId);
         }
       }
-      // scheduleAiStatusSnapshot() is already rAF-coalesced, so once a frame is
-      // pending there is no need to re-run the AI-kind tree walk / fallback
-      // regex scan for every further chunk that lands before it fires.
-      if (aiStatusSnapshotFrame === null && isAiTerminal(data)) {
+      // scheduleAiStatusSnapshot() is already coalesced on a trailing timer,
+      // so once one is pending there is no need to re-run the AI-kind tree
+      // walk / fallback regex scan for every further chunk before it fires.
+      if (aiStatusSnapshotTimer === null && isAiTerminal(data)) {
         scheduleAiStatusSnapshot();
       }
     };
@@ -528,7 +546,15 @@ export const useTerminalSession = ({
     terminalInstances.set(leafId, {
       surface,
       ptyId,
-      cleanup: { unlistenOutput, unlistenExit, onData, onResize, onPaste, writeBuffer },
+      cleanup: {
+        unlistenOutput,
+        unlistenExit,
+        onData,
+        onResize,
+        onPaste,
+        writeBuffer,
+        cancelAiStatusSnapshot,
+      },
     });
 
     setPtyId(workspaceId, leafId, ptyId);

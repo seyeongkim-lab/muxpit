@@ -126,7 +126,9 @@ export const App = () => {
   const customThemes = useSettingsStore((s) => s.customThemes);
   const dashboardLayout = useSettingsStore((s) => s.dashboardLayout);
   const hasCompletedOnboarding = useSettingsStore((s) => s.hasCompletedOnboarding);
-  const activeInfo = useWorkspaceInfoStore((s) => activeId ? s.info[activeId] : undefined);
+  // Subscribe to just the cwd string: the info object itself is republished
+  // whenever the AI status changes, which would re-render the whole app.
+  const activeCwd = useWorkspaceInfoStore((s) => activeId ? s.info[activeId]?.cwd : undefined);
   const fileLeaf = activeWs
     ? findLeafNode(activeWs.layout, activeWs.focusedLeafId) ?? findFirstLeafNode(activeWs.layout)
     : null;
@@ -134,7 +136,7 @@ export const App = () => {
   const parsedFileSsh = fileLeafIsRemote
     ? parseSshCommandLine(fileLeaf.sshCommand ?? fileLeaf.command)
     : undefined;
-  const fileRailCwd = activeInfo?.cwd || fileLeaf?.lastCwd || null;
+  const fileRailCwd = activeCwd || fileLeaf?.lastCwd || null;
   const fileRailSshConnection = fileLeafIsRemote
     ? fileLeaf.sshConnection ?? parsedFileSsh?.connection ?? null
     : null;

@@ -43,6 +43,27 @@ test("task updates replace a surface record and clear acknowledgement", () => {
   assert.equal(next[0].acknowledged, false);
 });
 
+test("an identical re-report keeps the same tasks array and acknowledgement", () => {
+  const update = {
+    workspaceId: "ws",
+    surfaceId: "pane",
+    source: "claude",
+    label: "reading files",
+    status: "working" as const,
+    updatedAt: 1,
+  };
+  const first = reduceAgentTask([], update);
+  assert.equal(reduceAgentTask(first, { ...update, updatedAt: 2 }), first);
+
+  const acknowledged = first.map((item) => ({ ...item, acknowledged: true }));
+  assert.equal(reduceAgentTask(acknowledged, { ...update, updatedAt: 3 }), acknowledged);
+  assert.equal(acknowledged[0].acknowledged, true);
+
+  const changed = reduceAgentTask(first, { ...update, label: "editing files", updatedAt: 4 });
+  assert.notEqual(changed, first);
+  assert.equal(changed[0].label, "editing files");
+});
+
 test("attention tasks omit working and acknowledged records", () => {
   const tasks = [
     task("working"),

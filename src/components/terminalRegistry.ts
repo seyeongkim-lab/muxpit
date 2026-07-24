@@ -13,6 +13,7 @@ export interface TerminalInstance {
     onResize: TerminalDisposable;
     onPaste: TerminalDisposable;
     writeBuffer?: TerminalDisposable;
+    cancelAiStatusSnapshot?: () => void;
   };
 }
 
@@ -31,6 +32,8 @@ export const destroyTerminal = (leafId: string) => {
   instance.cleanup.onResize.dispose();
   instance.cleanup.onPaste.dispose();
   instance.cleanup.writeBuffer?.dispose();
+  // A pending status snapshot must not fire against the disposed surface.
+  instance.cleanup.cancelAiStatusSnapshot?.();
   instance.surface.dispose();
   terminalInstances.delete(leafId);
 };

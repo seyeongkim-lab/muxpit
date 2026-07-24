@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace";
-import { useSettingsStore } from "../stores/settings";
-import type { AiTerminalStatusKind } from "../utils/aiTerminalStatus";
+import { useWorkspaceStore, collectLeafIds, type LayoutNode, type LeafNode, type Workspace } from "../stores/workspace.ts";
+import { useSettingsStore } from "../stores/settings.ts";
+import type { AiTerminalStatusKind } from "../utils/aiTerminalStatus.ts";
 
 const findLeafInLayout = (node: LayoutNode, id: string): LayoutNode | null => {
   if ((node.type === "leaf" || node.type === "browser" || node.type === "monitor" || node.type === "claudeSession") && node.id === id) return node;
@@ -82,12 +82,26 @@ export const useWorkspaceInfoStore = create<WorkspaceInfoState>((set) => ({
   setInfo: (wsId, info) =>
     set((s) => ({ info: { ...s.info, [wsId]: info } })),
   patchInfo: (wsId, patch) =>
-    set((s) => ({
-      info: {
-        ...s.info,
-        [wsId]: { ...emptyInfo(s.info[wsId]), ...s.info[wsId], ...patch },
-      },
-    })),
+    set((s) => {
+      const current = s.info[wsId];
+      // No-op patches are frequent (AI status snapshots re-derive the same
+      // values on every output burst); keeping the same state reference lets
+      // subscribers skip re-rendering.
+      if (
+        current &&
+        (Object.keys(patch) as Array<keyof WorkspaceInfo>).every(
+          (key) => current[key] === patch[key],
+        )
+      ) {
+        return s;
+      }
+      return {
+        info: {
+          ...s.info,
+          [wsId]: { ...emptyInfo(current), ...current, ...patch },
+        },
+      };
+    }),
   setLeafCwd: (wsId, leafId, cwd) =>
     set((s) => {
       const workspaceCwds = s.leafCwds[wsId] ?? {};

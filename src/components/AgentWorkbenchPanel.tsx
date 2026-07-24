@@ -1476,6 +1476,24 @@ const DesktopTargetRuntime = ({
     });
   }, [target]);
 
+  // Rebuilding row elements only when the items themselves change keeps a
+  // composer keystroke (which re-renders this component for the draft) from
+  // re-reconciling the whole timeline.
+  const timelineRows = useMemo(
+    () => runtime.items.map((item, index) => (
+      <TimelineRow
+        key={item.id}
+        item={item}
+        providerName={PROVIDER_NAMES[provider]}
+        streaming={runtime.running
+          && index === runtime.items.length - 1
+          && item.kind === "assistant"}
+        onOpenFile={openFileFromTimeline}
+      />
+    )),
+    [runtime.items, runtime.running, provider, openFileFromTimeline],
+  );
+
   useLayoutEffect(() => {
     if (!active || !timelineRef.current) return;
     if (timelineSessionRef.current !== timelineSessionKey) {
@@ -2144,17 +2162,7 @@ const DesktopTargetRuntime = ({
                   </div>
                 )
               ) : null}
-              {runtime.items.map((item, index) => (
-                <TimelineRow
-                  key={item.id}
-                  item={item}
-                  providerName={PROVIDER_NAMES[provider]}
-                  streaming={runtime.running
-                    && index === runtime.items.length - 1
-                    && item.kind === "assistant"}
-                  onOpenFile={openFileFromTimeline}
-                />
-              ))}
+              {timelineRows}
               {runtime.approvals.map((approval) => (
                 <article key={approval.requestId} className="agent-approval">
                   <small>Approval required</small>
