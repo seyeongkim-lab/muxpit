@@ -104,6 +104,29 @@ export const updateSessionRuntime = (
   return { ...runtimes, [key]: update(readSessionRuntime(runtimes, sessionId)) };
 };
 
+/**
+ * Every session a provider has opened keeps its timeline, which is what makes a
+ * stored snapshot large. Dropping the timelines of the sessions that are not on
+ * screen leaves them to reload their history from the host when reopened.
+ */
+export const dropInactiveTimelines = (
+  runtimes: AgentSessionRuntimes,
+  activeSessionId: string | null | undefined,
+): AgentSessionRuntimes => {
+  const activeKey = sessionRuntimeKey(activeSessionId);
+  const trimmed: AgentSessionRuntimes = {};
+  let dropped = false;
+  for (const [key, runtime] of Object.entries(runtimes)) {
+    if (key === activeKey || runtime.items.length === 0) {
+      trimmed[key] = runtime;
+      continue;
+    }
+    dropped = true;
+    trimmed[key] = { ...runtime, items: [], historyState: "idle" };
+  }
+  return dropped ? trimmed : runtimes;
+};
+
 export const moveSessionRuntime = (
   runtimes: AgentSessionRuntimes,
   fromSessionId: string | null | undefined,

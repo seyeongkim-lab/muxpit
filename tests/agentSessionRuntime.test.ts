@@ -6,6 +6,7 @@ import {
   activeSessionCount,
   completeSessionHistory,
   createSessionRuntime,
+  dropInactiveTimelines,
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
@@ -227,4 +228,50 @@ test("retry backoff doubles per failure and stays capped", () => {
   assert.equal(retryBackoffMs(5, 5_000, 60_000), 60_000);
   assert.equal(retryBackoffMs(50, 5_000, 60_000), 60_000);
   assert.equal(retryBackoffMs(0, 5_000, 60_000), 5_000);
+});
+
+test("stored runtimes keep only the open session's timeline", () => {
+  let runtimes = {};
+  runtimes = updateSessionRuntime(runtimes, "session-open", (runtime) => ({
+    ...runtime,
+    items: [{ id: "open-1", kind: "assistant", text: "on screen" }],
+    historyState: "loaded",
+    draft: "half typed",
+  }));
+  runtimes = updateSessionRuntime(runtimes, "session-background", (runtime) => ({
+    ...runtime,
+    items: [{ id: "background-1", kind: "assistant", text: "off screen" }],
+    historyState: "loaded",
+    draft: "keep me",
+    queue: ["queued instruction"],
+  }));
+
+  const trimmed = dropInactiveTimelines(runtimes, "session-open");
+
+  assert.equal(trimmed["session-open"], runtimes["session-open"]);
+  assert.deepEqual(trimmed["session-background"].items, []);
+  // Reopening has to refetch rather than show an empty transcript.
+  assert.equal(trimmed["session-background"].historyState, "idle");
+  assert.equal(trimmed["session-background"].draft, "keep me");
+  assert.deepEqual(trimmed["session-background"].queue, ["queued instruction"]);
+});
+
+test("stored runtimes stay identical when nothing has a timeline to drop", () => {
+  let runtimes = {};
+  runtimes = updateSessionRuntime(runtimes, "session-open", (runtime) => ({
+    ...runtime,
+    items: [{ id: "open-1", kind: "assistant", text: "on screen" }],
+  }));
+  runtimes = updateSessionRuntime(runtimes, "session-empty", (runtime) => runtime);
+
+  assert.equal(dropInactiveTimelines(runtimes, "session-open"), runtimes);
+});
+
+test("the draft session's timeline survives when no session is selected", () => {
+  const runtimes = updateSessionRuntime({}, null, (runtime) => ({
+    ...runtime,
+    items: [{ id: "draft-1", kind: "user", text: "first message" }],
+  }));
+
+  assert.deepEqual(dropInactiveTimelines(runtimes, null), runtimes);
 });

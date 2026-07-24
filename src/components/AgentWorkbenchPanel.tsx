@@ -63,6 +63,7 @@ import {
   beginSessionHistory,
   completeSessionHistory,
   createSessionRuntime,
+  dropInactiveTimelines,
   failSessionHistory,
   moveSessionRuntime,
   readSessionRuntime,
@@ -182,7 +183,10 @@ const clampedStoredPx = (key: string, fallback: number, min: number, max: number
 const CLAUDE_HELPER_TIMEOUT_MS = 30_000;
 const DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v2:";
 const LEGACY_DESKTOP_WORKBENCH_STORAGE_PREFIX = "muxpit-desktop-agent-workbench-v1:";
-const WORKBENCH_PERSIST_DELAY_MS = 200;
+// A snapshot serializes every provider's cached timelines — 2.7MB and ~15ms of
+// blocked main thread on a well-used target — and a draft keystroke schedules
+// one. Long enough that it lands in a real pause rather than between words.
+const WORKBENCH_PERSIST_DELAY_MS = 1_000;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const PROBE_RETRY_BASE_MS = 5_000;
 const PROBE_RETRY_MAX_MS = 60_000;
@@ -286,6 +290,19 @@ const snapshotViews = (
     activeSessionId: views[kind].activeSessionId,
     closedSessionIds: views[kind].closedSessionIds,
     runtimes: views[kind].runtimes,
+  }]),
+) as Record<AiKind, AgentWorkbenchViewSnapshot>;
+
+// Only the session on screen carries its timeline into storage. Every provider
+// caching every session it had opened put 2.7MB in one key, which is both the
+// cost of a save and a walk toward the 10MiB Web Storage ceiling that the
+// persistence module answers by deleting the key.
+const storableViews = (
+  views: Record<AiKind, AgentWorkbenchViewSnapshot>,
+): Record<AiKind, AgentWorkbenchViewSnapshot> => Object.fromEntries(
+  AI_KINDS.map((kind) => [kind, {
+    ...views[kind],
+    runtimes: dropInactiveTimelines(views[kind].runtimes, views[kind].activeSessionId),
   }]),
 ) as Record<AiKind, AgentWorkbenchViewSnapshot>;
 
@@ -1346,7 +1363,7 @@ const DesktopTargetRuntime = ({
     if (probedTarget !== targetKey) return;
     saveAgentWorkbenchSnapshot(`${DESKTOP_WORKBENCH_STORAGE_PREFIX}${targetKey}`, {
       provider: providerRef.current,
-      views: snapshotViews(viewsRef.current),
+      views: storableViews(snapshotViews(viewsRef.current)),
     });
   }, [probedTarget, targetKey]);
 
